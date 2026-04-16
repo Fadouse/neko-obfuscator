@@ -1,0 +1,32 @@
+version: 1
+preset: STANDARD
+
+transforms:
+  controlFlowFlattening:
+    enabled: true
+    intensity: 0.5
+  exceptionObfuscation:
+    enabled: false
+  exceptionReturn:
+    enabled: false
+  opaquePredicates:
+    enabled: false
+  stringEncryption:
+    enabled: true
+    mode: INVOKEDYNAMIC
+  numberEncryption:
+    enabled: true
+  invokeDynamic:
+    enabled: false
+  outliner:
+    enabled: false
+  stackObfuscation:
+    enabled: false
+  advancedJvm:
+    enabled: false
+
+native:
+  enabled: false
+
+keys:
+  masterSeed: 12345678

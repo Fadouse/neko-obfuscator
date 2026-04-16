@@ -1,0 +1,48 @@
+version: 1
+preset: LIGHT
+
+transforms:
+  controlFlowFlattening:
+    enabled: true
+    intensity: 1.0
+    zkmStyle: true
+    tailChainIntensity: 0.85
+    allowSwitchMethods: false
+    allowMonitorMethods: false
+    maxApplicableInstructionCount: 180
+    maxBackwardBranches: 2
+    maxBranchCount: 16
+  exceptionObfuscation:
+    enabled: true
+    intensity: 1.0
+    flattenedIntensityMultiplier: 0.55
+    skipFlattenedMethods: false
+    skipMethodsWithTryCatch: true
+    skipMethodsWithSwitches: true
+    skipMethodsWithMonitors: true
+    skipNonVoidMethods: true
+    skipBackwardGotos: true
+    maxApplicableInstructionCount: 260
+    maxEligibleGotos: 24
+  exceptionReturn:
+    enabled: false
+  opaquePredicates:
+    enabled: true
+    intensity: 1.0
+  stringEncryption:
+    enabled: false
+  numberEncryption:
+    enabled: false
+  invokeDynamic:
+    enabled: false
+  outliner:
+    enabled: false
+  stackObfuscation:
+    enabled: true
+    intensity: 1.0
+  advancedJvm:
+    enabled: true
+    intensity: 1.0
+
+keys:
+  masterSeed: 12345

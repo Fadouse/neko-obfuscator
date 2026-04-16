@@ -1,0 +1,81 @@
+version: 1
+preset: PARANOID
+
+transforms:
+  controlFlowFlattening:
+    enabled: true
+    intensity: 1.0
+    zkmStyle: true
+    tailChainIntensity: 0.85
+    tryCatchTailChainMultiplier: 0.35
+    allowTryCatchMethods: true
+    tryCatchMainOnly: true
+    maxTryCatchBlocks: 18
+    tryCatchBranchBonus: 2
+    tryCatchInstructionBonus: 160
+    entrypointTailChainMultiplier: 0.08
+    entrypointMaxTryCatchBlocks: 64
+    entrypointBranchBonus: 96
+    entrypointInstructionBonus: 640
+    allowSwitchMethods: false
+    allowMonitorMethods: false
+    maxApplicableInstructionCount: 180
+    maxBackwardBranches: 2
+    maxBranchCount: 16
+  exceptionObfuscation:
+    enabled: true
+    intensity: 1.0
+    # 默认继续叠加到 flatten 后的方法；需要调弱时可改 multiplier 或直接开启 skip
+    flattenedIntensityMultiplier: 0.55
+    skipFlattenedMethods: false
+    skipMethodsWithTryCatch: true
+    skipMethodsWithSwitches: true
+    skipMethodsWithMonitors: true
+    skipNonVoidMethods: true
+    skipBackwardGotos: true
+    maxApplicableInstructionCount: 260
+    maxEligibleGotos: 24
+  exceptionReturn:
+    enabled: false
+    intensity: 0.0
+  opaquePredicates:
+    enabled: true
+    intensity: 1.0
+  stringEncryption:
+    enabled: true
+    intensity: 1.0
+  numberEncryption:
+    enabled: true
+    intensity: 1.0
+    skipMethodsWithTryCatch: true
+    skipMethodsWithSwitches: true
+    skipMethodsWithMonitors: true
+    skipSensitiveApiMethods: true
+    skipSmallLoopConstants: true
+    maxPlainLoopConstant: 16
+    maxApplicableInstructionCount: 220
+    maxBranchCount: 18
+  invokeDynamic:
+    enabled: true
+    intensity: 1.0
+    skipMethodsWithTryCatch: true
+    skipMethodsWithSwitches: true
+    skipMethodsWithMonitors: true
+    skipSensitiveApiMethods: true
+    skipPrimitiveLoopCalls: true
+    maxApplicableInstructionCount: 260
+    maxBranchCount: 24
+  outliner:
+    enabled: false
+  stackObfuscation:
+    enabled: true
+    intensity: 1.0
+  advancedJvm:
+    enabled: true
+    intensity: 1.0
+
+native:
+  enabled: false
+
+keys:
+  masterSeed: auto

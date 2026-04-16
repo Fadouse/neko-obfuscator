@@ -1,0 +1,70 @@
+# ──────────────────────────────────────────
+#  Gradle / JVM build
+# ──────────────────────────────────────────
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+bin/
+out/
+target/
+
+# Compiled class / native artefacts
+*.class
+*.o
+*.so
+*.dll
+*.dylib
+
+# JVM crash logs
+hs_err_pid*.log
+replay_pid*.log
+
+# ──────────────────────────────────────────
+#  IDE / Editor
+# ──────────────────────────────────────────
+.idea/
+*.iml
+.vscode/
+.settings/
+.project
+.classpath
+.factorypath
+*.swp
+*.swo
+*~
+
+# ──────────────────────────────────────────
+#  OS
+# ──────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ──────────────────────────────────────────
+#  Project specific
+# ──────────────────────────────────────────
+# Local sandboxes / scratch files
+IK
+/scratch/
+/tmp/
+/local/
+
+# Test JAR binaries (keep the YAML configs, ignore generated jars)
+test-jars/*.jar
+test-jars/out/
+test-jars/output/
+test-jars/zkm_example/
+test-jars/*.log
+
+# Native translation build cache (neko-native / Zig)
+native-build/
+*.zig.cache/
+
+# Secrets / credentials (belt and braces — never commit these)
+*.key
+*.pem
+*.p12
+*.keystore
+.env
+.env.*
+!.env.example

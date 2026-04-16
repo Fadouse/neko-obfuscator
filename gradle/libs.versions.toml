@@ -1,0 +1,20 @@
+[versions]
+asm = "9.7.1"
+snakeyaml = "2.3"
+slf4j = "2.0.16"
+logback = "1.5.12"
+picocli = "4.7.6"
+junit = "5.11.3"
+
+[libraries]
+asm-core = { module = "org.ow2.asm:asm", version.ref = "asm" }
+asm-tree = { module = "org.ow2.asm:asm-tree", version.ref = "asm" }
+asm-commons = { module = "org.ow2.asm:asm-commons", version.ref = "asm" }
+asm-analysis = { module = "org.ow2.asm:asm-analysis", version.ref = "asm" }
+asm-util = { module = "org.ow2.asm:asm-util", version.ref = "asm" }
+snakeyaml = { module = "org.yaml:snakeyaml", version.ref = "snakeyaml" }
+slf4j-api = { module = "org.slf4j:slf4j-api", version.ref = "slf4j" }
+logback = { module = "ch.qos.logback:logback-classic", version.ref = "logback" }
+picocli = { module = "info.picocli:picocli", version.ref = "picocli" }
+junit-api = { module = "org.junit.jupiter:junit-jupiter-api", version.ref = "junit" }
+junit-engine = { module = "org.junit.jupiter:junit-jupiter-engine", version.ref = "junit" }

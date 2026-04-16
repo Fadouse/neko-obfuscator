@@ -1,0 +1,64 @@
+preset: LIGHT
+input: TEST.jar
+output: output/TEST-obf.jar
+
+transforms:
+  controlFlowFlattening:
+    enabled: true
+    intensity: 1.0
+    zkmStyle: true
+    tailChainIntensity: 0.85
+    allowSwitchMethods: false
+    allowMonitorMethods: false
+    maxApplicableInstructionCount: 180
+    maxBackwardBranches: 2
+    maxBranchCount: 16
+  exceptionObfuscation:
+    enabled: true
+    intensity: 1.0
+    flattenedIntensityMultiplier: 0.55
+    skipFlattenedMethods: false
+    skipMethodsWithTryCatch: true
+    skipMethodsWithSwitches: true
+    skipMethodsWithMonitors: true
+    skipNonVoidMethods: true
+    skipBackwardGotos: true
+    maxApplicableInstructionCount: 260
+    maxEligibleGotos: 24
+  exceptionReturn:
+    enabled: false
+    intensity: 0.0
+  opaquePredicates:
+    enabled: true
+    intensity: 1.0
+  stringEncryption:
+    enabled: true
+    intensity: 1.0
+  numberEncryption:
+    enabled: true
+    intensity: 1.0
+    skipMethodsWithTryCatch: true
+    skipMethodsWithSwitches: true
+    skipMethodsWithMonitors: true
+    maxApplicableInstructionCount: 220
+    maxBranchCount: 18
+  invokeDynamic:
+    enabled: true
+    intensity: 1.0
+    skipMethodsWithTryCatch: true
+    skipMethodsWithSwitches: true
+    skipMethodsWithMonitors: true
+    maxApplicableInstructionCount: 260
+    maxBranchCount: 24
+  outliner:
+    enabled: false
+    intensity: 0.0
+  stackObfuscation:
+    enabled: true
+    intensity: 1.0
+  advancedJvm:
+    enabled: true
+    intensity: 1.0
+
+keys:
+  masterSeed: 12345

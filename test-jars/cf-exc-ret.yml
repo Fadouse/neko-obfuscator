@@ -1,0 +1,34 @@
+version: 1
+preset: LIGHT
+
+transforms:
+  controlFlowFlattening:
+    enabled: true
+    intensity: 1.0
+    zkmStyle: true
+    tailChainIntensity: 0.85
+  exceptionObfuscation:
+    enabled: true
+    intensity: 1.0
+    flattenedIntensityMultiplier: 0.55
+    skipFlattenedMethods: false
+  exceptionReturn:
+    enabled: true
+    intensity: 1.0
+  opaquePredicates:
+    enabled: false
+  stringEncryption:
+    enabled: false
+  numberEncryption:
+    enabled: false
+  invokeDynamic:
+    enabled: false
+  outliner:
+    enabled: false
+  stackObfuscation:
+    enabled: false
+  advancedJvm:
+    enabled: false
+
+keys:
+  masterSeed: 12345

@@ -1,0 +1,27 @@
+version: 1
+preset: LIGHT
+
+transforms:
+  controlFlowFlattening:
+    enabled: false
+  exceptionObfuscation:
+    enabled: false
+  exceptionReturn:
+    enabled: false
+  opaquePredicates:
+    enabled: false
+  stringEncryption:
+    enabled: false
+  numberEncryption:
+    enabled: false
+  invokeDynamic:
+    enabled: false
+  outliner:
+    enabled: false
+  stackObfuscation:
+    enabled: false
+  advancedJvm:
+    enabled: false
+
+keys:
+  masterSeed: 12345
