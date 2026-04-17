@@ -77,6 +77,8 @@ public final class ConfigParser {
                 if (res.containsKey("encrypt")) nc.setResourceEncryption((Boolean) res.get("encrypt"));
                 if (res.containsKey("algorithm")) nc.setEncryptionAlgorithm((String) res.get("algorithm"));
             }
+            if (nativeMap.containsKey("resourceEncryption")) nc.setResourceEncryption((Boolean) nativeMap.get("resourceEncryption"));
+            if (nativeMap.containsKey("encryptionAlgorithm")) nc.setEncryptionAlgorithm((String) nativeMap.get("encryptionAlgorithm"));
             config.setNativeConfig(nc);
         }
 
