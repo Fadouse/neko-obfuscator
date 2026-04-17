@@ -1,7 +1,10 @@
 package dev.nekoobfuscator.runtime;
 
-import java.io.*;
-import java.nio.file.*;
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 
 /**
  * Loads platform-specific native libraries from the JAR at runtime.
@@ -9,53 +12,66 @@ import java.nio.file.*;
  */
 public final class NekoNativeLoader {
     private static volatile boolean loaded = false;
+    private static final Object LOCK = new Object();
 
     private NekoNativeLoader() {}
 
-    public static synchronized void load() {
-        if (loaded) return;
-
-        String os = System.getProperty("os.name", "").toLowerCase();
-        String arch = System.getProperty("os.arch", "").toLowerCase();
-
-        String platform;
-        if (os.contains("win")) platform = "windows";
-        else if (os.contains("mac") || os.contains("darwin")) platform = "macos";
-        else platform = "linux";
-
-        String archSuffix;
-        if (arch.contains("aarch64") || arch.contains("arm64")) archSuffix = "aarch64";
-        else archSuffix = "x64";
-
-        String ext;
-        if (os.contains("win")) ext = ".dll";
-        else if (os.contains("mac") || os.contains("darwin")) ext = ".dylib";
-        else ext = ".so";
-
-        String libName = "libneko_" + platform + "_" + archSuffix + ext;
-        String resourcePath = "/neko/native/" + libName;
-
-        try {
-            InputStream is = NekoNativeLoader.class.getResourceAsStream(resourcePath);
-            if (is == null) {
-                throw new UnsatisfiedLinkError("Native library not found: " + resourcePath);
+    public static void load() {
+        if (loaded) {
+            return;
+        }
+        synchronized (LOCK) {
+            if (loaded) {
+                return;
             }
+            try {
+                String os = System.getProperty("os.name", "").toLowerCase();
+                String arch = System.getProperty("os.arch", "").toLowerCase();
 
-            Path tmp = Files.createTempFile("neko_", ext);
-            tmp.toFile().deleteOnExit();
-            try (OutputStream out = Files.newOutputStream(tmp)) {
-                byte[] buf = new byte[8192];
-                int n;
-                while ((n = is.read(buf)) != -1) {
-                    out.write(buf, 0, n);
+                String platform;
+                String ext;
+                if (os.contains("win")) {
+                    platform = "windows";
+                    ext = ".dll";
+                } else if (os.contains("mac") || os.contains("darwin")) {
+                    platform = "macos";
+                    ext = ".dylib";
+                } else {
+                    platform = "linux";
+                    ext = ".so";
                 }
-            }
-            is.close();
 
-            System.load(tmp.toAbsolutePath().toString());
-            loaded = true;
-        } catch (IOException e) {
-            throw new UnsatisfiedLinkError("Failed to extract native library: " + e.getMessage());
+                String archSuffix;
+                if (arch.contains("aarch64") || arch.contains("arm64")) {
+                    archSuffix = "aarch64";
+                } else {
+                    archSuffix = "x64";
+                }
+
+                String libName = "libneko_" + platform + "_" + archSuffix + ext;
+                String resourcePath = "/neko/native/" + libName;
+
+                Path tmp = Files.createTempFile("libneko_", ext);
+                tmp.toFile().deleteOnExit();
+                try (InputStream is = NekoNativeLoader.class.getResourceAsStream(resourcePath)) {
+                    if (is == null) {
+                        throw new UnsatisfiedLinkError("Native library not found: " + resourcePath);
+                    }
+                    Files.copy(is, tmp, StandardCopyOption.REPLACE_EXISTING);
+                }
+
+                System.load(tmp.toAbsolutePath().toString());
+                loaded = true;
+            } catch (IOException e) {
+                throw new UnsatisfiedLinkError("Failed to load native library: " + e.getMessage());
+            }
         }
     }
+
+    public static void bindClass(Class<?> self, String internalOwnerName) {
+        load();
+        nekoBindClass(self, internalOwnerName);
+    }
+
+    private static native void nekoBindClass(Class<?> self, String internalOwnerName);
 }
