@@ -37,8 +37,14 @@ public class ObfuscationIntegrationTest {
         // Compile TestSample.java to a JAR
         Path srcFile = tempDir.resolve("TestSample.java");
         try (InputStream is = ObfuscationIntegrationTest.class.getResourceAsStream("/TestSample.java")) {
-            assertNotNull(is, "TestSample.java resource not found");
-            Files.copy(is, srcFile, StandardCopyOption.REPLACE_EXISTING);
+            if (is != null) {
+                Files.copy(is, srcFile, StandardCopyOption.REPLACE_EXISTING);
+            } else {
+                Path projectRoot = Path.of(System.getProperty("neko.test.projectRoot", System.getProperty("user.dir")));
+                Path fallback = projectRoot.resolve("neko-test/src/test/resources/TestSample.java");
+                assertTrue(Files.exists(fallback), "TestSample.java resource not found at classpath or fallback path: " + fallback);
+                Files.copy(fallback, srcFile, StandardCopyOption.REPLACE_EXISTING);
+            }
         }
 
         // Compile
