@@ -5,13 +5,17 @@ import dev.nekoobfuscator.api.transform.TransformPass;
 import dev.nekoobfuscator.core.ir.l1.L1Class;
 import dev.nekoobfuscator.core.ir.l1.L1Method;
 import dev.nekoobfuscator.core.jar.*;
+import org.objectweb.asm.ClassReader;
+import org.objectweb.asm.ClassWriter;
 import org.objectweb.asm.Type;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.lang.reflect.Method;
 import java.nio.file.Path;
 import java.util.*;
+import java.util.jar.Manifest;
 
 /**
  * Main obfuscation pipeline orchestrator.
@@ -37,6 +41,7 @@ public final class ObfuscationPipeline {
         log.info("Reading input JAR: {}", inputJar);
         JarInput input = new JarInput(inputJar);
         log.info("Loaded {} classes, {} resources", input.classes().size(), input.resources().size());
+        List<ResourceEntry> resources = new ArrayList<>(input.resources());
 
         // Step 2: Build class hierarchy
         ClassHierarchy hierarchy = new ClassHierarchy();
@@ -145,10 +150,42 @@ public final class ObfuscationPipeline {
             }
         }
 
+        // Step 7.5: Native compilation
+        Manifest outputManifest = input.manifest();
+        if (config.nativeConfig().enabled()) {
+            try {
+                log.info("Running native compilation stage");
+                Class<?> stageClass = Class.forName("dev.nekoobfuscator.native_.stage.NativeCompilationStage");
+                Object stage = stageClass.getConstructor(ObfuscationConfig.NativeConfig.class, long.class)
+                    .newInstance(config.nativeConfig(), ctx.masterSeed());
+                Method applyMethod = stageClass.getMethod("apply", Map.class, List.class);
+                Object result = applyMethod.invoke(stage, toBytecodeMap(allClasses), resources);
+
+                Object classMapObj = result.getClass().getMethod("allClasses").invoke(result);
+                Object resourceListObj = result.getClass().getMethod("resources").invoke(result);
+                int translated = (Integer) result.getClass().getMethod("translatedMethodCount").invoke(result);
+                int rejected = (Integer) result.getClass().getMethod("rejectedMethodCount").invoke(result);
+
+                Map<?, ?> nativeClasses = (Map<?, ?>) classMapObj;
+                List<?> nativeResources = (List<?>) resourceListObj;
+                allClasses = parseClasses(nativeClasses);
+                resources = castResources(nativeResources);
+                log.info("Native stage: translated={} rejected={}", translated, rejected);
+            } catch (ClassNotFoundException e) {
+                log.warn("Native stage requested but neko-native not on classpath");
+            } catch (Exception e) {
+                if (config.nativeConfig().skipOnError()) {
+                    log.error("Native stage failed; continuing without native translation", e);
+                } else {
+                    throw new RuntimeException("Native stage failed", e);
+                }
+            }
+        }
+
         // Step 8: Write output JAR
         log.info("Writing output JAR: {}", outputJar);
         JarOutput output = new JarOutput(hierarchy);
-        output.write(outputJar, allClasses, input.resources(), input.manifest());
+        output.write(outputJar, allClasses, resources, outputManifest);
 
         long elapsed = System.currentTimeMillis() - startTime;
         log.info("Obfuscation completed in {}ms", elapsed);
@@ -159,18 +196,49 @@ public final class ObfuscationPipeline {
      * can find bootstrap methods, key derivation, decryptors, etc.
      */
     private void injectRuntimeClasses(List<L1Class> classes, ClassHierarchy hierarchy, long masterSeed) {
-        String[] runtimeClasses = {
-            "dev/nekoobfuscator/runtime/NekoBootstrap",
-            "dev/nekoobfuscator/runtime/NekoKeyDerivation",
-            "dev/nekoobfuscator/runtime/NekoStringDecryptor",
-            "dev/nekoobfuscator/runtime/NekoFlowException",
-            "dev/nekoobfuscator/runtime/NekoContext",
-            "dev/nekoobfuscator/runtime/NekoClassLoader",
-            "dev/nekoobfuscator/runtime/NekoNativeLoader",
-            "dev/nekoobfuscator/runtime/NekoResourceLoader",
-        };
+        Set<String> needed = new LinkedHashSet<>();
 
-        for (String className : runtimeClasses) {
+        if (config.nativeConfig().enabled()) {
+            needed.add("dev/nekoobfuscator/runtime/NekoNativeLoader");
+            if (config.nativeConfig().resourceEncryption()) {
+                needed.add("dev/nekoobfuscator/runtime/NekoResourceLoader");
+                needed.add("dev/nekoobfuscator/runtime/NekoKeyDerivation");
+            }
+        }
+
+        if (config.isTransformEnabled("stringEncryption")) {
+            needed.add("dev/nekoobfuscator/runtime/NekoBootstrap");
+            needed.add("dev/nekoobfuscator/runtime/NekoKeyDerivation");
+            needed.add("dev/nekoobfuscator/runtime/NekoStringDecryptor");
+        }
+
+        if (config.isTransformEnabled("invokeDynamic")) {
+            needed.add("dev/nekoobfuscator/runtime/NekoBootstrap");
+            needed.add("dev/nekoobfuscator/runtime/NekoContext");
+            needed.add("dev/nekoobfuscator/runtime/NekoClassLoader");
+            needed.add("dev/nekoobfuscator/runtime/NekoKeyDerivation");
+        }
+
+        if (config.isTransformEnabled("controlFlowFlattening")
+            || config.isTransformEnabled("opaquePredicates")
+            || config.isTransformEnabled("advancedJvm")) {
+            needed.add("dev/nekoobfuscator/runtime/NekoContext");
+        }
+
+        if (config.isTransformEnabled("exceptionObfuscation")
+            || config.isTransformEnabled("exceptionReturn")) {
+            needed.add("dev/nekoobfuscator/runtime/NekoFlowException");
+        }
+
+        Set<String> existing = new HashSet<>();
+        for (L1Class clazz : classes) {
+            existing.add(clazz.name());
+        }
+
+        for (String className : needed) {
+            if (!existing.add(className)) {
+                continue;
+            }
             String resourcePath = className + ".class";
             try (var is = getClass().getClassLoader().getResourceAsStream(resourcePath)) {
                 if (is == null) {
@@ -387,4 +455,42 @@ public final class ObfuscationPipeline {
             default -> 1;
         };
     }
+
+    private Map<String, byte[]> toBytecodeMap(List<L1Class> classes) {
+        Map<String, byte[]> bytecode = new LinkedHashMap<>();
+        for (L1Class clazz : classes) {
+            ClassWriter writer = new ClassWriter(0);
+            clazz.asmNode().accept(writer);
+            bytecode.put(clazz.name(), writer.toByteArray());
+        }
+        return bytecode;
+    }
+
+    private List<L1Class> parseClasses(Map<?, ?> classMap) {
+        List<L1Class> classes = new ArrayList<>();
+        for (Map.Entry<?, ?> entry : classMap.entrySet()) {
+            Object name = entry.getKey();
+            Object bytes = entry.getValue();
+            if (!(name instanceof String) || !(bytes instanceof byte[] data)) {
+                throw new IllegalStateException("Unexpected native stage class result type");
+            }
+            ClassReader reader = new ClassReader(data);
+            org.objectweb.asm.tree.ClassNode node = new org.objectweb.asm.tree.ClassNode();
+            reader.accept(node, ClassReader.EXPAND_FRAMES);
+            classes.add(new L1Class(node));
+        }
+        return classes;
+    }
+
+    private List<ResourceEntry> castResources(List<?> nativeResources) {
+        List<ResourceEntry> resources = new ArrayList<>(nativeResources.size());
+        for (Object resource : nativeResources) {
+            if (!(resource instanceof ResourceEntry entry)) {
+                throw new IllegalStateException("Unexpected native stage resource result type");
+            }
+            resources.add(entry);
+        }
+        return resources;
+    }
+
 }
