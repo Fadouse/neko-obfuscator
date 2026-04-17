@@ -65,6 +65,13 @@ public final class ConfigParser {
             if (nativeMap.containsKey("enabled")) nc.setEnabled((Boolean) nativeMap.get("enabled"));
             if (nativeMap.containsKey("targets")) nc.setTargets((List<String>) nativeMap.get("targets"));
             if (nativeMap.containsKey("zigPath")) nc.setZigPath((String) nativeMap.get("zigPath"));
+            if (nativeMap.containsKey("methods")) nc.setMethods((List<String>) nativeMap.get("methods"));
+            if (nativeMap.containsKey("excludePatterns")) nc.setExcludePatterns((List<String>) nativeMap.get("excludePatterns"));
+            if (nativeMap.containsKey("includeAnnotated")) nc.setIncludeAnnotated((Boolean) nativeMap.get("includeAnnotated"));
+            if (nativeMap.containsKey("skipOnError")) nc.setSkipOnError((Boolean) nativeMap.get("skipOnError"));
+            if (nativeMap.containsKey("outputPrefix")) nc.setOutputPrefix((String) nativeMap.get("outputPrefix"));
+            if (nativeMap.containsKey("obfuscateJniSlotDispatch")) nc.setObfuscateJniSlotDispatch((Boolean) nativeMap.get("obfuscateJniSlotDispatch"));
+            if (nativeMap.containsKey("cacheJniIds")) nc.setCacheJniIds((Boolean) nativeMap.get("cacheJniIds"));
             if (nativeMap.containsKey("resources")) {
                 Map<String, Object> res = (Map<String, Object>) nativeMap.get("resources");
                 if (res.containsKey("encrypt")) nc.setResourceEncryption((Boolean) res.get("encrypt"));

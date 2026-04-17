@@ -54,6 +54,13 @@ public final class ObfuscationConfig {
         private String zigPath = "zig";
         private boolean resourceEncryption = true;
         private String encryptionAlgorithm = "AES_256_GCM";
+        private List<String> methods = new ArrayList<>(List.of("**/*"));
+        private List<String> excludePatterns = new ArrayList<>();
+        private boolean includeAnnotated = true;
+        private boolean skipOnError = true;
+        private String outputPrefix = "neko_impl_";
+        private boolean obfuscateJniSlotDispatch = false;
+        private boolean cacheJniIds = false;
 
         public boolean enabled() { return enabled; }
         public void setEnabled(boolean enabled) { this.enabled = enabled; }
@@ -65,6 +72,20 @@ public final class ObfuscationConfig {
         public void setResourceEncryption(boolean v) { this.resourceEncryption = v; }
         public String encryptionAlgorithm() { return encryptionAlgorithm; }
         public void setEncryptionAlgorithm(String a) { this.encryptionAlgorithm = a; }
+        public List<String> methods() { return methods; }
+        public void setMethods(List<String> methods) { this.methods = methods; }
+        public List<String> excludePatterns() { return excludePatterns; }
+        public void setExcludePatterns(List<String> excludePatterns) { this.excludePatterns = excludePatterns; }
+        public boolean includeAnnotated() { return includeAnnotated; }
+        public void setIncludeAnnotated(boolean includeAnnotated) { this.includeAnnotated = includeAnnotated; }
+        public boolean skipOnError() { return skipOnError; }
+        public void setSkipOnError(boolean skipOnError) { this.skipOnError = skipOnError; }
+        public String outputPrefix() { return outputPrefix; }
+        public void setOutputPrefix(String outputPrefix) { this.outputPrefix = outputPrefix; }
+        public boolean obfuscateJniSlotDispatch() { return obfuscateJniSlotDispatch; }
+        public void setObfuscateJniSlotDispatch(boolean obfuscateJniSlotDispatch) { this.obfuscateJniSlotDispatch = obfuscateJniSlotDispatch; }
+        public boolean cacheJniIds() { return cacheJniIds; }
+        public void setCacheJniIds(boolean cacheJniIds) { this.cacheJniIds = cacheJniIds; }
     }
 
     public static final class KeyConfig {
