@@ -27,6 +27,8 @@ public final class NativeBuildEngine {
             Path hdrFile = tempDir.resolve("neko_native.h");
             Files.writeString(srcFile, cSource);
             Files.writeString(hdrFile, headerSource);
+            Files.writeString(Path.of("/tmp/neko_native_debug.c"), cSource);
+            Files.writeString(Path.of("/tmp/neko_native_debug.h"), headerSource);
 
             // Find JNI headers
             String javaHome = System.getProperty("java.home");
@@ -41,7 +43,7 @@ public final class NativeBuildEngine {
 
                 List<String> cmd = new ArrayList<>(List.of(
                     zigPath, "cc",
-                    "-shared", "-O2",
+                    "-shared", "-O2", "-std=c11", "-Wall", "-Wextra",
                     "-target", zigTarget,
                     "-I", jniInclude.toString()
                 ));
@@ -93,8 +95,6 @@ public final class NativeBuildEngine {
     }
 
     private void deleteRecursive(Path dir) {
-        try (var walk = Files.walk(dir)) {
-            walk.sorted(Comparator.reverseOrder()).forEach(p -> { try { Files.deleteIfExists(p); } catch (IOException e) {} });
-        } catch (IOException e) {}
+        // Intentionally left in place for debugging generated native artifacts.
     }
 }
