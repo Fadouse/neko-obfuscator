@@ -172,7 +172,10 @@ keys:
 更多字段、预设默认值与调优建议，详见 · For all fields, preset defaults and tuning advice, see
 [`docs/CONFIG.md`](./docs/CONFIG.md).
 
-仓库内提供多套示例 · Ready-made examples live in [`test-jars/`](./test-jars/):
+启用原生翻译时需要可用的 Zig 工具链；`native` 节首选使用 `resourceEncryption` / `encryptionAlgorithm`，旧写法 `resources.encrypt` / `resources.algorithm` 仍兼容。
+When native translation is enabled, a working Zig toolchain is required; the preferred `native` keys are `resourceEncryption` / `encryptionAlgorithm`, while the legacy `resources.encrypt` / `resources.algorithm` form remains supported.
+
+仓库内提供多套示例 · Ready-made examples live in [`test-jars/`](./test-jars/) and [`configs/`](./configs/):
 
 | 文件 · File | 说明 · Description |
 |---|---|
@@ -181,6 +184,9 @@ keys:
 | `string-only.yml` | 仅字符串加密 · String encryption only |
 | `full-obfuscation.yml` | PARANOID 预设完整配置 · Full PARANOID preset |
 | `diag.yml` | 诊断 / 调试用 · Diagnostic / debugging config |
+| `configs/native-test.yml` | 原生翻译 smoke-test 配置 · Native translation smoke-test config |
+| `configs/native-snake.yml` | Snake 示例的原生翻译配置 · Native translation config for the snake sample |
+| `configs/native-obfusjack.yml` | ObfusJack 示例的原生翻译配置 · Native translation config for the obfusjack sample |
 
 ---
 

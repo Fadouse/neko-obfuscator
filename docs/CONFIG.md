@@ -309,23 +309,42 @@ Heavy catch-all pass: dead code, overlapping exception handlers, fake `SourceFil
 ```yaml
 native:
   enabled: false
-  targets: [LINUX_X64, WINDOWS_X64]   # 当前支持两个目标
+  targets: [LINUX_X64, WINDOWS_X64]   # 默认值；另外还支持 LINUX_AARCH64 / MACOS_X64 / MACOS_AARCH64
   zigPath: zig                        # 要求 zig 可执行文件可被找到
-  resources:
-    encrypt: true
-    algorithm: AES_256_GCM            # 目前仅实现 AES_256_GCM
+  resourceEncryption: true            # 首选写法 · preferred YAML key
+  encryptionAlgorithm: AES_256_GCM    # 目前仅实现 AES_256_GCM
+  methods: ["**/*"]                  # 类级或 class#method 级 glob
+  excludePatterns: []
+  includeAnnotated: true
+  skipOnError: true
+  outputPrefix: neko_impl_
+  obfuscateJniSlotDispatch: false
+  cacheJniIds: false
 ```
 
 | 字段 · Field | 类型 · Type | 默认值 · Default | 说明 · Notes |
 |---|---|---|---|
 | `enabled` | bool | `false` | 是否启用原生翻译 · Turn native translation on/off |
-| `targets` | list<string> | `[LINUX_X64, WINDOWS_X64]` | 目标平台；启用后不能为空。 · Target platforms; must be non-empty when `enabled: true` |
+| `targets` | list<string> | `[LINUX_X64, WINDOWS_X64]` | 目标平台；启用后不能为空。当前支持 `LINUX_X64`、`LINUX_AARCH64`、`WINDOWS_X64`、`MACOS_X64`、`MACOS_AARCH64`。 · Target platforms; must be non-empty when `enabled: true`. Supported targets today: `LINUX_X64`, `LINUX_AARCH64`, `WINDOWS_X64`, `MACOS_X64`, `MACOS_AARCH64`. |
 | `zigPath` | string | `zig` | Zig 可执行文件的路径或命令名。 · Path/command name of the Zig executable |
-| `resources.encrypt` | bool | `true` | 是否对资源加密 · Encrypt resources |
-| `resources.algorithm` | string | `AES_256_GCM` | 加密算法（目前仅 `AES_256_GCM`）。 · Encryption algorithm (only `AES_256_GCM` today) |
+| `resourceEncryption` | bool | `true` | 是否对资源加密。 · Whether to encrypt embedded resources. |
+| `encryptionAlgorithm` | string | `AES_256_GCM` | 资源加密算法（目前仅 `AES_256_GCM`）。 · Resource-encryption algorithm (only `AES_256_GCM` today). |
+| `methods` | list<string> | `["**/*"]` | 选择要翻译的类/方法 glob；方法级写法使用 `classInternalName#methodName`。 · Class/method glob patterns for translation; method-level patterns use `classInternalName#methodName`. |
+| `excludePatterns` | list<string> | `[]` | 从 pattern 选择中排除的类/方法 glob。 · Class/method glob patterns excluded from pattern-based selection. |
+| `includeAnnotated` | bool | `true` | 是否把带 `@NativeTranslate` 的类/方法直接纳入翻译。 · Whether classes/methods annotated with `@NativeTranslate` are selected automatically. |
+| `skipOnError` | bool | `true` | 原生翻译 / 编译失败时是否回退到纯 JVM 输出。 · Whether native-translation / compilation failures fall back to pure JVM output. |
+| `outputPrefix` | string | `neko_impl_` | 生成的原生实现 / JNI 绑定前缀。 · Prefix used for generated native implementations / JNI bindings. |
+| `obfuscateJniSlotDispatch` | bool | `false` | 是否对 JNI slot dispatch 生成额外扰动。 · Whether to add extra obfuscation to JNI slot dispatch generation. |
+| `cacheJniIds` | bool | `false` | 是否缓存 JNI ID 查找结果。 · Whether to cache resolved JNI IDs. |
 
-> 翻译哪些方法由 `@NativeTranslate` 注解（或未来规则）决定；被选中的方法会被 lift 到 C-IR、经 Zig 编译为 `.so` / `.dll`，运行时由 `NekoNativeLoader` 加载。
-> Which methods get translated is driven by `@NativeTranslate` (or, in future, rules); selected methods are lifted to C-IR, compiled with Zig to `.so` / `.dll`, and loaded at runtime by `NekoNativeLoader`.
+> 方法选择顺序 · Selection order：若 `includeAnnotated: true`，带 `@NativeTranslate` 的类/方法会被**直接选中**；否则再按 `excludePatterns` 与 `methods` 做 glob 匹配。运行时包 `dev/nekoobfuscator/runtime/` 下的类始终不会被翻译。
+> Selection order: when `includeAnnotated: true`, classes/methods carrying `@NativeTranslate` are **selected immediately**; otherwise selection proceeds through `excludePatterns` and `methods` glob matching. Classes under `dev/nekoobfuscator/runtime/` are never translated.
+
+> 兼容性说明 · Compatibility note：YAML 中首选使用 `resourceEncryption` / `encryptionAlgorithm`。旧写法 `native.resources.encrypt` / `native.resources.algorithm` 仍然被解析，以兼容已有配置。
+> Prefer the top-level YAML keys `resourceEncryption` / `encryptionAlgorithm`. The legacy `native.resources.encrypt` / `native.resources.algorithm` block is still accepted for backwards compatibility.
+
+> 产物命名 · Output naming：生成的原生库会作为 `/neko/native/libneko_<platform>_<arch>.<ext>` 资源打包进输出 JAR，并由 `NekoNativeLoader` 在运行时提取加载。
+> Generated native libraries are packaged into the output JAR as `/neko/native/libneko_<platform>_<arch>.<ext>` resources and extracted by `NekoNativeLoader` at runtime.
 
 ---
 
@@ -424,9 +443,15 @@ native:
   enabled:  false
   targets:  [LINUX_X64, WINDOWS_X64]
   zigPath:  zig
-  resources:
-    encrypt:   true
-    algorithm: AES_256_GCM
+  resourceEncryption: true
+  encryptionAlgorithm: AES_256_GCM
+  methods:  ["**/*"]
+  excludePatterns: []
+  includeAnnotated: true
+  skipOnError: true
+  outputPrefix: neko_impl_
+  obfuscateJniSlotDispatch: false
+  cacheJniIds: false
 
 # === 密钥 · Keys ===========================================================
 keys:
@@ -601,7 +626,7 @@ keys:
   masterSeed: auto
 ```
 
-完整的预置配置见 · See full ready-made configs at [`test-jars/`](../test-jars/)。
+完整的预置配置见 · See full ready-made configs at [`test-jars/`](../test-jars/)；原生翻译示例见 [`configs/`](../configs/)。
 
 ---
 
