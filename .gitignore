@@ -68,3 +68,9 @@ native-build/
 .env
 .env.*
 !.env.example
+
+# ──────────────────────────────────────────
+#  Local reference / research material
+# ──────────────────────────────────────────
+_reference_native_obfuscator/
+_refs/

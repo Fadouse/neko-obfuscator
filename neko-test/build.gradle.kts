@@ -1,8 +1,21 @@
 val libs = rootProject.the<VersionCatalogsExtension>().named("libs")
 
 tasks.test {
+    useJUnitPlatform()
+    dependsOn(":neko-cli:installDist")
     jvmArgs("-Xss4m") // Larger stack for SSA rename on deep CFGs
     maxHeapSize = "512m"
+    systemProperty("neko.test.projectRoot", rootProject.projectDir.absolutePath)
+    systemProperty("neko.test.jarsDir", rootProject.projectDir.resolve("test-jars").absolutePath)
+    systemProperty("neko.test.configsDir", rootProject.projectDir.resolve("configs").absolutePath)
+    systemProperty("neko.test.cliPath", rootProject.projectDir.resolve("neko-cli/build/install/neko-cli/bin/neko-cli").absolutePath)
+    systemProperty(
+        "neko.test.nativeWorkDir",
+        layout.buildDirectory
+            .dir("test-native")
+            .get()
+            .asFile.absolutePath,
+    )
 }
 
 dependencies {

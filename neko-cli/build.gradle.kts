@@ -14,7 +14,7 @@ dependencies {
     implementation(project(":neko-core"))
     implementation(project(":neko-transforms"))
     implementation(project(":neko-native"))
-    runtimeOnly(project(":neko-runtime"))
+    implementation(project(":neko-runtime"))
     implementation(libs.findLibrary("picocli").get())
     runtimeOnly(libs.findLibrary("logback").get())
 }

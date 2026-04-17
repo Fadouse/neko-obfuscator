@@ -1,0 +1,40 @@
+version: 1
+preset: STANDARD
+
+transforms:
+  controlFlowFlattening:
+    enabled: false
+  exceptionObfuscation:
+    enabled: false
+  exceptionReturn:
+    enabled: false
+  opaquePredicates:
+    enabled: false
+  stringEncryption:
+    enabled: false
+  numberEncryption:
+    enabled: false
+  invokeDynamic:
+    enabled: false
+  outliner:
+    enabled: false
+  stackObfuscation:
+    enabled: false
+  advancedJvm:
+    enabled: false
+
+native:
+  enabled: true
+  targets:
+    - LINUX_X64
+  methods:
+    - "**/*"
+  excludePatterns: []
+  includeAnnotated: true
+  skipOnError: true
+  outputPrefix: "neko_impl_"
+  resources:
+    encrypt: false
+
+keys:
+  masterSeed: 12345
