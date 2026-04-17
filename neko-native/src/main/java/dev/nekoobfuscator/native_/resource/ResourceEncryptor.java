@@ -90,6 +90,8 @@ public final class ResourceEncryptor {
 
     private boolean shouldEncrypt(String name) {
         return !name.startsWith("META-INF/")
+            && !name.startsWith("neko/native/")
+            && !name.startsWith("neko/resources/")
             && !name.endsWith(".MF")
             && !name.endsWith(".SF")
             && !name.endsWith(".RSA")
