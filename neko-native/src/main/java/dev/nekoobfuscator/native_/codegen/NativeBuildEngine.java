@@ -43,7 +43,7 @@ public final class NativeBuildEngine {
 
                 List<String> cmd = new ArrayList<>(List.of(
                     zigPath, "cc",
-                    "-shared", "-O2", "-std=c11", "-Wall", "-Wextra",
+                    "-shared", "-Oz", "-std=c11", "-Wall", "-Wextra",
                     "-target", zigTarget,
                     "-I", jniInclude.toString()
                 ));

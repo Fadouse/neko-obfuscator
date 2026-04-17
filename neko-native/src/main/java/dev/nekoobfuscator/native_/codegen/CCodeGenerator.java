@@ -6,9 +6,11 @@ import dev.nekoobfuscator.core.ir.l3.CVariable;
 import dev.nekoobfuscator.native_.translator.NativeTranslator.NativeMethodBinding;
 import org.objectweb.asm.Type;
 
+import java.util.LinkedHashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 public final class CCodeGenerator {
     @SuppressWarnings("unused")
@@ -16,6 +18,12 @@ public final class CCodeGenerator {
     private final LinkedHashMap<String, Integer> classSlotIndex = new LinkedHashMap<>();
     private final LinkedHashMap<String, Integer> methodSlotIndex = new LinkedHashMap<>();
     private final LinkedHashMap<String, Integer> fieldSlotIndex = new LinkedHashMap<>();
+    private final LinkedHashMap<String, Integer> ownerBindIndex = new LinkedHashMap<>();
+    private final LinkedHashMap<String, OwnerResolution> ownerResolutions = new LinkedHashMap<>();
+    private final LinkedHashMap<String, Integer> icacheMethodIndex = new LinkedHashMap<>();
+    private final LinkedHashMap<String, IcacheSiteRef> icacheSites = new LinkedHashMap<>();
+    private final LinkedHashMap<String, IcacheDirectStubRef> icacheDirectStubs = new LinkedHashMap<>();
+    private final LinkedHashMap<String, IcacheMetaRef> icacheMetas = new LinkedHashMap<>();
     private int stringCacheCount;
 
     public CCodeGenerator(long masterSeed) {
@@ -52,6 +60,107 @@ public final class CCodeGenerator {
         return "g_fid_" + internField(owner, name, desc, isStatic);
     }
 
+    public String fieldOffsetSlotName(String owner, String name, String desc, boolean isStatic) {
+        return "g_off_" + internField(owner, name, desc, isStatic);
+    }
+
+    public String staticFieldOffsetSlotName(String owner, String name, String desc, boolean isStatic) {
+        return "g_static_off_" + internField(owner, name, desc, isStatic);
+    }
+
+    public String staticFieldBaseSlotName(String owner, String name, String desc, boolean isStatic) {
+        return "g_static_base_" + internField(owner, name, desc, isStatic);
+    }
+
+    public void registerBindingOwner(String ownerInternalName) {
+        ownerBindIndex.computeIfAbsent(ownerInternalName, ignored -> ownerBindIndex.size());
+        OwnerResolution resolution = ownerResolutions.computeIfAbsent(ownerInternalName, ignored -> new OwnerResolution());
+        resolution.classes.add(ownerInternalName);
+        internClass(ownerInternalName);
+    }
+
+    public void registerOwnerClassReference(String bindingOwner, String classOwner) {
+        registerBindingOwner(bindingOwner);
+        ownerResolutions.get(bindingOwner).classes.add(classOwner);
+        internClass(classOwner);
+    }
+
+    public void registerOwnerMethodReference(String bindingOwner, String owner, String name, String desc, boolean isStatic) {
+        registerOwnerClassReference(bindingOwner, owner);
+        ownerResolutions.get(bindingOwner).methods.add(new MethodRef(owner, name, desc, isStatic));
+        internMethod(owner, name, desc, isStatic);
+    }
+
+    public void registerOwnerFieldReference(String bindingOwner, String owner, String name, String desc, boolean isStatic) {
+        registerOwnerClassReference(bindingOwner, owner);
+        ownerResolutions.get(bindingOwner).fields.add(new FieldRef(owner, name, desc, isStatic));
+        internField(owner, name, desc, isStatic);
+    }
+
+    public void registerOwnerStringReference(String bindingOwner, String value, String cacheVar) {
+        registerBindingOwner(bindingOwner);
+        ownerResolutions.get(bindingOwner).strings.add(new StringRef(cacheVar, value));
+    }
+
+    public String reserveInvokeCacheSite(String bindingOwner, String methodKey, int siteIndex) {
+        String cacheMethodKey = bindingOwner + '#' + methodKey;
+        String siteKey = cacheMethodKey + '#' + siteIndex;
+        registerBindingOwner(bindingOwner);
+        return icacheSites.computeIfAbsent(siteKey, ignored -> new IcacheSiteRef(
+            ownerBindIndex.get(bindingOwner),
+            icacheMethodIndex.computeIfAbsent(cacheMethodKey, key -> icacheMethodIndex.size()),
+            siteIndex,
+            bindingOwner,
+            methodKey
+        )).symbol();
+    }
+
+    public String reserveInvokeCacheDirectStub(
+        String bindingOwner,
+        String methodKey,
+        int siteIndex,
+        NativeMethodBinding binding,
+        Type[] args,
+        Type returnType
+    ) {
+        String cacheMethodKey = bindingOwner + '#' + methodKey;
+        String siteKey = cacheMethodKey + '#' + siteIndex;
+        registerBindingOwner(bindingOwner);
+        return icacheDirectStubs.computeIfAbsent(siteKey, ignored -> new IcacheDirectStubRef(
+            ownerBindIndex.get(bindingOwner),
+            icacheMethodIndex.computeIfAbsent(cacheMethodKey, key -> icacheMethodIndex.size()),
+            siteIndex,
+            binding,
+            args.clone(),
+            returnType
+        )).symbol();
+    }
+
+    public String reserveInvokeCacheMeta(
+        String bindingOwner,
+        String methodKey,
+        int siteIndex,
+        String name,
+        String desc,
+        boolean isInterface,
+        String translatedClassSlot,
+        String translatedStubSymbol
+    ) {
+        String cacheMethodKey = bindingOwner + '#' + methodKey;
+        String siteKey = cacheMethodKey + '#' + siteIndex;
+        registerBindingOwner(bindingOwner);
+        return icacheMetas.computeIfAbsent(siteKey, ignored -> new IcacheMetaRef(
+            ownerBindIndex.get(bindingOwner),
+            icacheMethodIndex.computeIfAbsent(cacheMethodKey, key -> icacheMethodIndex.size()),
+            siteIndex,
+            name,
+            desc,
+            isInterface,
+            translatedClassSlot,
+            translatedStubSymbol
+        )).symbol();
+    }
+
     public String generateHeader(List<NativeMethodBinding> bindings) {
         StringBuilder sb = new StringBuilder();
         sb.append("#ifndef NEKO_NATIVE_H\n");
@@ -73,14 +182,21 @@ public final class CCodeGenerator {
         StringBuilder sb = new StringBuilder();
         sb.append("#include \"neko_native.h\"\n");
         sb.append("#include <stdint.h>\n");
+        sb.append("#include <stdio.h>\n");
         sb.append("#include <stdlib.h>\n");
         sb.append("#include <string.h>\n");
         sb.append("#include <math.h>\n\n");
         sb.append(renderResolutionCaches());
         sb.append(renderRuntimeSupport());
-        sb.append(renderNativeBindingRegistry(bindings));
+        sb.append(renderHotSpotSupport());
+        sb.append(renderBindSupport());
+        sb.append(renderNativeBindingTables(bindings));
+        sb.append(renderBindOwnerFunctions());
+        sb.append(renderIcacheDirectStubs());
+        sb.append(renderIcacheMetas());
         sb.append(body);
         sb.append(renderJniOnLoad(bindings));
+        sb.append(renderNativeBindingRegistry(bindings));
         return sb.toString();
     }
 
@@ -150,12 +266,13 @@ public final class CCodeGenerator {
             + "    if ((*vm)->GetEnv(vm, (void**)&env, JNI_VERSION_1_6) != JNI_OK) return JNI_ERR;\n"
             + "    jclass loaderClass = neko_find_class(env, \"dev/nekoobfuscator/runtime/NekoNativeLoader\");\n"
             + "    if (loaderClass == NULL) return JNI_ERR;\n"
+            + "    neko_hotspot_init(env);\n"
             + "    if (neko_register_natives(env, loaderClass, g_neko_loader_methods, 1) != 0) return JNI_ERR;\n"
             + "    return JNI_VERSION_1_6;\n"
             + "}\n";
     }
 
-    private String renderNativeBindingRegistry(List<NativeMethodBinding> bindings) {
+    private String renderNativeBindingTables(List<NativeMethodBinding> bindings) {
         StringBuilder sb = new StringBuilder();
         Map<String, List<NativeMethodBinding>> byOwner = new LinkedHashMap<>();
         for (NativeMethodBinding binding : bindings) {
@@ -177,13 +294,25 @@ public final class CCodeGenerator {
         sb.append("static JNINativeMethod g_neko_loader_methods[] = {\n");
         sb.append("    {\"nekoBindClass\", \"(Ljava/lang/Class;Ljava/lang/String;)V\", (void*)&Java_dev_nekoobfuscator_runtime_NekoNativeLoader_nekoBindClass},\n");
         sb.append("};\n\n");
+        return sb.toString();
+    }
+
+    private String renderNativeBindingRegistry(List<NativeMethodBinding> bindings) {
+        StringBuilder sb = new StringBuilder();
+        Map<String, List<NativeMethodBinding>> byOwner = new LinkedHashMap<>();
+        int groupIndex;
+        for (NativeMethodBinding binding : bindings) {
+            byOwner.computeIfAbsent(binding.ownerInternalName(), ignored -> new java.util.ArrayList<>()).add(binding);
+        }
         sb.append("static jint neko_bind_owner(JNIEnv *env, jclass target, const char *owner) {\n");
         sb.append("    if (target == NULL || owner == NULL) return JNI_ERR;\n");
         groupIndex = 0;
         for (Map.Entry<String, List<NativeMethodBinding>> entry : byOwner.entrySet()) {
-            sb.append("    if (strcmp(owner, \"").append(c(entry.getKey())).append("\") == 0) return neko_register_natives(env, target, g_owner_bindings_")
+            sb.append("    if (strcmp(owner, \"").append(c(entry.getKey())).append("\") == 0) { neko_bind_owner_")
+                .append(ownerBindIndex.get(entry.getKey()))
+                .append("(env, target); return neko_register_natives(env, target, g_owner_bindings_")
                 .append(groupIndex).append(", sizeof(g_owner_bindings_").append(groupIndex).append(") / sizeof(g_owner_bindings_")
-                .append(groupIndex).append("[0]));\n");
+                .append(groupIndex).append("[0])); }\n");
             groupIndex++;
         }
         sb.append("    return JNI_ERR;\n");
@@ -206,6 +335,20 @@ public final class CCodeGenerator {
     private String renderResolutionCaches() {
         StringBuilder sb = new StringBuilder();
         sb.append("// === Global resolution caches ===\n");
+        sb.append("typedef struct neko_icache_site {\n");
+        sb.append("    uintptr_t receiver_key;\n");
+        sb.append("    void* target;\n");
+        sb.append("    uint8_t target_kind;\n");
+        sb.append("    uint8_t _pad0;\n");
+        sb.append("    uint16_t miss_count;\n");
+        sb.append("    uint32_t _pad1;\n");
+        sb.append("    jclass cached_class;\n");
+        sb.append("} neko_icache_site;\n\n");
+        sb.append("#define NEKO_ICACHE_EMPTY 0u\n");
+        sb.append("#define NEKO_ICACHE_DIRECT_C 1u\n");
+        sb.append("#define NEKO_ICACHE_NONVIRT_MID 2u\n");
+        sb.append("#define NEKO_ICACHE_MEGA 3u\n");
+        sb.append("#define NEKO_ICACHE_MEGA_THRESHOLD 16u\n\n");
         for (Map.Entry<String, Integer> entry : classSlotIndex.entrySet()) {
             sb.append("static jclass g_cls_").append(entry.getValue()).append(" = NULL;   // ").append(entry.getKey()).append("\n");
         }
@@ -214,9 +357,20 @@ public final class CCodeGenerator {
         }
         for (Map.Entry<String, Integer> entry : fieldSlotIndex.entrySet()) {
             sb.append("static jfieldID g_fid_").append(entry.getValue()).append(" = NULL;   // ").append(entry.getKey()).append("\n");
+            sb.append("static jlong g_off_").append(entry.getValue()).append(" = -1;\n");
+            sb.append("static jlong g_static_off_").append(entry.getValue()).append(" = -1;\n");
+            sb.append("static jobject g_static_base_").append(entry.getValue()).append(" = NULL;\n");
         }
         for (int i = 0; i < stringCacheCount; i++) {
             sb.append("static jstring g_str_").append(i).append(" = NULL;\n");
+        }
+        for (Map.Entry<String, Integer> entry : ownerBindIndex.entrySet()) {
+            sb.append("static jboolean g_owner_bound_").append(entry.getValue()).append(" = JNI_FALSE;   // ").append(entry.getKey()).append("\n");
+        }
+        for (IcacheSiteRef site : icacheSites.values()) {
+            sb.append("static neko_icache_site ").append(site.symbol()).append(" = {0};   // ")
+                .append(site.bindingOwner()).append(" :: ").append(site.methodKey()).append(" [site ")
+                .append(site.siteIndex()).append("]\n");
         }
         sb.append("\n");
         sb.append("#define NEKO_ENSURE_CLASS(slot, env, name) ((slot) != NULL ? (slot) : ((slot) = (jclass)neko_new_global_ref((env), neko_find_class((env), (name)))))\n");
@@ -225,6 +379,292 @@ public final class CCodeGenerator {
         sb.append("#define NEKO_ENSURE_STATIC_METHOD_ID(slot, env, cls, name, desc) ((slot) != NULL ? (slot) : ((slot) = neko_get_static_method_id((env), (cls), (name), (desc))))\n");
         sb.append("#define NEKO_ENSURE_FIELD_ID(slot, env, cls, name, desc) ((slot) != NULL ? (slot) : ((slot) = neko_get_field_id((env), (cls), (name), (desc))))\n");
         sb.append("#define NEKO_ENSURE_STATIC_FIELD_ID(slot, env, cls, name, desc) ((slot) != NULL ? (slot) : ((slot) = neko_get_static_field_id((env), (cls), (name), (desc))))\n\n");
+        return sb.toString();
+    }
+
+    private String renderBindSupport() {
+        return """
+static void neko_raise_bound_resolution_error(JNIEnv *env, const char *errorClass, const char *message) {
+    if (env == NULL || errorClass == NULL || message == NULL) return;
+    if (neko_exception_check(env)) neko_exception_clear(env);
+    jclass error = neko_find_class(env, errorClass);
+    if (error == NULL) {
+        if (neko_exception_check(env)) neko_exception_clear(env);
+        return;
+    }
+    neko_throw_new(env, error, message);
+}
+
+static void neko_bind_log_failure(JNIEnv *env, const char *errorClass, const char *message) {
+    neko_raise_bound_resolution_error(env, errorClass, message);
+    if (env != NULL && neko_exception_check(env)) neko_exception_clear(env);
+}
+
+static void neko_bind_owner_class_slot(JNIEnv *env, jclass *slot, jclass self_class, const char *owner) {
+    jobject globalRef;
+    char message[256];
+    if (env == NULL || slot == NULL || *slot != NULL) return;
+    if (self_class == NULL) {
+        snprintf(message, sizeof(message), "Bind-time owner class missing: %s", owner == NULL ? "<null>" : owner);
+        neko_bind_log_failure(env, "java/lang/NoClassDefFoundError", message);
+        return;
+    }
+    globalRef = neko_new_global_ref(env, self_class);
+    if (globalRef == NULL || neko_exception_check(env)) {
+        if (neko_exception_check(env)) neko_exception_clear(env);
+        snprintf(message, sizeof(message), "Bind-time owner class global-ref failed: %s", owner == NULL ? "<null>" : owner);
+        neko_bind_log_failure(env, "java/lang/NoClassDefFoundError", message);
+        return;
+    }
+    *slot = (jclass)globalRef;
+}
+
+static void neko_bind_class_slot(JNIEnv *env, jclass *slot, const char *owner) {
+    jclass localClass;
+    jobject globalRef;
+    char message[256];
+    if (env == NULL || slot == NULL || *slot != NULL || owner == NULL) return;
+    localClass = neko_find_class(env, owner);
+    if (localClass == NULL || neko_exception_check(env)) {
+        if (neko_exception_check(env)) neko_exception_clear(env);
+        snprintf(message, sizeof(message), "Bind-time class resolution failed: %s", owner);
+        neko_bind_log_failure(env, "java/lang/NoClassDefFoundError", message);
+        if (localClass != NULL) neko_delete_local_ref(env, localClass);
+        return;
+    }
+    globalRef = neko_new_global_ref(env, localClass);
+    neko_delete_local_ref(env, localClass);
+    if (globalRef == NULL || neko_exception_check(env)) {
+        if (neko_exception_check(env)) neko_exception_clear(env);
+        snprintf(message, sizeof(message), "Bind-time class global-ref failed: %s", owner);
+        neko_bind_log_failure(env, "java/lang/NoClassDefFoundError", message);
+        return;
+    }
+    *slot = (jclass)globalRef;
+}
+
+static void neko_bind_method_slot(JNIEnv *env, jmethodID *slot, jclass cls, const char *owner, const char *name, const char *desc, jboolean isStatic) {
+    char message[320];
+    if (env == NULL || slot == NULL || *slot != NULL || cls == NULL || owner == NULL || name == NULL || desc == NULL) return;
+    *slot = isStatic ? neko_get_static_method_id(env, cls, name, desc) : neko_get_method_id(env, cls, name, desc);
+    if (*slot == NULL || neko_exception_check(env)) {
+        if (neko_exception_check(env)) neko_exception_clear(env);
+        snprintf(message, sizeof(message), "Bind-time %s method resolution failed: %s.%s%s", isStatic ? "static" : "instance", owner, name, desc);
+        neko_bind_log_failure(env, "java/lang/NoSuchMethodError", message);
+        *slot = NULL;
+    }
+}
+
+static void neko_bind_field_slot(JNIEnv *env, jfieldID *slot, jclass cls, const char *owner, const char *name, const char *desc, jboolean isStatic) {
+    char message[320];
+    if (env == NULL || slot == NULL || *slot != NULL || cls == NULL || owner == NULL || name == NULL || desc == NULL) return;
+    *slot = isStatic ? neko_get_static_field_id(env, cls, name, desc) : neko_get_field_id(env, cls, name, desc);
+    if (*slot == NULL || neko_exception_check(env)) {
+        if (neko_exception_check(env)) neko_exception_clear(env);
+        snprintf(message, sizeof(message), "Bind-time %s field resolution failed: %s.%s:%s", isStatic ? "static" : "instance", owner, name, desc);
+        neko_bind_log_failure(env, "java/lang/NoSuchFieldError", message);
+        *slot = NULL;
+    }
+}
+
+static void neko_bind_string_slot(JNIEnv *env, jstring *slot, const char *utf) {
+    jstring localString;
+    jobject globalRef;
+    char message[256];
+    if (env == NULL || slot == NULL || *slot != NULL || utf == NULL) return;
+    localString = neko_new_string_utf(env, utf);
+    if (localString == NULL || neko_exception_check(env)) {
+        if (neko_exception_check(env)) neko_exception_clear(env);
+        snprintf(message, sizeof(message), "Bind-time string resolution failed: %s", utf);
+        neko_bind_log_failure(env, "java/lang/IllegalStateException", message);
+        if (localString != NULL) neko_delete_local_ref(env, localString);
+        return;
+    }
+    globalRef = neko_new_global_ref(env, localString);
+    neko_delete_local_ref(env, localString);
+    if (globalRef == NULL || neko_exception_check(env)) {
+        if (neko_exception_check(env)) neko_exception_clear(env);
+        snprintf(message, sizeof(message), "Bind-time string global-ref failed: %s", utf);
+        neko_bind_log_failure(env, "java/lang/IllegalStateException", message);
+        return;
+    }
+    *slot = (jstring)globalRef;
+}
+
+static jclass neko_bound_class(JNIEnv *env, jclass slot, const char *owner) {
+    char message[256];
+    if (slot != NULL) return slot;
+    snprintf(message, sizeof(message), "Unresolved bound class: %s", owner == NULL ? "<null>" : owner);
+    neko_raise_bound_resolution_error(env, "java/lang/NoClassDefFoundError", message);
+    return NULL;
+}
+
+static jmethodID neko_bound_method(JNIEnv *env, jmethodID slot, const char *owner, const char *name, const char *desc, jboolean isStatic) {
+    char message[320];
+    if (slot != NULL) return slot;
+    snprintf(message, sizeof(message), "Unresolved bound %s method: %s.%s%s", isStatic ? "static" : "instance", owner == NULL ? "<null>" : owner, name == NULL ? "<null>" : name, desc == NULL ? "<null>" : desc);
+    neko_raise_bound_resolution_error(env, "java/lang/NoSuchMethodError", message);
+    return NULL;
+}
+
+static jfieldID neko_bound_field(JNIEnv *env, jfieldID slot, const char *owner, const char *name, const char *desc, jboolean isStatic) {
+    char message[320];
+    if (slot != NULL) return slot;
+    snprintf(message, sizeof(message), "Unresolved bound %s field: %s.%s:%s", isStatic ? "static" : "instance", owner == NULL ? "<null>" : owner, name == NULL ? "<null>" : name, desc == NULL ? "<null>" : desc);
+    neko_raise_bound_resolution_error(env, "java/lang/NoSuchFieldError", message);
+    return NULL;
+}
+
+static jstring neko_bound_string(JNIEnv *env, jstring slot, const char *utf) {
+    char message[256];
+    if (slot != NULL) return slot;
+    snprintf(message, sizeof(message), "Unresolved bound string: %s", utf == NULL ? "<null>" : utf);
+    neko_raise_bound_resolution_error(env, "java/lang/IllegalStateException", message);
+    return NULL;
+}
+
+static jboolean neko_bind_primitive_field_metadata_enabled(void) {
+    return g_hotspot.initialized && (g_hotspot.fast_bits & NEKO_FAST_PRIM_FIELD) != 0;
+}
+
+static void neko_disable_primitive_field_fast_path(JNIEnv *env) {
+    (void)env;
+    g_hotspot.fast_bits &= ~NEKO_FAST_PRIM_FIELD;
+}
+
+static void neko_bind_instance_field_offset(JNIEnv *env, jlong *slot, jclass cls, const char *name) {
+    jvalue args[2];
+    jstring fieldName;
+    if (!neko_bind_primitive_field_metadata_enabled() || env == NULL || slot == NULL || *slot > 0 || cls == NULL || name == NULL) return;
+    fieldName = neko_new_string_utf(env, name);
+    if (fieldName == NULL || neko_exception_check(env)) {
+        if (fieldName != NULL) neko_delete_local_ref(env, fieldName);
+        if (neko_exception_check(env)) neko_exception_clear(env);
+        neko_disable_primitive_field_fast_path(env);
+        return;
+    }
+    args[0].l = cls;
+    args[1].l = fieldName;
+    *slot = neko_call_static_long_method_a(env, g_hotspot.loader_class, g_hotspot.mid_instance_field_offset, args);
+    neko_delete_local_ref(env, fieldName);
+    if (neko_exception_check(env) || *slot <= 0) {
+        if (neko_exception_check(env)) neko_exception_clear(env);
+        *slot = -1;
+        neko_disable_primitive_field_fast_path(env);
+    }
+}
+
+static void neko_bind_static_field_metadata(JNIEnv *env, jobject *baseSlot, jlong *offsetSlot, jclass cls, const char *name) {
+    jvalue args[2];
+    jstring fieldName;
+    jobject baseLocal;
+    jobject baseGlobal;
+    if (!neko_bind_primitive_field_metadata_enabled() || env == NULL || baseSlot == NULL || offsetSlot == NULL
+        || (*baseSlot != NULL && *offsetSlot > 0) || cls == NULL || name == NULL) return;
+    fieldName = neko_new_string_utf(env, name);
+    if (fieldName == NULL || neko_exception_check(env)) {
+        if (fieldName != NULL) neko_delete_local_ref(env, fieldName);
+        if (neko_exception_check(env)) neko_exception_clear(env);
+        neko_disable_primitive_field_fast_path(env);
+        return;
+    }
+    args[0].l = cls;
+    args[1].l = fieldName;
+    *offsetSlot = neko_call_static_long_method_a(env, g_hotspot.loader_class, g_hotspot.mid_static_field_offset, args);
+    if (neko_exception_check(env) || *offsetSlot <= 0) {
+        neko_delete_local_ref(env, fieldName);
+        if (neko_exception_check(env)) neko_exception_clear(env);
+        *offsetSlot = -1;
+        neko_disable_primitive_field_fast_path(env);
+        return;
+    }
+    baseLocal = neko_call_static_object_method_a(env, g_hotspot.loader_class, g_hotspot.mid_static_field_base, args);
+    neko_delete_local_ref(env, fieldName);
+    if (neko_exception_check(env) || baseLocal == NULL) {
+        if (neko_exception_check(env)) neko_exception_clear(env);
+        *offsetSlot = -1;
+        neko_disable_primitive_field_fast_path(env);
+        return;
+    }
+    baseGlobal = neko_new_global_ref(env, baseLocal);
+    neko_delete_local_ref(env, baseLocal);
+    if (baseGlobal == NULL || neko_exception_check(env)) {
+        if (neko_exception_check(env)) neko_exception_clear(env);
+        *offsetSlot = -1;
+        neko_disable_primitive_field_fast_path(env);
+        return;
+    }
+    *baseSlot = baseGlobal;
+}
+
+""";
+    }
+
+    private String renderBindOwnerFunctions() {
+        StringBuilder sb = new StringBuilder();
+        if (ownerBindIndex.isEmpty()) {
+            return "";
+        }
+        sb.append("// === Bind-time owner resolution ===\n");
+        for (Map.Entry<String, Integer> entry : ownerBindIndex.entrySet()) {
+            String owner = entry.getKey();
+            int ownerId = entry.getValue();
+            OwnerResolution resolution = ownerResolutions.get(owner);
+            sb.append("static void neko_bind_owner_").append(ownerId).append("(JNIEnv *env, jclass self_class) {\n");
+            sb.append("    if (env == NULL || g_owner_bound_").append(ownerId).append(") return;\n");
+            sb.append("    g_owner_bound_").append(ownerId).append(" = JNI_TRUE;\n");
+            sb.append("    neko_bind_owner_class_slot(env, &").append(classSlotName(owner)).append(", self_class, \"")
+                .append(c(owner)).append("\");\n");
+            for (String classOwner : resolution.classes) {
+                if (owner.equals(classOwner)) {
+                    continue;
+                }
+                sb.append("    neko_bind_class_slot(env, &").append(classSlotName(classOwner)).append(", \"")
+                    .append(c(classOwner)).append("\");\n");
+            }
+            for (MethodRef methodRef : resolution.methods) {
+                sb.append("    neko_bind_method_slot(env, &").append(methodSlotName(methodRef.owner(), methodRef.name(), methodRef.desc(), methodRef.isStatic()))
+                    .append(", ").append(classSlotName(methodRef.owner())).append(", \"")
+                    .append(c(methodRef.owner())).append("\", \"")
+                    .append(c(methodRef.name())).append("\", \"")
+                    .append(c(methodRef.desc())).append("\", ")
+                    .append(methodRef.isStatic() ? "JNI_TRUE" : "JNI_FALSE").append(");\n");
+            }
+            for (FieldRef fieldRef : resolution.fields) {
+                sb.append("    neko_bind_field_slot(env, &").append(fieldSlotName(fieldRef.owner(), fieldRef.name(), fieldRef.desc(), fieldRef.isStatic()))
+                    .append(", ").append(classSlotName(fieldRef.owner())).append(", \"")
+                    .append(c(fieldRef.owner())).append("\", \"")
+                    .append(c(fieldRef.name())).append("\", \"")
+                    .append(c(fieldRef.desc())).append("\", ")
+                    .append(fieldRef.isStatic() ? "JNI_TRUE" : "JNI_FALSE").append(");\n");
+                if (isPrimitiveFieldDescriptor(fieldRef.desc())) {
+                    if (fieldRef.isStatic()) {
+                        sb.append("    neko_bind_static_field_metadata(env, &")
+                            .append(staticFieldBaseSlotName(fieldRef.owner(), fieldRef.name(), fieldRef.desc(), true))
+                            .append(", &")
+                            .append(staticFieldOffsetSlotName(fieldRef.owner(), fieldRef.name(), fieldRef.desc(), true))
+                            .append(", ")
+                            .append(classSlotName(fieldRef.owner()))
+                            .append(", \"")
+                            .append(c(fieldRef.name()))
+                            .append("\");\n");
+                    } else {
+                        sb.append("    neko_bind_instance_field_offset(env, &")
+                            .append(fieldOffsetSlotName(fieldRef.owner(), fieldRef.name(), fieldRef.desc(), false))
+                            .append(", ")
+                            .append(classSlotName(fieldRef.owner()))
+                            .append(", \"")
+                            .append(c(fieldRef.name()))
+                            .append("\");\n");
+                    }
+                }
+            }
+            for (StringRef stringRef : resolution.strings) {
+                sb.append("    neko_bind_string_slot(env, &").append(stringRef.cacheVar()).append(", \"")
+                    .append(c(stringRef.value())).append("\");\n");
+            }
+            sb.append("}\n\n");
+        }
         return sb.toString();
     }
 
@@ -242,6 +682,65 @@ public final class CCodeGenerator {
             }
         }
         return false;
+    }
+
+    private String renderIcacheDirectStubs() {
+        if (icacheDirectStubs.isEmpty()) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder();
+        sb.append("// === Inline-cache direct-call stubs ===\n");
+        for (IcacheDirectStubRef stub : icacheDirectStubs.values()) {
+            sb.append(renderIcacheDirectStub(stub));
+        }
+        sb.append('\n');
+        return sb.toString();
+    }
+
+    private String renderIcacheMetas() {
+        if (icacheMetas.isEmpty()) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder();
+        sb.append("// === Inline-cache metadata ===\n");
+        for (IcacheMetaRef meta : icacheMetas.values()) {
+            sb.append("static const neko_icache_meta ").append(meta.symbol()).append(" = {\"")
+                .append(c(meta.name())).append("\", \"").append(c(meta.desc())).append("\", ")
+                .append(meta.translatedClassSlot() == null ? "NULL" : "&" + meta.translatedClassSlot()).append(", ")
+                .append(meta.translatedStubSymbol() == null ? "NULL" : meta.translatedStubSymbol()).append(", ")
+                .append(meta.isInterface() ? "JNI_TRUE" : "JNI_FALSE").append("};\n");
+        }
+        sb.append('\n');
+        return sb.toString();
+    }
+
+    private String renderIcacheDirectStub(IcacheDirectStubRef stub) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("static jvalue ").append(stub.symbol()).append("(JNIEnv *env, jobject receiver, const jvalue *args) {\n");
+        sb.append("    jvalue result = {0};\n");
+        if (stub.returnType().getSort() != Type.VOID) {
+            sb.append("    result").append(jvalueAccessor(stub.returnType())).append(" = ");
+        } else {
+            sb.append("    ");
+        }
+        sb.append(stub.binding().cFunctionName()).append("(env, receiver");
+        for (int i = 0; i < stub.args().length; i++) {
+            sb.append(", ");
+            if (stub.args()[i].getSort() == Type.ARRAY) {
+                sb.append("(jarray)");
+            } else if (stub.args()[i].getSort() == Type.OBJECT) {
+                sb.append("(jobject)");
+            }
+            sb.append("args[").append(i).append("]").append(jvalueAccessor(stub.args()[i]));
+        }
+        sb.append(");\n");
+        sb.append("    return result;\n");
+        sb.append("}\n\n");
+        return sb.toString();
+    }
+
+    private boolean isPrimitiveFieldDescriptor(String desc) {
+        return desc != null && desc.length() == 1 && "ZBCSIJFD".indexOf(desc.charAt(0)) >= 0;
     }
 
     private String renderRuntimeSupport() {
@@ -279,8 +778,12 @@ static inline jint neko_throw_new(JNIEnv *env, jclass cls, const char *msg) { re
 static inline jthrowable neko_exception_occurred(JNIEnv *env) { return NEKO_JNI_FN_PTR(env, 15, jthrowable)(env); }
 static inline void neko_exception_clear(JNIEnv *env) { NEKO_JNI_FN_PTR(env, 17, void)(env); }
 static inline jint neko_ensure_local_capacity(JNIEnv *env, jint capacity) { return NEKO_JNI_FN_PTR(env, 26, jint, jint)(env, capacity); }
+static inline void neko_delete_global_ref(JNIEnv *env, jobject obj) { NEKO_JNI_FN_PTR(env, 22, void, jobject)(env, obj); }
 static inline jobject neko_new_global_ref(JNIEnv *env, jobject obj) { return NEKO_JNI_FN_PTR(env, 21, jobject, jobject)(env, obj); }
 static inline void neko_delete_local_ref(JNIEnv *env, jobject obj) { NEKO_JNI_FN_PTR(env, 23, void, jobject)(env, obj); }
+static inline jboolean neko_is_same_object(JNIEnv *env, jobject a, jobject b) { return NEKO_JNI_FN_PTR(env, 24, jboolean, jobject, jobject)(env, a, b); }
+static inline jobject neko_new_weak_global_ref(JNIEnv *env, jobject obj) { return NEKO_JNI_FN_PTR(env, 226, jobject, jobject)(env, obj); }
+static inline void neko_delete_weak_global_ref(JNIEnv *env, jobject obj) { NEKO_JNI_FN_PTR(env, 227, void, jobject)(env, obj); }
 static inline jobject neko_alloc_object(JNIEnv *env, jclass cls) { return NEKO_JNI_FN_PTR(env, 27, jobject, jclass)(env, cls); }
 static inline jobject neko_new_object_a(JNIEnv *env, jclass cls, jmethodID mid, const jvalue *args) { return NEKO_JNI_FN_PTR(env, 30, jobject, jclass, jmethodID, const jvalue*)(env, cls, mid, args); }
 static inline jobject neko_call_object_method_a(JNIEnv *env, jobject obj, jmethodID mid, const jvalue *args) { return NEKO_JNI_FN_PTR(env, 36, jobject, jobject, jmethodID, const jvalue*)(env, obj, mid, args); }
@@ -835,6 +1338,667 @@ static jobject neko_multi_new_array(JNIEnv *env, jint num_dims, jint *dims, cons
 """;
     }
 
+    private String renderHotSpotSupport() {
+        return """
+typedef enum {
+    NEKO_COOP_MODE_UNKNOWN = 0,
+    NEKO_COOP_MODE_DISABLED = 1,
+    NEKO_COOP_MODE_ZERO_BASED = 2,
+    NEKO_COOP_MODE_HEAP_BASED = 3
+} neko_coop_encoded_mode;
+
+enum {
+    NEKO_PRIM_Z = 0,
+    NEKO_PRIM_B = 1,
+    NEKO_PRIM_C = 2,
+    NEKO_PRIM_S = 3,
+    NEKO_PRIM_I = 4,
+    NEKO_PRIM_J = 5,
+    NEKO_PRIM_F = 6,
+    NEKO_PRIM_D = 7,
+    NEKO_PRIM_COUNT = 8
+};
+
+enum {
+    NEKO_HOTSPOT_FAST_RAW_HEAP = 1ll << 16,
+    NEKO_HOTSPOT_FAST_ARRAY_LAYOUT = 1ll << 18,
+    NEKO_HOTSPOT_FAST_HANDLE_TAGS = 1ll << 19,
+    NEKO_HOTSPOT_FAST_FIELD_HELPERS = 1ll << 20,
+    NEKO_FAST_RECEIVER_KEY = 0x10ll,
+    NEKO_FAST_PRIM_FIELD = 0x4ll,
+    NEKO_FAST_PRIM_ARRAY = 0x8ll
+};
+
+typedef struct {
+    jboolean initialized;
+    jint address_size;
+    jboolean compressed_oops_enabled;
+    jint compressed_oops_shift;
+    jlong compressed_oops_base;
+    jboolean compressed_klass_ptrs;
+    jboolean use_compact_object_headers;
+    jint coop_encoded_mode;
+    jint primitive_array_base_offsets[NEKO_PRIM_COUNT];
+    jint primitive_array_index_scales[NEKO_PRIM_COUNT];
+    jlong fast_bits;
+    jboolean is_hotspot;
+    jboolean use_zgc;
+    jboolean use_shenandoah_gc;
+    jint object_alignment_in_bytes;
+    jclass loader_class;
+    jmethodID mid_vm_option;
+    jmethodID mid_address_size;
+    jmethodID mid_array_base_offset;
+    jmethodID mid_array_index_scale;
+    jmethodID mid_instance_field_offset;
+    jmethodID mid_static_field_offset;
+    jmethodID mid_static_field_base;
+    /*
+     * Receiver-key scaffold state is appended so existing field offsets stay
+     * unchanged for T1-T4 fast paths. klass_offset_bytes is derived from the
+     * object-header mark word width (4 bytes on 32-bit, 8 bytes on 64-bit).
+     */
+    jboolean use_compressed_klass_ptrs;
+    jint klass_offset_bytes;
+} neko_hotspot_state;
+
+static neko_hotspot_state g_hotspot;
+
+static const char* neko_hotspot_primitive_name(int kind) {
+    switch (kind) {
+        case NEKO_PRIM_Z: return "boolean";
+        case NEKO_PRIM_B: return "byte";
+        case NEKO_PRIM_C: return "char";
+        case NEKO_PRIM_S: return "short";
+        case NEKO_PRIM_I: return "int";
+        case NEKO_PRIM_J: return "long";
+        case NEKO_PRIM_F: return "float";
+        case NEKO_PRIM_D: return "double";
+        default: return NULL;
+    }
+}
+
+static jboolean neko_hotspot_clear_exception(JNIEnv *env) {
+    if (!neko_exception_check(env)) return JNI_FALSE;
+    neko_exception_clear(env);
+    return JNI_TRUE;
+}
+
+static jboolean neko_parse_bool_option(const char *value, jboolean *out) {
+    if (value == NULL || out == NULL) return JNI_FALSE;
+    if (strcmp(value, "true") == 0) {
+        *out = JNI_TRUE;
+        return JNI_TRUE;
+    }
+    if (strcmp(value, "false") == 0) {
+        *out = JNI_FALSE;
+        return JNI_TRUE;
+    }
+    return JNI_FALSE;
+}
+
+static jboolean neko_parse_int_option(const char *value, jint *out) {
+    char *end = NULL;
+    long parsed;
+    if (value == NULL || out == NULL) return JNI_FALSE;
+    parsed = strtol(value, &end, 10);
+    if (end == value || (end != NULL && *end != '\0')) return JNI_FALSE;
+    *out = (jint)parsed;
+    return JNI_TRUE;
+}
+
+static jint neko_hotspot_shift_from_alignment(jint alignment) {
+    jint shift = 0;
+    if (alignment <= 0) return 0;
+    while ((alignment & 1) == 0) {
+        alignment >>= 1;
+        shift++;
+    }
+    return alignment == 1 ? shift : 0;
+}
+
+static jstring neko_system_property(JNIEnv *env, const char *key) {
+    static jclass g_system_cls = NULL;
+    static jmethodID g_system_get_property = NULL;
+    jclass systemClass = NEKO_ENSURE_CLASS(g_system_cls, env, "java/lang/System");
+    jmethodID getProperty = NEKO_ENSURE_STATIC_METHOD_ID(g_system_get_property, env, systemClass, "getProperty", "(Ljava/lang/String;)Ljava/lang/String;");
+    jvalue args[1];
+    args[0].l = neko_new_string_utf(env, key);
+    if (args[0].l == NULL) return NULL;
+    jstring value = (jstring)neko_call_static_object_method_a(env, systemClass, getProperty, args);
+    neko_delete_local_ref(env, args[0].l);
+    return value;
+}
+
+static jboolean neko_detect_hotspot(JNIEnv *env) {
+    jstring vmName = neko_system_property(env, "java.vm.name");
+    const char *chars;
+    jboolean isHotspot = JNI_FALSE;
+    if (vmName == NULL || neko_hotspot_clear_exception(env)) return JNI_FALSE;
+    chars = neko_get_string_utf_chars(env, vmName);
+    if (chars != NULL) {
+        if (strstr(chars, "HotSpot") != NULL || strstr(chars, "OpenJDK") != NULL) {
+            isHotspot = JNI_TRUE;
+        }
+        neko_release_string_utf_chars(env, vmName, chars);
+    }
+    neko_delete_local_ref(env, vmName);
+    return isHotspot;
+}
+
+static jboolean neko_hotspot_option_string(JNIEnv *env, neko_hotspot_state *state, const char *name, char *buffer, size_t bufferSize) {
+    jvalue args[1];
+    jstring optionName;
+    jstring optionValue;
+    const char *chars;
+    if (state == NULL || buffer == NULL || bufferSize == 0) return JNI_FALSE;
+    optionName = neko_new_string_utf(env, name);
+    if (optionName == NULL) return JNI_FALSE;
+    args[0].l = optionName;
+    optionValue = (jstring)neko_call_static_object_method_a(env, state->loader_class, state->mid_vm_option, args);
+    if (neko_hotspot_clear_exception(env)) {
+        neko_delete_local_ref(env, optionName);
+        return JNI_FALSE;
+    }
+    neko_delete_local_ref(env, optionName);
+    if (optionValue == NULL) return JNI_FALSE;
+    chars = neko_get_string_utf_chars(env, optionValue);
+    if (chars == NULL) {
+        neko_delete_local_ref(env, optionValue);
+        return JNI_FALSE;
+    }
+    strncpy(buffer, chars, bufferSize - 1u);
+    buffer[bufferSize - 1u] = '\0';
+    neko_release_string_utf_chars(env, optionValue, chars);
+    neko_delete_local_ref(env, optionValue);
+    return JNI_TRUE;
+}
+
+static void neko_hotspot_init(JNIEnv *env) {
+    neko_hotspot_state state;
+    char optionValue[64];
+    jlong fastBits = 0;
+    jboolean arraysOk = JNI_TRUE;
+    jboolean fieldHelpersOk = JNI_FALSE;
+    if (g_hotspot.initialized) return;
+    memset(&state, 0, sizeof(state));
+    if (env == NULL) goto fail;
+    if (!neko_detect_hotspot(env)) goto fail;
+
+    jclass loaderLocal = neko_find_class(env, "dev/nekoobfuscator/runtime/NekoNativeLoader");
+    if (loaderLocal == NULL || neko_hotspot_clear_exception(env)) goto fail;
+    state.loader_class = (jclass)neko_new_global_ref(env, loaderLocal);
+    neko_delete_local_ref(env, loaderLocal);
+    if (state.loader_class == NULL) goto fail;
+
+    state.mid_vm_option = neko_get_static_method_id(env, state.loader_class, "nekoVmOption", "(Ljava/lang/String;)Ljava/lang/String;");
+    state.mid_address_size = neko_get_static_method_id(env, state.loader_class, "nekoAddressSize", "()I");
+    state.mid_array_base_offset = neko_get_static_method_id(env, state.loader_class, "nekoArrayBaseOffset", "(Ljava/lang/String;)I");
+    state.mid_array_index_scale = neko_get_static_method_id(env, state.loader_class, "nekoArrayIndexScale", "(Ljava/lang/String;)I");
+    state.mid_instance_field_offset = neko_get_static_method_id(env, state.loader_class, "nekoInstanceFieldOffset", "(Ljava/lang/Class;Ljava/lang/String;)J");
+    state.mid_static_field_offset = neko_get_static_method_id(env, state.loader_class, "nekoStaticFieldOffset", "(Ljava/lang/Class;Ljava/lang/String;)J");
+    state.mid_static_field_base = neko_get_static_method_id(env, state.loader_class, "nekoStaticFieldBase", "(Ljava/lang/Class;Ljava/lang/String;)Ljava/lang/Object;");
+    if (state.mid_vm_option == NULL || state.mid_address_size == NULL || state.mid_array_base_offset == NULL
+        || state.mid_array_index_scale == NULL || state.mid_instance_field_offset == NULL
+        || state.mid_static_field_offset == NULL || state.mid_static_field_base == NULL
+        || neko_hotspot_clear_exception(env)) goto fail;
+
+    state.is_hotspot = JNI_TRUE;
+    state.address_size = neko_call_static_int_method_a(env, state.loader_class, state.mid_address_size, NULL);
+    if (neko_hotspot_clear_exception(env) || state.address_size <= 0) goto fail;
+
+    memset(optionValue, 0, sizeof(optionValue));
+    if (neko_hotspot_option_string(env, &state, "UseCompressedOops", optionValue, sizeof(optionValue))) {
+        (void)neko_parse_bool_option(optionValue, &state.compressed_oops_enabled);
+    }
+    memset(optionValue, 0, sizeof(optionValue));
+    if (neko_hotspot_option_string(env, &state, "UseCompressedClassPointers", optionValue, sizeof(optionValue))) {
+        (void)neko_parse_bool_option(optionValue, &state.compressed_klass_ptrs);
+    }
+    memset(optionValue, 0, sizeof(optionValue));
+    if (neko_hotspot_option_string(env, &state, "UseCompactObjectHeaders", optionValue, sizeof(optionValue))) {
+        (void)neko_parse_bool_option(optionValue, &state.use_compact_object_headers);
+    }
+    memset(optionValue, 0, sizeof(optionValue));
+    if (neko_hotspot_option_string(env, &state, "UseZGC", optionValue, sizeof(optionValue))) {
+        (void)neko_parse_bool_option(optionValue, &state.use_zgc);
+    }
+    memset(optionValue, 0, sizeof(optionValue));
+    if (neko_hotspot_option_string(env, &state, "UseShenandoahGC", optionValue, sizeof(optionValue))) {
+        (void)neko_parse_bool_option(optionValue, &state.use_shenandoah_gc);
+    }
+    memset(optionValue, 0, sizeof(optionValue));
+    if (neko_hotspot_option_string(env, &state, "ObjectAlignmentInBytes", optionValue, sizeof(optionValue))) {
+        (void)neko_parse_int_option(optionValue, &state.object_alignment_in_bytes);
+    }
+
+    state.use_compressed_klass_ptrs = state.compressed_klass_ptrs;
+    if (state.address_size == 4 || state.address_size == 8) {
+        state.klass_offset_bytes = state.address_size;
+    }
+
+    if (state.compressed_oops_enabled) {
+        state.compressed_oops_shift = neko_hotspot_shift_from_alignment(state.object_alignment_in_bytes);
+        state.compressed_oops_base = 0;
+        state.coop_encoded_mode = NEKO_COOP_MODE_UNKNOWN;
+    } else {
+        state.coop_encoded_mode = NEKO_COOP_MODE_DISABLED;
+    }
+
+    for (int i = 0; i < NEKO_PRIM_COUNT; i++) {
+        const char *primitiveName = neko_hotspot_primitive_name(i);
+        jstring primitiveString = NULL;
+        jvalue args[1];
+        jint baseOffset;
+        jint indexScale;
+        if (primitiveName == NULL) goto fail;
+        primitiveString = neko_new_string_utf(env, primitiveName);
+        if (primitiveString == NULL) goto fail;
+        args[0].l = primitiveString;
+        baseOffset = neko_call_static_int_method_a(env, state.loader_class, state.mid_array_base_offset, args);
+        if (neko_hotspot_clear_exception(env)) {
+            neko_delete_local_ref(env, primitiveString);
+            goto fail;
+        }
+        indexScale = neko_call_static_int_method_a(env, state.loader_class, state.mid_array_index_scale, args);
+        if (neko_hotspot_clear_exception(env)) {
+            neko_delete_local_ref(env, primitiveString);
+            goto fail;
+        }
+        neko_delete_local_ref(env, primitiveString);
+        state.primitive_array_base_offsets[i] = baseOffset;
+        state.primitive_array_index_scales[i] = indexScale;
+        if (baseOffset < 0 || indexScale <= 0) arraysOk = JNI_FALSE;
+    }
+
+    {
+        jclass integerClass = neko_find_class(env, "java/lang/Integer");
+        jstring valueName = NULL;
+        jstring typeName = NULL;
+        jvalue args[2];
+        jlong instanceOffset;
+        jlong staticOffset;
+        jobject staticBase;
+        if (integerClass == NULL || neko_hotspot_clear_exception(env)) goto fail;
+        valueName = neko_new_string_utf(env, "value");
+        typeName = neko_new_string_utf(env, "TYPE");
+        if (valueName == NULL || typeName == NULL) {
+            if (valueName != NULL) neko_delete_local_ref(env, valueName);
+            if (typeName != NULL) neko_delete_local_ref(env, typeName);
+            neko_delete_local_ref(env, integerClass);
+            goto fail;
+        }
+        args[0].l = integerClass;
+        args[1].l = valueName;
+        instanceOffset = neko_call_static_long_method_a(env, state.loader_class, state.mid_instance_field_offset, args);
+        if (neko_hotspot_clear_exception(env)) {
+            neko_delete_local_ref(env, valueName);
+            neko_delete_local_ref(env, typeName);
+            neko_delete_local_ref(env, integerClass);
+            goto fail;
+        }
+        args[1].l = typeName;
+        staticOffset = neko_call_static_long_method_a(env, state.loader_class, state.mid_static_field_offset, args);
+        if (neko_hotspot_clear_exception(env)) {
+            neko_delete_local_ref(env, valueName);
+            neko_delete_local_ref(env, typeName);
+            neko_delete_local_ref(env, integerClass);
+            goto fail;
+        }
+        staticBase = neko_call_static_object_method_a(env, state.loader_class, state.mid_static_field_base, args);
+        if (neko_hotspot_clear_exception(env)) {
+            neko_delete_local_ref(env, valueName);
+            neko_delete_local_ref(env, typeName);
+            neko_delete_local_ref(env, integerClass);
+            goto fail;
+        }
+        fieldHelpersOk = (instanceOffset >= 0 && staticOffset >= 0 && staticBase != NULL) ? JNI_TRUE : JNI_FALSE;
+        if (staticBase != NULL) neko_delete_local_ref(env, staticBase);
+        neko_delete_local_ref(env, valueName);
+        neko_delete_local_ref(env, typeName);
+        neko_delete_local_ref(env, integerClass);
+    }
+
+    {
+        jclass objectClass = neko_find_class(env, "java/lang/Object");
+        jobject globalRef;
+        jobject weakRef;
+        if (objectClass == NULL || neko_hotspot_clear_exception(env)) goto fail;
+        globalRef = neko_new_global_ref(env, objectClass);
+        weakRef = neko_new_weak_global_ref(env, objectClass);
+        if (globalRef != NULL && weakRef != NULL
+            && ((((uintptr_t)objectClass) & 0x3u) == 0u)
+            && ((((uintptr_t)globalRef) & 0x3u) == 0x2u)
+            && ((((uintptr_t)weakRef) & 0x3u) == 0x1u)) {
+            fastBits |= NEKO_HOTSPOT_FAST_HANDLE_TAGS;
+        }
+        if (globalRef != NULL) neko_delete_global_ref(env, globalRef);
+        if (weakRef != NULL) neko_delete_weak_global_ref(env, weakRef);
+        neko_delete_local_ref(env, objectClass);
+    }
+
+    if (arraysOk) fastBits |= NEKO_HOTSPOT_FAST_ARRAY_LAYOUT;
+    if (fieldHelpersOk) fastBits |= NEKO_HOTSPOT_FAST_FIELD_HELPERS;
+    if ((fastBits & NEKO_HOTSPOT_FAST_HANDLE_TAGS) != 0u && arraysOk && fieldHelpersOk
+        && !state.use_zgc && !state.use_shenandoah_gc) {
+        fastBits |= NEKO_HOTSPOT_FAST_RAW_HEAP;
+    }
+
+    if ((fastBits & NEKO_HOTSPOT_FAST_RAW_HEAP) != 0 && !state.use_compact_object_headers) {
+        if (fieldHelpersOk) fastBits |= NEKO_FAST_PRIM_FIELD;
+        if (arraysOk) fastBits |= NEKO_FAST_PRIM_ARRAY;
+        if (state.klass_offset_bytes > 0) fastBits |= NEKO_FAST_RECEIVER_KEY;
+    }
+
+    /*
+     * Compact object headers change where klass metadata lives, so any future
+     * receiver-key extraction or raw heap layout shortcut must stay disabled.
+     * Zeroing fast_bits here keeps later tiers on the conservative JNI path.
+     */
+    if (state.use_compact_object_headers) fastBits = 0;
+
+    state.fast_bits = fastBits;
+    state.initialized = JNI_TRUE;
+    g_hotspot = state;
+    return;
+
+fail:
+    if (state.loader_class != NULL && env != NULL) {
+        neko_delete_global_ref(env, state.loader_class);
+    }
+    memset(&g_hotspot, 0, sizeof(g_hotspot));
+    g_hotspot.initialized = JNI_TRUE;
+    g_hotspot.fast_bits = 0;
+}
+
+""" + renderHotSpotFastAccessHelpers();
+    }
+
+    private String renderHotSpotFastAccessHelpers() {
+        StringBuilder sb = new StringBuilder();
+        sb.append("""
+
+#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 199901L
+#define NEKO_FAST_INLINE static inline
+#else
+#define NEKO_FAST_INLINE static
+#endif
+
+NEKO_FAST_INLINE void* neko_handle_oop(jobject handle) {
+    uintptr_t raw;
+    uintptr_t slot;
+    if (handle == NULL) return NULL;
+    raw = (uintptr_t)handle;
+    slot = (g_hotspot.fast_bits & NEKO_HOTSPOT_FAST_HANDLE_TAGS) != 0 ? (raw & ~(uintptr_t)0x3u) : raw;
+    return *(void**)slot;
+}
+
+NEKO_FAST_INLINE jint neko_fast_array_length(JNIEnv *env, jarray arr) {
+    return (jint)neko_get_array_length(env, arr);
+}
+
+NEKO_FAST_INLINE jboolean neko_receiver_key_supported(void) {
+    return g_hotspot.initialized
+        && g_hotspot.use_compact_object_headers == JNI_FALSE
+        && (g_hotspot.fast_bits & NEKO_FAST_RECEIVER_KEY) != 0;
+}
+
+NEKO_FAST_INLINE uintptr_t neko_receiver_key(jobject obj) {
+    char *oop;
+    char *klassAddr;
+    if (obj == NULL || !neko_receiver_key_supported()) return (uintptr_t)0;
+    oop = (char*)neko_handle_oop(obj);
+    if (oop == NULL || g_hotspot.klass_offset_bytes <= 0) return (uintptr_t)0;
+    klassAddr = oop + g_hotspot.klass_offset_bytes;
+    if (g_hotspot.use_compressed_klass_ptrs) {
+        return (uintptr_t)(*(uint32_t*)klassAddr);
+    }
+    return *(uintptr_t*)klassAddr;
+}
+
+typedef jvalue (*neko_icache_direct_stub)(JNIEnv *env, jobject receiver, const jvalue *args);
+
+typedef struct {
+    const char *name;
+    const char *desc;
+    const jclass *translated_class_slot;
+    neko_icache_direct_stub translated_stub;
+    jboolean is_interface;
+} neko_icache_meta;
+
+NEKO_FAST_INLINE char neko_icache_return_kind(const char *desc) {
+    const char *ret = desc == NULL ? NULL : strrchr(desc, ')');
+    return (ret != NULL && ret[1] != '\0') ? ret[1] : 'V';
+}
+
+static jvalue neko_icache_call_virtual(JNIEnv *env, jobject receiver, jmethodID mid, const jvalue *args, const char *desc) {
+    jvalue result = {0};
+    switch (neko_icache_return_kind(desc)) {
+        case 'V': neko_call_void_method_a(env, receiver, mid, args); break;
+        case 'Z': result.z = neko_call_boolean_method_a(env, receiver, mid, args); break;
+        case 'B': result.b = neko_call_byte_method_a(env, receiver, mid, args); break;
+        case 'C': result.c = neko_call_char_method_a(env, receiver, mid, args); break;
+        case 'S': result.s = neko_call_short_method_a(env, receiver, mid, args); break;
+        case 'I': result.i = neko_call_int_method_a(env, receiver, mid, args); break;
+        case 'J': result.j = neko_call_long_method_a(env, receiver, mid, args); break;
+        case 'F': result.f = neko_call_float_method_a(env, receiver, mid, args); break;
+        case 'D': result.d = neko_call_double_method_a(env, receiver, mid, args); break;
+        default: result.l = neko_call_object_method_a(env, receiver, mid, args); break;
+    }
+    return result;
+}
+
+static jvalue neko_icache_call_nonvirtual(JNIEnv *env, jobject receiver, jclass klass, jmethodID mid, const jvalue *args, const char *desc) {
+    jvalue result = {0};
+    switch (neko_icache_return_kind(desc)) {
+        case 'V': neko_call_nonvirtual_void_method_a(env, receiver, klass, mid, args); break;
+        case 'Z': result.z = neko_call_nonvirtual_boolean_method_a(env, receiver, klass, mid, args); break;
+        case 'B': result.b = neko_call_nonvirtual_byte_method_a(env, receiver, klass, mid, args); break;
+        case 'C': result.c = neko_call_nonvirtual_char_method_a(env, receiver, klass, mid, args); break;
+        case 'S': result.s = neko_call_nonvirtual_short_method_a(env, receiver, klass, mid, args); break;
+        case 'I': result.i = neko_call_nonvirtual_int_method_a(env, receiver, klass, mid, args); break;
+        case 'J': result.j = neko_call_nonvirtual_long_method_a(env, receiver, klass, mid, args); break;
+        case 'F': result.f = neko_call_nonvirtual_float_method_a(env, receiver, klass, mid, args); break;
+        case 'D': result.d = neko_call_nonvirtual_double_method_a(env, receiver, klass, mid, args); break;
+        default: result.l = neko_call_nonvirtual_object_method_a(env, receiver, klass, mid, args); break;
+    }
+    return result;
+}
+
+NEKO_FAST_INLINE void neko_icache_replace_class(JNIEnv *env, neko_icache_site *site, jclass cachedClass) {
+    if (site == NULL) return;
+    if (site->cached_class != NULL) neko_delete_global_ref(env, site->cached_class);
+    site->cached_class = cachedClass;
+}
+
+NEKO_FAST_INLINE void neko_icache_store_direct(JNIEnv *env, neko_icache_site *site, uintptr_t receiverKey, jclass cachedClass, void *target) {
+    if (site == NULL) return;
+    neko_icache_replace_class(env, site, cachedClass);
+    site->receiver_key = receiverKey;
+    site->target = target;
+    site->target_kind = NEKO_ICACHE_DIRECT_C;
+}
+
+NEKO_FAST_INLINE void neko_icache_store_nonvirt(JNIEnv *env, neko_icache_site *site, uintptr_t receiverKey, jclass cachedClass, jmethodID mid) {
+    if (site == NULL) return;
+    neko_icache_replace_class(env, site, cachedClass);
+    site->receiver_key = receiverKey;
+    site->target = (void*)mid;
+    site->target_kind = NEKO_ICACHE_NONVIRT_MID;
+}
+
+NEKO_FAST_INLINE jboolean neko_icache_note_miss(JNIEnv *env, neko_icache_site *site) {
+    if (site == NULL) return JNI_FALSE;
+    if (site->miss_count < (uint16_t)0xFFFFu) site->miss_count++;
+    if (site->miss_count < NEKO_ICACHE_MEGA_THRESHOLD) return JNI_FALSE;
+    neko_icache_replace_class(env, site, NULL);
+    site->receiver_key = (uintptr_t)0;
+    site->target = NULL;
+    site->target_kind = NEKO_ICACHE_MEGA;
+    return JNI_TRUE;
+}
+
+static jvalue neko_icache_dispatch(
+    JNIEnv *env,
+    neko_icache_site *site,
+    const neko_icache_meta *meta,
+    jobject receiver,
+    jmethodID fallback_mid,
+    const jvalue *args
+) {
+    jvalue result = {0};
+    uintptr_t receiverKey;
+    if (env == NULL || receiver == NULL || fallback_mid == NULL) return result;
+    if (site != NULL && neko_receiver_key_supported()) {
+        receiverKey = neko_receiver_key(receiver);
+        if (receiverKey != 0 && site->target_kind != NEKO_ICACHE_MEGA) {
+            if (receiverKey == site->receiver_key) {
+                if (site->target_kind == NEKO_ICACHE_DIRECT_C && site->target != NULL) {
+                    return ((neko_icache_direct_stub)site->target)(env, receiver, args);
+                }
+                if (site->target_kind == NEKO_ICACHE_NONVIRT_MID && site->cached_class != NULL && site->target != NULL) {
+                    return neko_icache_call_nonvirtual(env, receiver, site->cached_class, (jmethodID)site->target, args, meta != NULL ? meta->desc : NULL);
+                }
+            }
+            if (!neko_icache_note_miss(env, site)) {
+                jclass exactClass = neko_get_object_class(env, receiver);
+                if (exactClass != NULL && !neko_exception_check(env)) {
+                    jclass translatedClass = (meta != NULL && meta->translated_class_slot != NULL) ? *meta->translated_class_slot : NULL;
+                    if (translatedClass != NULL && meta != NULL && meta->translated_stub != NULL && neko_is_same_object(env, exactClass, translatedClass)) {
+                        jclass cachedExactClass = (jclass)neko_new_global_ref(env, exactClass);
+                        if (neko_exception_check(env)) {
+                            neko_exception_clear(env);
+                            cachedExactClass = NULL;
+                        }
+                        neko_icache_store_direct(env, site, receiverKey, cachedExactClass, (void*)meta->translated_stub);
+                        neko_delete_local_ref(env, exactClass);
+                        return meta->translated_stub(env, receiver, args);
+                    }
+                    jmethodID exactMid = neko_get_method_id(env, exactClass, meta != NULL ? meta->name : NULL, meta != NULL ? meta->desc : NULL);
+                    if (exactMid != NULL && !neko_exception_check(env)) {
+                        jclass cachedExactClass = (jclass)neko_new_global_ref(env, exactClass);
+                        if (neko_exception_check(env)) {
+                            neko_exception_clear(env);
+                            cachedExactClass = NULL;
+                        }
+                        if (cachedExactClass != NULL) {
+                            neko_icache_store_nonvirt(env, site, receiverKey, cachedExactClass, exactMid);
+                        }
+                        result = neko_icache_call_nonvirtual(env, receiver, cachedExactClass != NULL ? cachedExactClass : exactClass, exactMid, args, meta != NULL ? meta->desc : NULL);
+                        neko_delete_local_ref(env, exactClass);
+                        return result;
+                    }
+                    if (neko_exception_check(env)) neko_exception_clear(env);
+                    neko_delete_local_ref(env, exactClass);
+                } else if (neko_exception_check(env)) {
+                    neko_exception_clear(env);
+                }
+            }
+        }
+    }
+    return neko_icache_call_virtual(env, receiver, fallback_mid, args, meta != NULL ? meta->desc : NULL);
+}
+
+""");
+        appendPrimitiveFieldHelpers(sb, 'Z', "jboolean", "boolean");
+        appendPrimitiveFieldHelpers(sb, 'B', "jbyte", "byte");
+        appendPrimitiveFieldHelpers(sb, 'C', "jchar", "char");
+        appendPrimitiveFieldHelpers(sb, 'S', "jshort", "short");
+        appendPrimitiveFieldHelpers(sb, 'I', "jint", "int");
+        appendPrimitiveFieldHelpers(sb, 'J', "jlong", "long");
+        appendPrimitiveFieldHelpers(sb, 'F', "jfloat", "float");
+        appendPrimitiveFieldHelpers(sb, 'D', "jdouble", "double");
+        appendPrimitiveArrayHelpers(sb, "z", "jboolean", "boolean", "NEKO_PRIM_Z");
+        appendPrimitiveArrayHelpers(sb, "b", "jbyte", "byte", "NEKO_PRIM_B");
+        appendPrimitiveArrayHelpers(sb, "c", "jchar", "char", "NEKO_PRIM_C");
+        appendPrimitiveArrayHelpers(sb, "s", "jshort", "short", "NEKO_PRIM_S");
+        appendPrimitiveArrayHelpers(sb, "i", "jint", "int", "NEKO_PRIM_I");
+        appendPrimitiveArrayHelpers(sb, "l", "jlong", "long", "NEKO_PRIM_J");
+        appendPrimitiveArrayHelpers(sb, "f", "jfloat", "float", "NEKO_PRIM_F");
+        appendPrimitiveArrayHelpers(sb, "d", "jdouble", "double", "NEKO_PRIM_D");
+        return sb.toString();
+    }
+
+    private void appendPrimitiveFieldHelpers(StringBuilder sb, char desc, String cType, String wrapperStem) {
+        sb.append("NEKO_FAST_INLINE ").append(cType).append(" neko_fast_get_").append(desc)
+            .append("_field(JNIEnv *env, jobject obj, jfieldID fid, jlong offset) {\n")
+            .append("    if (g_hotspot.initialized && (g_hotspot.fast_bits & NEKO_FAST_PRIM_FIELD) != 0 && offset > 0) {\n")
+            .append("        char *oop = (char*)neko_handle_oop(obj);\n")
+            .append("        if (oop != NULL) return *(").append(cType).append("*)(oop + offset);\n")
+            .append("    }\n")
+            .append("    return neko_get_").append(wrapperStem).append("_field(env, obj, fid);\n")
+            .append("}\n\n")
+            .append("NEKO_FAST_INLINE void neko_fast_set_").append(desc)
+            .append("_field(JNIEnv *env, jobject obj, jfieldID fid, jlong offset, ").append(cType).append(" value) {\n")
+            .append("    if (g_hotspot.initialized && (g_hotspot.fast_bits & NEKO_FAST_PRIM_FIELD) != 0 && offset > 0) {\n")
+            .append("        char *oop = (char*)neko_handle_oop(obj);\n")
+            .append("        if (oop != NULL) { *(").append(cType).append("*)(oop + offset) = value; return; }\n")
+            .append("    }\n")
+            .append("    neko_set_").append(wrapperStem).append("_field(env, obj, fid, value);\n")
+            .append("}\n\n")
+            .append("NEKO_FAST_INLINE ").append(cType).append(" neko_fast_get_static_").append(desc)
+            .append("_field(JNIEnv *env, jclass cls, jfieldID fid, jobject staticBase, jlong offset) {\n")
+            .append("    if (g_hotspot.initialized && (g_hotspot.fast_bits & NEKO_FAST_PRIM_FIELD) != 0 && offset > 0) {\n")
+            .append("        char *oop = (char*)neko_handle_oop(staticBase);\n")
+            .append("        if (oop != NULL) return *(").append(cType).append("*)(oop + offset);\n")
+            .append("    }\n")
+            .append("    return neko_get_static_").append(wrapperStem).append("_field(env, cls, fid);\n")
+            .append("}\n\n")
+            .append("NEKO_FAST_INLINE void neko_fast_set_static_").append(desc)
+            .append("_field(JNIEnv *env, jclass cls, jfieldID fid, jobject staticBase, jlong offset, ").append(cType).append(" value) {\n")
+            .append("    if (g_hotspot.initialized && (g_hotspot.fast_bits & NEKO_FAST_PRIM_FIELD) != 0 && offset > 0) {\n")
+            .append("        char *oop = (char*)neko_handle_oop(staticBase);\n")
+            .append("        if (oop != NULL) { *(").append(cType).append("*)(oop + offset) = value; return; }\n")
+            .append("    }\n")
+            .append("    neko_set_static_").append(wrapperStem).append("_field(env, cls, fid, value);\n")
+            .append("}\n\n");
+    }
+
+    private void appendPrimitiveArrayHelpers(StringBuilder sb, String prefix, String cType, String wrapperStem, String kindConstant) {
+        sb.append("NEKO_FAST_INLINE ").append(cType).append(" neko_fast_").append(prefix)
+            .append("aload(JNIEnv *env, jarray arr, jint idx) {\n")
+            .append("    if (g_hotspot.initialized && (g_hotspot.fast_bits & NEKO_FAST_PRIM_ARRAY) != 0) {\n")
+            .append("        jint arrayLen = neko_fast_array_length(env, arr);\n")
+            .append("        char *oop = (char*)neko_handle_oop((jobject)arr);\n")
+            .append("        if (oop != NULL && idx >= 0 && idx < arrayLen) {\n")
+            .append("            char *addr = oop + g_hotspot.primitive_array_base_offsets[").append(kindConstant).append("] + ((jlong)idx * g_hotspot.primitive_array_index_scales[").append(kindConstant).append("]);\n")
+            .append("            return *(").append(cType).append("*)addr;\n")
+            .append("        }\n")
+            .append("    }\n")
+            .append("    { ").append(cType).append(" value = (").append(cType).append(")0;\n")
+            .append("        neko_get_").append(wrapperStem).append("_array_region(env, (").append(cTypeForArray(prefix)).append(")arr, idx, 1, &value);\n")
+            .append("        return value;\n")
+            .append("    }\n")
+            .append("}\n\n")
+            .append("NEKO_FAST_INLINE void neko_fast_").append(prefix)
+            .append("astore(JNIEnv *env, jarray arr, jint idx, ").append(cType).append(" value) {\n")
+            .append("    if (g_hotspot.initialized && (g_hotspot.fast_bits & NEKO_FAST_PRIM_ARRAY) != 0) {\n")
+            .append("        jint arrayLen = neko_fast_array_length(env, arr);\n")
+            .append("        char *oop = (char*)neko_handle_oop((jobject)arr);\n")
+            .append("        if (oop != NULL && idx >= 0 && idx < arrayLen) {\n")
+            .append("            char *addr = oop + g_hotspot.primitive_array_base_offsets[").append(kindConstant).append("] + ((jlong)idx * g_hotspot.primitive_array_index_scales[").append(kindConstant).append("]);\n")
+            .append("            *(").append(cType).append("*)addr = value;\n")
+            .append("            return;\n")
+            .append("        }\n")
+            .append("    }\n")
+            .append("    neko_set_").append(wrapperStem).append("_array_region(env, (").append(cTypeForArray(prefix)).append(")arr, idx, 1, &value);\n")
+            .append("}\n\n");
+    }
+
+    private String cTypeForArray(String prefix) {
+        return switch (prefix) {
+            case "z" -> "jbooleanArray";
+            case "b" -> "jbyteArray";
+            case "c" -> "jcharArray";
+            case "s" -> "jshortArray";
+            case "i" -> "jintArray";
+            case "l" -> "jlongArray";
+            case "f" -> "jfloatArray";
+            case "d" -> "jdoubleArray";
+            default -> "jarray";
+        };
+    }
+
     private String jniType(Type type) {
         return switch (type.getSort()) {
             case Type.VOID -> "void";
@@ -852,7 +2016,13 @@ static jobject neko_multi_new_array(JNIEnv *env, jint num_dims, jint *dims, cons
     }
 
     private String c(String s) {
-        return s.replace("\\", "\\\\").replace("\"", "\\\"");
+        return s.replace("\\", "\\\\")
+            .replace("\"", "\\\"")
+            .replace("\n", "\\n")
+            .replace("\r", "\\r")
+            .replace("\t", "\\t")
+            .replace("\b", "\\b")
+            .replace("\f", "\\f");
     }
 
     private String renderParam(CVariable variable) {
@@ -860,5 +2030,66 @@ static jobject neko_multi_new_array(JNIEnv *env, jint num_dims, jint *dims, cons
             return "JNIEnv *env";
         }
         return variable.declaration();
+    }
+
+    private record MethodRef(String owner, String name, String desc, boolean isStatic) {}
+
+    private record FieldRef(String owner, String name, String desc, boolean isStatic) {}
+
+    private record StringRef(String cacheVar, String value) {}
+
+        private String jvalueAccessor(Type type) {
+        return switch (type.getSort()) {
+            case Type.BOOLEAN -> ".z";
+            case Type.BYTE -> ".b";
+            case Type.CHAR -> ".c";
+            case Type.SHORT -> ".s";
+            case Type.INT -> ".i";
+            case Type.FLOAT -> ".f";
+            case Type.LONG -> ".j";
+            case Type.DOUBLE -> ".d";
+            default -> ".l";
+        };
+    }
+
+    private record IcacheSiteRef(int ownerId, int methodId, int siteIndex, String bindingOwner, String methodKey) {
+        private String symbol() {
+            return "neko_icache_" + ownerId + '_' + methodId + '_' + siteIndex;
+        }
+    }
+
+    private record IcacheDirectStubRef(
+        int ownerId,
+        int methodId,
+        int siteIndex,
+        NativeMethodBinding binding,
+        Type[] args,
+        Type returnType
+    ) {
+        private String symbol() {
+            return "neko_icache_stub_" + ownerId + '_' + methodId + '_' + siteIndex;
+        }
+    }
+
+    private record IcacheMetaRef(
+        int ownerId,
+        int methodId,
+        int siteIndex,
+        String name,
+        String desc,
+        boolean isInterface,
+        String translatedClassSlot,
+        String translatedStubSymbol
+    ) {
+        private String symbol() {
+            return "neko_icache_meta_" + ownerId + '_' + methodId + '_' + siteIndex;
+        }
+    }
+
+    private static final class OwnerResolution {
+        private final Set<String> classes = new LinkedHashSet<>();
+        private final Set<MethodRef> methods = new LinkedHashSet<>();
+        private final Set<FieldRef> fields = new LinkedHashSet<>();
+        private final Set<StringRef> strings = new LinkedHashSet<>();
     }
 }

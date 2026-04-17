@@ -7,20 +7,18 @@ import dev.nekoobfuscator.core.ir.l3.CStatement;
 import dev.nekoobfuscator.core.ir.l3.CType;
 import dev.nekoobfuscator.core.ir.l3.CVariable;
 import dev.nekoobfuscator.native_.codegen.CCodeGenerator;
-import org.objectweb.asm.Handle;
 import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.Type;
 import org.objectweb.asm.tree.AbstractInsnNode;
 import org.objectweb.asm.tree.FrameNode;
-import org.objectweb.asm.tree.InvokeDynamicInsnNode;
 import org.objectweb.asm.tree.InsnNode;
 import org.objectweb.asm.tree.JumpInsnNode;
 import org.objectweb.asm.tree.LabelNode;
 import org.objectweb.asm.tree.LineNumberNode;
 import org.objectweb.asm.tree.LookupSwitchInsnNode;
+import org.objectweb.asm.tree.AnnotationNode;
 import org.objectweb.asm.tree.MethodInsnNode;
 import org.objectweb.asm.tree.MethodNode;
-import org.objectweb.asm.tree.MultiANewArrayInsnNode;
 import org.objectweb.asm.tree.LdcInsnNode;
 import org.objectweb.asm.tree.TableSwitchInsnNode;
 import org.objectweb.asm.tree.TryCatchBlockNode;
@@ -34,9 +32,9 @@ import java.util.List;
 import java.util.Map;
 
 public final class NativeTranslator {
-    private static final String INDY_HELPER_OWNER = "dev/nekoobfuscator/runtime/NekoIndyDispatch";
-    private static final String INDY_HELPER_NAME = "invoke";
-    private static final String INDY_HELPER_DESC = "(JLjava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;[Ljava/lang/Object;[Ljava/lang/Object;)Ljava/lang/Object;";
+    private static final String METHOD_HANDLE_DESC = "Ljava/lang/invoke/MethodHandle;";
+    private static final String LAMBDA_FORM_HIDDEN_DESC = "Ljava/lang/invoke/LambdaForm$Hidden;";
+    private static final String JDK_HIDDEN_DESC = "Ljdk/internal/vm/annotation/Hidden;";
 
     private final CCodeGenerator codeGenerator;
 
@@ -47,9 +45,11 @@ public final class NativeTranslator {
     public TranslationResult translate(List<MethodSelection> selectedMethods) {
         List<NativeMethodBinding> bindings = new ArrayList<>();
         Map<String, NativeMethodBinding> bindingMap = new HashMap<>();
+        Map<String, L1Class> ownersByName = new HashMap<>();
         Map<String, Integer> overloadCounts = new HashMap<>();
         for (MethodSelection selection : selectedMethods) {
             overloadCounts.merge(selection.owner().name() + '#' + selection.method().name(), 1, Integer::sum);
+            ownersByName.putIfAbsent(selection.owner().name(), selection.owner());
         }
         for (int i = 0; i < selectedMethods.size(); i++) {
             MethodSelection selection = selectedMethods.get(i);
@@ -72,9 +72,10 @@ public final class NativeTranslator {
             bindingMap.put(bindingKey(binding.ownerInternalName(), binding.methodName(), binding.descriptor()), binding);
         }
 
-        OpcodeTranslator opcodeTranslator = new OpcodeTranslator(codeGenerator, bindingMap);
+        OpcodeTranslator opcodeTranslator = new OpcodeTranslator(codeGenerator, bindingMap, new MethodHandleBridgeRegistry(ownersByName));
         List<CFunction> functions = new ArrayList<>(selectedMethods.size());
         for (int i = 0; i < selectedMethods.size(); i++) {
+            codeGenerator.registerBindingOwner(selectedMethods.get(i).owner().name());
             functions.add(translateMethod(selectedMethods.get(i), bindings.get(i), opcodeTranslator));
         }
 
@@ -213,6 +214,60 @@ public final class NativeTranslator {
         return !(insn instanceof LabelNode) && !(insn instanceof LineNumberNode) && !(insn instanceof FrameNode);
     }
 
+    private static final class MethodHandleBridgeRegistry implements OpcodeTranslator.MethodHandleBridgeFactory {
+        private final Map<String, L1Class> ownersByName;
+        private final Map<String, Integer> bridgeCounters = new HashMap<>();
+
+        private MethodHandleBridgeRegistry(Map<String, L1Class> ownersByName) {
+            this.ownersByName = ownersByName;
+        }
+
+        @Override
+        public OpcodeTranslator.MethodHandleBridge ensureBridge(String ownerInternalName, String invokeDescriptor) {
+            L1Class owner = ownersByName.get(ownerInternalName);
+            if (owner == null) {
+                return null;
+            }
+
+            Type[] invokeArgs = Type.getArgumentTypes(invokeDescriptor);
+            Type[] bridgeArgs = new Type[invokeArgs.length + 1];
+            bridgeArgs[0] = Type.getType(METHOD_HANDLE_DESC);
+            System.arraycopy(invokeArgs, 0, bridgeArgs, 1, invokeArgs.length);
+
+            Type returnType = Type.getReturnType(invokeDescriptor);
+            String bridgeName = "neko$mh$" + bridgeCounters.merge(ownerInternalName, 1, Integer::sum);
+            String bridgeDescriptor = Type.getMethodDescriptor(returnType, bridgeArgs);
+
+            MethodNode bridge = new MethodNode(Opcodes.ACC_STATIC | Opcodes.ACC_SYNTHETIC, bridgeName, bridgeDescriptor, null, null);
+            if (owner.version() >= 53) {
+                addHiddenAnnotation(bridge, LAMBDA_FORM_HIDDEN_DESC);
+                addHiddenAnnotation(bridge, JDK_HIDDEN_DESC);
+            }
+
+            int localIndex = 0;
+            for (Type argumentType : bridgeArgs) {
+                bridge.instructions.add(new VarInsnNode(argumentType.getOpcode(Opcodes.ILOAD), localIndex));
+                localIndex += argumentType.getSize();
+            }
+            bridge.instructions.add(new MethodInsnNode(Opcodes.INVOKEVIRTUAL, "java/lang/invoke/MethodHandle", "invokeExact", invokeDescriptor, false));
+            bridge.instructions.add(new InsnNode(returnType.getOpcode(Opcodes.IRETURN)));
+            bridge.maxStack = Math.max(localIndex, returnType.getSize());
+            bridge.maxLocals = localIndex;
+
+            owner.asmNode().methods.add(bridge);
+            owner.methods().add(new L1Method(owner, bridge));
+            owner.markDirty();
+            return new OpcodeTranslator.MethodHandleBridge(ownerInternalName, bridgeName, bridgeDescriptor);
+        }
+
+        private void addHiddenAnnotation(MethodNode bridge, String descriptor) {
+            if (bridge.visibleAnnotations == null) {
+                bridge.visibleAnnotations = new ArrayList<>();
+            }
+            bridge.visibleAnnotations.add(new AnnotationNode(descriptor));
+        }
+    }
+
     private StringConcatPattern renderedStringConcatPattern(AbstractInsnNode start) {
         if (!(start instanceof org.objectweb.asm.tree.TypeInsnNode newInsn)
             || start.getOpcode() != Opcodes.NEW
@@ -316,67 +371,6 @@ public final class NativeTranslator {
         return sb.toString();
     }
 
-    private String renderMultiANewArray(MultiANewArrayInsnNode insn) {
-        return "{ jint __dims[" + insn.dims + "]; for (int __k = " + (insn.dims - 1) + "; __k >= 0; __k--) __dims[__k] = POP_I(); PUSH_O(neko_multi_new_array(env, " + insn.dims + ", __dims, \"" + c(insn.desc) + "\")); }";
-    }
-
-    private String renderInvokeDynamic(MethodSelection selection, InvokeDynamicInsnNode indy, int indyIndex) {
-        Type[] argTypes = Type.getArgumentTypes(indy.desc);
-        Type ret = Type.getReturnType(indy.desc);
-        long siteId = stableSiteId(selection, indyIndex);
-        StringBuilder sb = new StringBuilder("{ ");
-        for (int i = argTypes.length - 1; i >= 0; i--) {
-            sb.append(jniTypeName(argTypes[i])).append(" arg").append(i).append(" = ").append(popForType(argTypes[i])).append("; ");
-        }
-        sb.append("jclass __indyCls = neko_find_class(env, \"").append(INDY_HELPER_OWNER).append("\"); ");
-        sb.append("jmethodID __indyMid = neko_get_static_method_id(env, __indyCls, \"").append(INDY_HELPER_NAME).append("\", \"").append(INDY_HELPER_DESC).append("\"); ");
-        sb.append("jclass __objCls = neko_find_class(env, \"java/lang/Object\"); ");
-        sb.append("jobjectArray __bootstrapArgs = neko_new_object_array(env, ").append(indy.bsmArgs.length).append(", __objCls, NULL); ");
-        for (int i = 0; i < indy.bsmArgs.length; i++) {
-            sb.append(renderBootstrapArg(i, indy.bsmArgs[i]));
-        }
-        sb.append("jobjectArray __invokeArgs = neko_new_object_array(env, ").append(argTypes.length).append(", __objCls, NULL); ");
-        for (int i = 0; i < argTypes.length; i++) {
-            sb.append("neko_set_object_array_element(env, __invokeArgs, ").append(i).append(", ")
-                .append(boxValueExpression(argTypes[i], "arg" + i)).append("); ");
-        }
-        sb.append("jvalue __callArgs[8]; ");
-        sb.append("__callArgs[0].j = (jlong)").append(siteId).append("LL; ");
-        sb.append("__callArgs[1].l = neko_new_string_utf(env, \"").append(c(indy.bsm.getOwner())).append("\"); ");
-        sb.append("__callArgs[2].l = neko_new_string_utf(env, \"").append(c(indy.bsm.getName())).append("\"); ");
-        sb.append("__callArgs[3].l = neko_new_string_utf(env, \"").append(c(indy.bsm.getDesc())).append("\"); ");
-        sb.append("__callArgs[4].l = neko_new_string_utf(env, \"").append(c(indy.name)).append("\"); ");
-        sb.append("__callArgs[5].l = neko_new_string_utf(env, \"").append(c(indy.desc)).append("\"); ");
-        sb.append("__callArgs[6].l = __bootstrapArgs; ");
-        sb.append("__callArgs[7].l = __invokeArgs; ");
-        sb.append("jobject __indyResult = neko_call_static_object_method_a(env, __indyCls, __indyMid, __callArgs); ");
-        sb.append(unboxReturn(ret, "__indyResult"));
-        sb.append(" }");
-        return sb.toString();
-    }
-
-    private String renderBootstrapArg(int index, Object arg) {
-        String valueExpr;
-        if (arg instanceof Integer i) {
-            valueExpr = "neko_box_int(env, " + i + ")";
-        } else if (arg instanceof Long l) {
-            valueExpr = "neko_box_long(env, " + l + "LL)";
-        } else if (arg instanceof Float f) {
-            valueExpr = "neko_box_float(env, " + formatFloat(f) + ")";
-        } else if (arg instanceof Double d) {
-            valueExpr = "neko_box_double(env, " + formatDouble(d) + ")";
-        } else if (arg instanceof String s) {
-            valueExpr = "neko_new_string_utf(env, \"" + c(s) + "\")";
-        } else if (arg instanceof Type type) {
-            valueExpr = "neko_new_string_utf(env, \"" + c(encodeType(type)) + "\")";
-        } else if (arg instanceof Handle handle) {
-            valueExpr = "neko_new_string_utf(env, \"" + c(encodeHandle(handle)) + "\")";
-        } else {
-            valueExpr = "NULL";
-        }
-        return "neko_set_object_array_element(env, __bootstrapArgs, " + index + ", " + valueExpr + "); ";
-    }
-
     private String renderExceptionDispatch(List<TryHandler> handlers) {
         StringBuilder sb = new StringBuilder();
         sb.append("if (neko_exception_check(env)) { ");
@@ -477,93 +471,6 @@ public final class NativeTranslator {
             case Type.ARRAY, Type.OBJECT -> "o";
             default -> "i";
         };
-    }
-
-    private String jniTypeName(Type type) {
-        return switch (type.getSort()) {
-            case Type.BOOLEAN -> "jboolean";
-            case Type.BYTE -> "jbyte";
-            case Type.CHAR -> "jchar";
-            case Type.SHORT -> "jshort";
-            case Type.INT -> "jint";
-            case Type.FLOAT -> "jfloat";
-            case Type.LONG -> "jlong";
-            case Type.DOUBLE -> "jdouble";
-            case Type.ARRAY -> "jarray";
-            case Type.VOID -> "void";
-            default -> "jobject";
-        };
-    }
-
-    private String popForType(Type type) {
-        return switch (type.getSort()) {
-            case Type.BOOLEAN, Type.BYTE, Type.CHAR, Type.SHORT, Type.INT -> "POP_I()";
-            case Type.FLOAT -> "POP_F()";
-            case Type.LONG -> "POP_L()";
-            case Type.DOUBLE -> "POP_D()";
-            default -> "POP_O()";
-        };
-    }
-
-    private String boxValueExpression(Type type, String valueExpr) {
-        return switch (type.getSort()) {
-            case Type.BOOLEAN -> "neko_box_boolean(env, " + valueExpr + ")";
-            case Type.BYTE -> "neko_box_byte(env, " + valueExpr + ")";
-            case Type.CHAR -> "neko_box_char(env, " + valueExpr + ")";
-            case Type.SHORT -> "neko_box_short(env, " + valueExpr + ")";
-            case Type.INT -> "neko_box_int(env, " + valueExpr + ")";
-            case Type.FLOAT -> "neko_box_float(env, " + valueExpr + ")";
-            case Type.LONG -> "neko_box_long(env, " + valueExpr + ")";
-            case Type.DOUBLE -> "neko_box_double(env, " + valueExpr + ")";
-            default -> valueExpr;
-        };
-    }
-
-    private String unboxReturn(Type ret, String objExpr) {
-        return switch (ret.getSort()) {
-            case Type.VOID -> "";
-            case Type.BOOLEAN -> "PUSH_I(neko_unbox_boolean(env, " + objExpr + ")); ";
-            case Type.BYTE -> "PUSH_I((jint)neko_unbox_byte(env, " + objExpr + ")); ";
-            case Type.CHAR -> "PUSH_I((jint)neko_unbox_char(env, " + objExpr + ")); ";
-            case Type.SHORT -> "PUSH_I((jint)neko_unbox_short(env, " + objExpr + ")); ";
-            case Type.INT -> "PUSH_I(neko_unbox_int(env, " + objExpr + ")); ";
-            case Type.FLOAT -> "PUSH_F(neko_unbox_float(env, " + objExpr + ")); ";
-            case Type.LONG -> "PUSH_L(neko_unbox_long(env, " + objExpr + ")); ";
-            case Type.DOUBLE -> "PUSH_D(neko_unbox_double(env, " + objExpr + ")); ";
-            default -> "PUSH_O(" + objExpr + "); ";
-        };
-    }
-
-    private long stableSiteId(MethodSelection selection, int indyIndex) {
-        String key = selection.owner().name() + '#' + selection.method().name() + selection.method().descriptor() + '#' + indyIndex;
-        long h = 1125899906842597L;
-        for (int i = 0; i < key.length(); i++) {
-            h = 31L * h + key.charAt(i);
-        }
-        return h & Long.MAX_VALUE;
-    }
-
-    private String encodeType(Type type) {
-        if (type.getSort() == Type.METHOD) {
-            return "\u0001NEKO_MT:" + type.getDescriptor();
-        }
-        return "\u0001NEKO_CT:" + type.getDescriptor();
-    }
-
-    private String encodeHandle(Handle handle) {
-        return "\u0001NEKO_H:" + handle.getTag() + "|" + handle.getOwner() + "|" + handle.getName() + "|" + handle.getDesc() + "|" + (handle.isInterface() ? '1' : '0');
-    }
-
-    private String formatFloat(float value) {
-        if (Float.isNaN(value)) return "NAN";
-        if (Float.isInfinite(value)) return value > 0 ? "INFINITY" : "-INFINITY";
-        return Float.toString(value) + 'f';
-    }
-
-    private String formatDouble(double value) {
-        if (Double.isNaN(value)) return "NAN";
-        if (Double.isInfinite(value)) return value > 0 ? "INFINITY" : "-INFINITY";
-        return Double.toString(value);
     }
 
     private String bindingKey(String owner, String name, String desc) {
