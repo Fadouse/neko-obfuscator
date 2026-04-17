@@ -33,8 +33,7 @@ native:
   includeAnnotated: true
   skipOnError: true
   outputPrefix: "neko_impl_"
-  resources:
-    encrypt: false
+  resourceEncryption: false
 
 keys:
   masterSeed: 12345
