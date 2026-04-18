@@ -53,6 +53,9 @@ public final class Wave3InvokeStaticEmitter {
         for (int i = 0; i < ctx.stringCacheCount(); i++) {
             sb.append("static jstring g_str_").append(i).append(" = NULL;\n");
         }
+        for (Map.Entry<String, Integer> entry : ctx.ownerBindIndex().entrySet()) {
+            sb.append("static jboolean g_owner_bound_").append(entry.getValue()).append(" = JNI_FALSE;   // ").append(entry.getKey()).append("\n");
+        }
         for (IcacheSiteRef site : ctx.icacheSites().values()) {
             sb.append("static neko_icache_site ").append(icacheSiteSymbol(site)).append(" = {0};   // ")
                 .append(site.bindingOwner()).append(" :: ").append(site.methodKey()).append(" [site ")
@@ -79,6 +82,102 @@ static void neko_raise_bound_resolution_error(JNIEnv *env, const char *errorClas
         return;
     }
     neko_throw_new(env, error, message);
+}
+
+static void neko_bind_log_failure(JNIEnv *env, const char *errorClass, const char *message) {
+    neko_raise_bound_resolution_error(env, errorClass, message);
+    if (env != NULL && neko_exception_check(env)) neko_exception_clear(env);
+}
+
+static void neko_bind_owner_class_slot(JNIEnv *env, jclass *slot, jclass self_class, const char *owner) {
+    jobject globalRef;
+    char message[256];
+    if (env == NULL || slot == NULL || *slot != NULL) return;
+    if (self_class == NULL) {
+        snprintf(message, sizeof(message), "Bind-time owner class missing: %s", owner == NULL ? "<null>" : owner);
+        neko_bind_log_failure(env, "java/lang/NoClassDefFoundError", message);
+        return;
+    }
+    globalRef = neko_new_global_ref(env, self_class);
+    if (globalRef == NULL || neko_exception_check(env)) {
+        if (neko_exception_check(env)) neko_exception_clear(env);
+        snprintf(message, sizeof(message), "Bind-time owner class global-ref failed: %s", owner == NULL ? "<null>" : owner);
+        neko_bind_log_failure(env, "java/lang/NoClassDefFoundError", message);
+        return;
+    }
+    *slot = (jclass)globalRef;
+}
+
+static void neko_bind_class_slot(JNIEnv *env, jclass *slot, const char *owner) {
+    jclass localClass;
+    jobject globalRef;
+    char message[256];
+    if (env == NULL || slot == NULL || *slot != NULL || owner == NULL) return;
+    localClass = neko_find_class(env, owner);
+    if (localClass == NULL || neko_exception_check(env)) {
+        if (neko_exception_check(env)) neko_exception_clear(env);
+        snprintf(message, sizeof(message), "Bind-time class resolution failed: %s", owner);
+        neko_bind_log_failure(env, "java/lang/NoClassDefFoundError", message);
+        if (localClass != NULL) neko_delete_local_ref(env, localClass);
+        return;
+    }
+    globalRef = neko_new_global_ref(env, localClass);
+    neko_delete_local_ref(env, localClass);
+    if (globalRef == NULL || neko_exception_check(env)) {
+        if (neko_exception_check(env)) neko_exception_clear(env);
+        snprintf(message, sizeof(message), "Bind-time class global-ref failed: %s", owner);
+        neko_bind_log_failure(env, "java/lang/NoClassDefFoundError", message);
+        return;
+    }
+    *slot = (jclass)globalRef;
+}
+
+static void neko_bind_method_slot(JNIEnv *env, jmethodID *slot, jclass cls, const char *owner, const char *name, const char *desc, jboolean isStatic) {
+    char message[320];
+    if (env == NULL || slot == NULL || *slot != NULL || cls == NULL || owner == NULL || name == NULL || desc == NULL) return;
+    *slot = isStatic ? neko_get_static_method_id(env, cls, name, desc) : neko_get_method_id(env, cls, name, desc);
+    if (*slot == NULL || neko_exception_check(env)) {
+        if (neko_exception_check(env)) neko_exception_clear(env);
+        snprintf(message, sizeof(message), "Bind-time %s method resolution failed: %s.%s%s", isStatic ? "static" : "instance", owner, name, desc);
+        neko_bind_log_failure(env, "java/lang/NoSuchMethodError", message);
+        *slot = NULL;
+    }
+}
+
+static void neko_bind_field_slot(JNIEnv *env, jfieldID *slot, jclass cls, const char *owner, const char *name, const char *desc, jboolean isStatic) {
+    char message[320];
+    if (env == NULL || slot == NULL || *slot != NULL || cls == NULL || owner == NULL || name == NULL || desc == NULL) return;
+    *slot = isStatic ? neko_get_static_field_id(env, cls, name, desc) : neko_get_field_id(env, cls, name, desc);
+    if (*slot == NULL || neko_exception_check(env)) {
+        if (neko_exception_check(env)) neko_exception_clear(env);
+        snprintf(message, sizeof(message), "Bind-time %s field resolution failed: %s.%s:%s", isStatic ? "static" : "instance", owner, name, desc);
+        neko_bind_log_failure(env, "java/lang/NoSuchFieldError", message);
+        *slot = NULL;
+    }
+}
+
+static void neko_bind_string_slot(JNIEnv *env, jstring *slot, const char *utf) {
+    jstring localString;
+    jobject globalRef;
+    char message[256];
+    if (env == NULL || slot == NULL || *slot != NULL || utf == NULL) return;
+    localString = neko_new_string_utf(env, utf);
+    if (localString == NULL || neko_exception_check(env)) {
+        if (neko_exception_check(env)) neko_exception_clear(env);
+        snprintf(message, sizeof(message), "Bind-time string resolution failed: %s", utf);
+        neko_bind_log_failure(env, "java/lang/IllegalStateException", message);
+        if (localString != NULL) neko_delete_local_ref(env, localString);
+        return;
+    }
+    globalRef = neko_new_global_ref(env, localString);
+    neko_delete_local_ref(env, localString);
+    if (globalRef == NULL || neko_exception_check(env)) {
+        if (neko_exception_check(env)) neko_exception_clear(env);
+        snprintf(message, sizeof(message), "Bind-time string global-ref failed: %s", utf);
+        neko_bind_log_failure(env, "java/lang/IllegalStateException", message);
+        return;
+    }
+    *slot = (jstring)globalRef;
 }
 
 static jclass neko_bound_class(JNIEnv *env, jclass slot, const char *owner) {
@@ -188,27 +287,6 @@ static void neko_log_wave3_ready(void) {
                     .append(c(fieldRef.name())).append("\", \"")
                     .append(c(fieldRef.desc())).append("\", ")
                     .append(fieldRef.isStatic() ? "JNI_TRUE" : "JNI_FALSE").append(");\n");
-                if (isPrimitiveFieldDescriptor(fieldRef.desc())) {
-                    if (fieldRef.isStatic()) {
-                        sb.append("    neko_bind_static_field_metadata(env, &")
-                            .append(generator.staticFieldBaseSlotName(fieldRef.owner(), fieldRef.name(), fieldRef.desc(), true))
-                            .append(", &")
-                            .append(generator.staticFieldOffsetSlotName(fieldRef.owner(), fieldRef.name(), fieldRef.desc(), true))
-                            .append(", ")
-                            .append(generator.classSlotName(fieldRef.owner()))
-                            .append(", \"")
-                            .append(c(fieldRef.name()))
-                            .append("\");\n");
-                    } else {
-                        sb.append("    neko_bind_instance_field_offset(env, &")
-                            .append(generator.fieldOffsetSlotName(fieldRef.owner(), fieldRef.name(), fieldRef.desc(), false))
-                            .append(", ")
-                            .append(generator.classSlotName(fieldRef.owner()))
-                            .append(", \"")
-                            .append(c(fieldRef.name()))
-                            .append("\");\n");
-                    }
-                }
             }
             for (StringRef stringRef : resolution.strings()) {
                 sb.append("    neko_bind_string_slot(env, &").append(stringRef.cacheVar()).append(", \"")

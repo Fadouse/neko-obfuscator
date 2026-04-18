@@ -289,8 +289,8 @@ public final class CCodeGenerator {
         sb.append(manifestEmitter.renderManifestSupport(bindings, signaturePlan));
         sb.append(assemblyStubEmitter.renderSignatureDispatchSupport(signaturePlan));
         sb.append(bootstrapEmitter.renderBootstrapSupport());
-        sb.append(wave3InvokeStaticEmitter.renderBindOwnerFunctions());
         sb.append(wave3InvokeStaticEmitter.renderBindSupport());
+        sb.append(wave3InvokeStaticEmitter.renderBindOwnerFunctions());
         sb.append(wave2FieldLdcEmitter.renderWave2Support());
         sb.append(wave3InvokeStaticEmitter.renderWave3Support());
         sb.append(wave4aRuntimeApiEmitter.renderWave4ASupport());
