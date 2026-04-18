@@ -4,6 +4,7 @@ import dev.nekoobfuscator.core.ir.l3.CFunction;
 import dev.nekoobfuscator.core.ir.l3.CStatement;
 import dev.nekoobfuscator.core.ir.l3.CType;
 import dev.nekoobfuscator.core.ir.l3.CVariable;
+import dev.nekoobfuscator.native_.codegen.emit.CEmissionContext;
 import dev.nekoobfuscator.native_.translator.NativeTranslator.NativeMethodBinding;
 import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.Type;
@@ -25,28 +26,43 @@ public final class CCodeGenerator {
 
     @SuppressWarnings("unused")
     private final SymbolTableGenerator symbols;
-    private final LinkedHashMap<String, Integer> classSlotIndex = new LinkedHashMap<>();
-    private final LinkedHashMap<String, Integer> methodSlotIndex = new LinkedHashMap<>();
-    private final LinkedHashMap<String, Integer> fieldSlotIndex = new LinkedHashMap<>();
-    private final LinkedHashMap<String, Integer> ownerBindIndex = new LinkedHashMap<>();
-    private final LinkedHashMap<String, OwnerResolution> ownerResolutions = new LinkedHashMap<>();
-    private final LinkedHashMap<String, Integer> icacheMethodIndex = new LinkedHashMap<>();
-    private final LinkedHashMap<String, IcacheSiteRef> icacheSites = new LinkedHashMap<>();
-    private final LinkedHashMap<String, IcacheDirectStubRef> icacheDirectStubs = new LinkedHashMap<>();
-    private final LinkedHashMap<String, IcacheMetaRef> icacheMetas = new LinkedHashMap<>();
-    private final LinkedHashMap<String, Integer> manifestMethodIndex = new LinkedHashMap<>();
-    private final LinkedHashMap<String, List<ManifestFieldSiteRef>> manifestFieldSites = new LinkedHashMap<>();
-    private final LinkedHashMap<String, List<ManifestInvokeSiteRef>> manifestInvokeSites = new LinkedHashMap<>();
-    private final LinkedHashMap<String, List<ManifestLdcSiteRef>> manifestLdcSites = new LinkedHashMap<>();
-    private final LinkedHashSet<String> manifestOwnerInternals = new LinkedHashSet<>();
-    private int stringCacheCount;
+    private final CEmissionContext ctx;
+    private final LinkedHashMap<String, Integer> classSlotIndex;
+    private final LinkedHashMap<String, Integer> methodSlotIndex;
+    private final LinkedHashMap<String, Integer> fieldSlotIndex;
+    private final LinkedHashMap<String, Integer> ownerBindIndex;
+    private final LinkedHashMap<String, OwnerResolution> ownerResolutions;
+    private final LinkedHashMap<String, Integer> icacheMethodIndex;
+    private final LinkedHashMap<String, IcacheSiteRef> icacheSites;
+    private final LinkedHashMap<String, IcacheDirectStubRef> icacheDirectStubs;
+    private final LinkedHashMap<String, IcacheMetaRef> icacheMetas;
+    private final LinkedHashMap<String, Integer> manifestMethodIndex;
+    private final LinkedHashMap<String, List<ManifestFieldSiteRef>> manifestFieldSites;
+    private final LinkedHashMap<String, List<ManifestInvokeSiteRef>> manifestInvokeSites;
+    private final LinkedHashMap<String, List<ManifestLdcSiteRef>> manifestLdcSites;
+    private final LinkedHashSet<String> manifestOwnerInternals;
 
     public CCodeGenerator(long masterSeed) {
-        this.symbols = new SymbolTableGenerator(masterSeed);
+        this.ctx = new CEmissionContext(masterSeed);
+        this.symbols = ctx.symbols();
+        this.classSlotIndex = ctx.classSlotIndex();
+        this.methodSlotIndex = ctx.methodSlotIndex();
+        this.fieldSlotIndex = ctx.fieldSlotIndex();
+        this.ownerBindIndex = ctx.ownerBindIndex();
+        this.ownerResolutions = ctx.ownerResolutions();
+        this.icacheMethodIndex = ctx.icacheMethodIndex();
+        this.icacheSites = ctx.icacheSites();
+        this.icacheDirectStubs = ctx.icacheDirectStubs();
+        this.icacheMetas = ctx.icacheMetas();
+        this.manifestMethodIndex = ctx.manifestMethodIndex();
+        this.manifestFieldSites = ctx.manifestFieldSites();
+        this.manifestInvokeSites = ctx.manifestInvokeSites();
+        this.manifestLdcSites = ctx.manifestLdcSites();
+        this.manifestOwnerInternals = ctx.manifestOwnerInternals();
     }
 
     public void configureStringCacheCount(int stringCacheCount) {
-        this.stringCacheCount = stringCacheCount;
+        ctx.setStringCacheCount(stringCacheCount);
     }
 
     public int internClass(String internalName) {
@@ -2489,7 +2505,7 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *reserved) {
             sb.append("static jlong g_static_off_").append(entry.getValue()).append(" = -1;\n");
             sb.append("static jobject g_static_base_").append(entry.getValue()).append(" = NULL;\n");
         }
-        for (int i = 0; i < stringCacheCount; i++) {
+        for (int i = 0; i < ctx.stringCacheCount(); i++) {
             sb.append("static jstring g_str_").append(i).append(" = NULL;\n");
         }
         for (IcacheSiteRef site : icacheSites.values()) {
@@ -5028,7 +5044,7 @@ static jvalue neko_icache_dispatch(
 
     private record StringRef(String cacheVar, String value) {}
 
-    private enum LdcKind {
+    public enum LdcKind {
         STRING("NEKO_LDC_KIND_STRING"),
         CLASS("NEKO_LDC_KIND_CLASS"),
         METHOD_HANDLE("NEKO_LDC_KIND_METHOD_HANDLE"),
@@ -5045,13 +5061,13 @@ static jvalue neko_icache_dispatch(
         }
     }
 
-    private record Utf8BlobRef(int methodId, int siteIndex, byte[] bytes) {
+    public record Utf8BlobRef(int methodId, int siteIndex, byte[] bytes) {
         private String symbol() {
             return "g_neko_utf8_" + methodId + '_' + siteIndex;
         }
     }
 
-    private record ManifestFieldSiteRef(
+    public record ManifestFieldSiteRef(
         int methodId,
         int siteIndex,
         int ownerClassIndex,
@@ -5066,7 +5082,7 @@ static jvalue neko_icache_dispatch(
         }
     }
 
-    private record ManifestInvokeSiteRef(
+    public record ManifestInvokeSiteRef(
         int methodId,
         int siteIndex,
         String owner,
@@ -5076,7 +5092,7 @@ static jvalue neko_icache_dispatch(
         String signatureKey
     ) {}
 
-    private record ManifestLdcSiteRef(int methodId, int siteIndex, LdcKind kind, String rawConstant, Utf8BlobRef blob) {
+    public record ManifestLdcSiteRef(int methodId, int siteIndex, LdcKind kind, String rawConstant, Utf8BlobRef blob) {
         private String arrayElementExpression() {
             return "&" + "g_neko_ldc_sites_" + methodId + '[' + siteIndex + ']';
         }
@@ -5096,13 +5112,13 @@ static jvalue neko_icache_dispatch(
         };
     }
 
-    private record IcacheSiteRef(int ownerId, int methodId, int siteIndex, String bindingOwner, String methodKey) {
+    public record IcacheSiteRef(int ownerId, int methodId, int siteIndex, String bindingOwner, String methodKey) {
         private String symbol() {
             return "neko_icache_" + ownerId + '_' + methodId + '_' + siteIndex;
         }
     }
 
-    private record IcacheDirectStubRef(
+    public record IcacheDirectStubRef(
         int ownerId,
         int methodId,
         int siteIndex,
@@ -5115,7 +5131,7 @@ static jvalue neko_icache_dispatch(
         }
     }
 
-    private record IcacheMetaRef(
+    public record IcacheMetaRef(
         int ownerId,
         int methodId,
         int siteIndex,
@@ -5130,7 +5146,7 @@ static jvalue neko_icache_dispatch(
         }
     }
 
-    private static final class OwnerResolution {
+    public static final class OwnerResolution {
         private final Set<String> classes = new LinkedHashSet<>();
         private final Set<MethodRef> methods = new LinkedHashSet<>();
         private final Set<FieldRef> fields = new LinkedHashSet<>();
