@@ -6,6 +6,7 @@ import dev.nekoobfuscator.core.ir.l3.CType;
 import dev.nekoobfuscator.core.ir.l3.CVariable;
 import dev.nekoobfuscator.native_.codegen.emit.BootstrapEmitter;
 import dev.nekoobfuscator.native_.codegen.emit.CEmissionContext;
+import dev.nekoobfuscator.native_.codegen.emit.AssemblyStubEmitter;
 import dev.nekoobfuscator.native_.codegen.emit.EntryPatchEmitter;
 import dev.nekoobfuscator.native_.codegen.emit.ManifestEmitter;
 import dev.nekoobfuscator.native_.codegen.emit.Wave1RuntimeEmitter;
@@ -38,6 +39,7 @@ public final class CCodeGenerator {
     private final Wave3InvokeStaticEmitter wave3InvokeStaticEmitter;
     private final Wave4aRuntimeApiEmitter wave4aRuntimeApiEmitter;
     private final EntryPatchEmitter entryPatchEmitter;
+    private final AssemblyStubEmitter assemblyStubEmitter;
     private final BootstrapEmitter bootstrapEmitter;
     private final LinkedHashMap<String, Integer> classSlotIndex;
     private final LinkedHashMap<String, Integer> methodSlotIndex;
@@ -59,6 +61,7 @@ public final class CCodeGenerator {
         this.wave3InvokeStaticEmitter = new Wave3InvokeStaticEmitter(this, ctx);
         this.wave4aRuntimeApiEmitter = new Wave4aRuntimeApiEmitter();
         this.entryPatchEmitter = new EntryPatchEmitter();
+        this.assemblyStubEmitter = new AssemblyStubEmitter(ctx);
         this.bootstrapEmitter = new BootstrapEmitter(wave1RuntimeEmitter);
         this.symbols = ctx.symbols();
         this.classSlotIndex = ctx.classSlotIndex();
@@ -234,30 +237,22 @@ public final class CCodeGenerator {
         sb.append("#include <jni.h>\n");
         sb.append("#include <stdint.h>\n\n");
         for (NativeMethodBinding binding : bindings) {
-            sb.append(renderPrototype(binding)).append(";\n");
+            sb.append(assemblyStubEmitter.renderPrototype(binding)).append(";\n");
         }
         sb.append("\n#endif\n");
         return sb.toString();
     }
 
     public List<GeneratedSource> generateAdditionalSources(List<NativeMethodBinding> bindings) {
-        if (bindings.isEmpty()) {
-            return List.of();
-        }
-        return List.of(new GeneratedSource("neko_stubs.S", generateAssembly(bindings)));
+        return assemblyStubEmitter.generateAdditionalSources(bindings);
     }
 
     public List<SignatureInfo> signatureInfos(List<NativeMethodBinding> bindings) {
-        SignaturePlan plan = buildSignaturePlan(bindings);
-        List<SignatureInfo> infos = new ArrayList<>(plan.signatures().size());
-        for (SignatureShape signature : plan.signatures()) {
-            infos.add(new SignatureInfo(signature.id(), signature.key()));
-        }
-        return infos;
+        return assemblyStubEmitter.signatureInfos(bindings);
     }
 
     public String generateSource(List<CFunction> functions, List<NativeMethodBinding> bindings) {
-        SignaturePlan signaturePlan = buildSignaturePlan(bindings);
+        SignaturePlan signaturePlan = assemblyStubEmitter.buildSignaturePlan(bindings);
         StringBuilder body = new StringBuilder();
         for (CFunction function : functions) {
             body.append(renderFunction(function)).append("\n");
@@ -292,7 +287,7 @@ public final class CCodeGenerator {
         sb.append(wave1RuntimeEmitter.renderRuntimeSupport());
         sb.append(wave1RuntimeEmitter.renderHotSpotSupport());
         sb.append(manifestEmitter.renderManifestSupport(bindings, signaturePlan));
-        sb.append(renderSignatureDispatchSupport(signaturePlan));
+        sb.append(assemblyStubEmitter.renderSignatureDispatchSupport(signaturePlan));
         sb.append(bootstrapEmitter.renderBootstrapSupport());
         sb.append(wave3InvokeStaticEmitter.renderBindOwnerFunctions());
         sb.append(wave3InvokeStaticEmitter.renderBindSupport());
@@ -305,27 +300,6 @@ public final class CCodeGenerator {
         sb.append(wave3InvokeStaticEmitter.renderIcacheMetas());
         sb.append(body);
         sb.append(renderJniOnLoad());
-        return sb.toString();
-    }
-
-    private String renderPrototype(NativeMethodBinding binding) {
-        StringBuilder sb = new StringBuilder();
-        sb.append(rawFunctionReturnType(Type.getReturnType(binding.descriptor()))).append(' ')
-            .append(binding.cFunctionName()).append('(');
-        if (!binding.isStatic()) {
-            sb.append("void* _this");
-        }
-        Type[] args = Type.getArgumentTypes(binding.descriptor());
-        if (binding.isStatic() && args.length == 0) {
-            sb.append("void");
-        }
-        for (int i = 0; i < args.length; i++) {
-            if (i > 0 || !binding.isStatic()) {
-                sb.append(", ");
-            }
-            sb.append(rawFunctionParamType(args[i])).append(" p").append(i);
-        }
-        sb.append(")");
         return sb.toString();
     }
 
@@ -379,84 +353,6 @@ public final class CCodeGenerator {
             return "    /* " + comment.text() + " */\n";
         }
         throw new IllegalStateException("Unsupported C statement in generator: " + statement.getClass().getSimpleName());
-    }
-
-    private String renderSignatureDispatchSupport(SignaturePlan signaturePlan) {
-        if (signaturePlan.signatures().isEmpty()) {
-            return "";
-        }
-        StringBuilder sb = new StringBuilder();
-        sb.append("// === Signature dispatch helpers ===\n");
-        for (SignatureShape signature : signaturePlan.signatures()) {
-            sb.append(renderSignatureDispatcher(signature, false));
-            sb.append(renderSignatureDispatcher(signature, true));
-        }
-        sb.append('\n');
-        return sb.toString();
-    }
-
-    private String renderSignatureDispatcher(SignatureShape signature, boolean instance) {
-        StringBuilder sb = new StringBuilder();
-        String returnType = rawType(signature.returnKind());
-        String dispatcherName = "neko_sig_" + signature.id() + (instance ? "_dispatch_instance" : "_dispatch_static");
-        String functionPointerType = "neko_sig_" + signature.id() + (instance ? "_instance_fn" : "_static_fn");
-        List<String> params = new ArrayList<>();
-        List<String> args = new ArrayList<>();
-
-        params.add("const NekoManifestMethod* entry");
-        if (instance) {
-            params.add("void* _this");
-            args.add("_this");
-        }
-        for (int i = 0; i < signature.argKinds().size(); i++) {
-            params.add(rawType(signature.argKinds().get(i)) + " p" + i);
-            args.add("p" + i);
-        }
-
-        sb.append("typedef ").append(returnType).append(" (*").append(functionPointerType).append(")(");
-        if (instance) {
-            sb.append("void*");
-            for (int i = 0; i < signature.argKinds().size(); i++) {
-                sb.append(", ").append(rawType(signature.argKinds().get(i)));
-            }
-        } else {
-            for (int i = 0; i < signature.argKinds().size(); i++) {
-                if (i > 0) {
-                    sb.append(", ");
-                }
-                sb.append(rawType(signature.argKinds().get(i)));
-            }
-            if (signature.argKinds().isEmpty()) {
-                sb.append("void");
-            }
-        }
-        sb.append(");\n");
-
-        sb.append("__attribute__((visibility(\"hidden\"))) ").append(returnType).append(' ').append(dispatcherName).append('(');
-        for (int i = 0; i < params.size(); i++) {
-            if (i > 0) {
-                sb.append(", ");
-            }
-            sb.append(params.get(i));
-        }
-        sb.append(") {\n");
-        if (signature.returnKind() == 'V') {
-            sb.append("    ((").append(functionPointerType).append(")entry->impl_fn)(");
-        } else {
-            sb.append("    return ((").append(functionPointerType).append(")entry->impl_fn)(");
-        }
-        for (int i = 0; i < args.size(); i++) {
-            if (i > 0) {
-                sb.append(", ");
-            }
-            sb.append(args.get(i));
-        }
-        sb.append(");\n");
-        if (signature.returnKind() == 'V') {
-            sb.append("    return;\n");
-        }
-        sb.append("}\n\n");
-        return sb.toString();
     }
 
     private String renderJniOnLoad() {
@@ -530,404 +426,6 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *reserved) {
         return false;
     }
 
-    private String generateAssembly(List<NativeMethodBinding> bindings) {
-        SignaturePlan signaturePlan = buildSignaturePlan(bindings);
-        StringBuilder sb = new StringBuilder();
-        sb.append("#if !defined(__x86_64__) || !defined(__linux__)\n");
-        sb.append("#error \"M3 stubs only support x86_64 Linux\"\n");
-        sb.append("#endif\n\n");
-        sb.append(".intel_syntax noprefix\n");
-        sb.append(".text\n\n");
-        sb.append("# Signature-stub sketch:\n");
-        sb.append("#   i2i: lookup manifest entry by Method*, pop return address, unpack interpreter slots,\n");
-        sb.append("#        call hidden C dispatcher, restore sender_sp (r13) and jump to continuation.\n");
-        sb.append("#   c2i: lookup manifest entry by Method*, materialize any stack-overflow args for the\n");
-        sb.append("#        hidden C dispatcher, put entry in rdi, call dispatcher, return to compiled caller.\n\n");
-        for (SignatureShape signature : signaturePlan.signatures()) {
-            appendSignatureAssembly(sb, signature);
-        }
-        return sb.toString();
-    }
-
-    private void appendSignatureAssembly(StringBuilder sb, SignatureShape signature) {
-        String prefix = "neko_sig_" + signature.id();
-        DispatchPlan i2iStatic = buildI2iDispatchPlan(buildLogicalArgKinds(signature, false));
-        DispatchPlan i2iInstance = buildI2iDispatchPlan(buildLogicalArgKinds(signature, true));
-        DispatchPlan c2iStatic = buildC2iDispatchPlan(buildLogicalArgKinds(signature, false));
-        DispatchPlan c2iInstance = buildC2iDispatchPlan(buildLogicalArgKinds(signature, true));
-
-        sb.append(".globl ").append(prefix).append("_i2i\n");
-        sb.append(".type ").append(prefix).append("_i2i, @function\n");
-        sb.append(prefix).append("_i2i:\n");
-        appendManifestLookup(sb, prefix + "_i2i_found", prefix + "_i2i_fail");
-        sb.append("    test WORD PTR [rax + ").append(MANIFEST_FLAGS_OFFSET).append("], 1\n");
-        sb.append("    jnz ").append(prefix).append("_i2i_static\n");
-        appendI2iMode(sb, signature, i2iInstance, true, prefix + "_i2i_instance");
-        sb.append(prefix).append("_i2i_static:\n");
-        appendI2iMode(sb, signature, i2iStatic, false, prefix + "_i2i_static");
-        sb.append(prefix).append("_i2i_fail:\n");
-        sb.append("    pop r10\n");
-        appendZeroReturn(sb, signature.returnKind());
-        sb.append("    mov rsp, r13\n");
-        sb.append("    jmp r10\n\n");
-
-        sb.append(".globl ").append(prefix).append("_c2i\n");
-        sb.append(".type ").append(prefix).append("_c2i, @function\n");
-        sb.append(prefix).append("_c2i:\n");
-        appendManifestLookup(sb, prefix + "_c2i_found", prefix + "_c2i_fail");
-        sb.append("    test WORD PTR [rax + ").append(MANIFEST_FLAGS_OFFSET).append("], 1\n");
-        sb.append("    jnz ").append(prefix).append("_c2i_static\n");
-        appendC2iMode(sb, signature, c2iInstance, true, prefix + "_c2i_instance");
-        sb.append(prefix).append("_c2i_static:\n");
-        appendC2iMode(sb, signature, c2iStatic, false, prefix + "_c2i_static");
-        sb.append(prefix).append("_c2i_fail:\n");
-        appendZeroReturn(sb, signature.returnKind());
-        sb.append("    ret\n\n");
-    }
-
-    private void appendManifestLookup(StringBuilder sb, String foundLabel, String failLabel) {
-        sb.append("    lea r10, [rip + g_neko_manifest_method_stars]\n");
-        sb.append("    xor r11d, r11d\n");
-        sb.append(foundLabel).append("_scan:\n");
-        sb.append("    cmp r11d, DWORD PTR [rip + g_neko_manifest_method_count]\n");
-        sb.append("    jae ").append(failLabel).append("\n");
-        sb.append("    cmp QWORD PTR [r10 + r11 * 8], rbx\n");
-        sb.append("    je ").append(foundLabel).append("\n");
-        sb.append("    inc r11d\n");
-        sb.append("    jmp ").append(foundLabel).append("_scan\n");
-        sb.append(foundLabel).append(":\n");
-        sb.append("    mov rax, r11\n");
-        sb.append("    imul rax, rax, ").append(MANIFEST_ENTRY_SIZE).append("\n");
-        sb.append("    lea r10, [rip + g_neko_manifest_methods]\n");
-        sb.append("    add rax, r10\n");
-    }
-
-    private void appendI2iMode(StringBuilder sb, SignatureShape signature, DispatchPlan plan, boolean instance, String labelPrefix) {
-        sb.append("    pop r10\n");
-        sb.append("    mov r11, rsp\n");
-        sb.append("    sub rsp, ").append(plan.frameBytes()).append("\n");
-        sb.append("    mov QWORD PTR [rsp + ").append(plan.entrySaveOffset()).append("], rax\n");
-        sb.append("    mov QWORD PTR [rsp + ").append(plan.retSaveOffset()).append("], r10\n");
-        emitStackCopiesFromInterpreter(sb, plan, labelPrefix);
-        emitRegisterLoadsFromInterpreter(sb, plan, labelPrefix);
-        sb.append("    mov rdi, QWORD PTR [rsp + ").append(plan.entrySaveOffset()).append("]\n");
-        sb.append("    call neko_sig_").append(signature.id()).append(instance ? "_dispatch_instance" : "_dispatch_static").append("\n");
-        if (signature.returnKind() == 'L') {
-            sb.append("    mov rdi, rax\n");
-            sb.append("    call neko_encode_heap_oop_runtime\n");
-        }
-        sb.append("    mov r10, QWORD PTR [rsp + ").append(plan.retSaveOffset()).append("]\n");
-        sb.append("    mov rsp, r13\n");
-        sb.append("    jmp r10\n");
-    }
-
-    private void appendC2iMode(StringBuilder sb, SignatureShape signature, DispatchPlan plan, boolean instance, String labelPrefix) {
-        sb.append("    sub rsp, ").append(plan.frameBytes()).append("\n");
-        sb.append("    mov QWORD PTR [rsp + ").append(plan.entrySaveOffset()).append("], rax\n");
-        for (int gpIndex = 0; gpIndex < plan.sourceLayout().gpRegisterCount(); gpIndex++) {
-            sb.append("    mov QWORD PTR [rsp + ").append(plan.gpSpillBaseOffset() + (gpIndex * 8)).append("], ").append(javaGpRegister64(gpIndex)).append("\n");
-        }
-        emitStackCopiesFromCompiled(sb, plan, labelPrefix);
-        sb.append("    mov rdi, QWORD PTR [rsp + ").append(plan.entrySaveOffset()).append("]\n");
-        sb.append("    call neko_sig_").append(signature.id()).append(instance ? "_dispatch_instance" : "_dispatch_static").append("\n");
-        sb.append("    add rsp, ").append(plan.frameBytes()).append("\n");
-        sb.append("    ret\n");
-    }
-
-    private void emitStackCopiesFromInterpreter(StringBuilder sb, DispatchPlan plan, String labelPrefix) {
-        for (int i = 0; i < plan.logicalArgKinds().size(); i++) {
-            ArgLocation dest = plan.destLayout().locations().get(i);
-            if (dest.kind() != ArgLocationKind.STACK) {
-                continue;
-            }
-            ArgLocation source = plan.sourceLayout().locations().get(i);
-            emitInterpreterLoadToStack(sb, plan, source, dest.index(), plan.logicalArgKinds().get(i), labelPrefix + "_stack_" + i);
-        }
-    }
-
-    private void emitRegisterLoadsFromInterpreter(StringBuilder sb, DispatchPlan plan, String labelPrefix) {
-        for (int i = 0; i < plan.logicalArgKinds().size(); i++) {
-            ArgLocation dest = plan.destLayout().locations().get(i);
-            ArgLocation source = plan.sourceLayout().locations().get(i);
-            char kind = plan.logicalArgKinds().get(i);
-            if (dest.kind() == ArgLocationKind.GP_REG) {
-                emitInterpreterLoadToGpRegister(sb, source, dispatcherGpRegister(dest.index()), dispatcherGpRegister32(dest.index()), kind);
-            } else if (dest.kind() == ArgLocationKind.FP_REG) {
-                emitInterpreterLoadToFpRegister(sb, source, fpRegister(dest.index()), kind);
-            }
-        }
-    }
-
-    private void emitStackCopiesFromCompiled(StringBuilder sb, DispatchPlan plan, String labelPrefix) {
-        for (int i = 0; i < plan.logicalArgKinds().size(); i++) {
-            ArgLocation dest = plan.destLayout().locations().get(i);
-            if (dest.kind() != ArgLocationKind.STACK) {
-                continue;
-            }
-            ArgLocation source = plan.sourceLayout().locations().get(i);
-            emitCompiledLoadToStack(sb, plan, source, dest.index(), plan.logicalArgKinds().get(i), labelPrefix + "_stack_" + i);
-        }
-    }
-
-    private void emitInterpreterLoadToStack(StringBuilder sb, DispatchPlan plan, ArgLocation source, int destStackSlot, char kind, String labelPrefix) {
-        int sourceOffset = source.index() * 8;
-        int destOffset = destStackSlot * 8;
-        if (kind == 'F') {
-            sb.append("    movss xmm15, DWORD PTR [r11 + ").append(sourceOffset).append("]\n");
-            sb.append("    movss DWORD PTR [rsp + ").append(destOffset).append("], xmm15\n");
-            return;
-        }
-        if (kind == 'D') {
-            sb.append("    movsd xmm15, QWORD PTR [r11 + ").append(sourceOffset).append("]\n");
-            sb.append("    movsd QWORD PTR [rsp + ").append(destOffset).append("], xmm15\n");
-            return;
-        }
-        if (kind == 'L' || kind == 'J') {
-            sb.append("    mov rax, QWORD PTR [r11 + ").append(sourceOffset).append("]\n");
-            sb.append("    mov QWORD PTR [rsp + ").append(destOffset).append("], rax\n");
-            return;
-        }
-        sb.append("    mov eax, DWORD PTR [r11 + ").append(sourceOffset).append("]\n");
-        sb.append("    mov DWORD PTR [rsp + ").append(destOffset).append("], eax\n");
-    }
-
-    private void emitInterpreterLoadToGpRegister(StringBuilder sb, ArgLocation source, String register64, String register32, char kind) {
-        int sourceOffset = source.index() * 8;
-        if (kind == 'L' || kind == 'J') {
-            sb.append("    mov ").append(register64).append(", QWORD PTR [r11 + ").append(sourceOffset).append("]\n");
-        } else {
-            sb.append("    mov ").append(register32).append(", DWORD PTR [r11 + ").append(sourceOffset).append("]\n");
-        }
-    }
-
-    private void emitInterpreterLoadToFpRegister(StringBuilder sb, ArgLocation source, String xmmRegister, char kind) {
-        int sourceOffset = source.index() * 8;
-        if (kind == 'F') {
-            sb.append("    movss ").append(xmmRegister).append(", DWORD PTR [r11 + ").append(sourceOffset).append("]\n");
-        } else {
-            sb.append("    movsd ").append(xmmRegister).append(", QWORD PTR [r11 + ").append(sourceOffset).append("]\n");
-        }
-    }
-
-    private void emitCompiledLoadToStack(StringBuilder sb, DispatchPlan plan, ArgLocation source, int destStackSlot, char kind, String labelPrefix) {
-        int destOffset = destStackSlot * 8;
-        switch (source.kind()) {
-            case GP_REG -> {
-                int spillOffset = plan.gpSpillBaseOffset() + (source.index() * 8);
-                if (kind == 'L' || kind == 'J') {
-                    sb.append("    mov rax, QWORD PTR [rsp + ").append(spillOffset).append("]\n");
-                    sb.append("    mov QWORD PTR [rsp + ").append(destOffset).append("], rax\n");
-                } else {
-                    sb.append("    mov eax, DWORD PTR [rsp + ").append(spillOffset).append("]\n");
-                    sb.append("    mov DWORD PTR [rsp + ").append(destOffset).append("], eax\n");
-                }
-            }
-            case STACK -> {
-                int sourceOffset = plan.frameBytes() + 8 + (source.index() * 8);
-                if (kind == 'F') {
-                    sb.append("    movss xmm15, DWORD PTR [rsp + ").append(sourceOffset).append("]\n");
-                    sb.append("    movss DWORD PTR [rsp + ").append(destOffset).append("], xmm15\n");
-                } else if (kind == 'D') {
-                    sb.append("    movsd xmm15, QWORD PTR [rsp + ").append(sourceOffset).append("]\n");
-                    sb.append("    movsd QWORD PTR [rsp + ").append(destOffset).append("], xmm15\n");
-                } else if (kind == 'L' || kind == 'J') {
-                    sb.append("    mov rax, QWORD PTR [rsp + ").append(sourceOffset).append("]\n");
-                    sb.append("    mov QWORD PTR [rsp + ").append(destOffset).append("], rax\n");
-                } else {
-                    sb.append("    mov eax, DWORD PTR [rsp + ").append(sourceOffset).append("]\n");
-                    sb.append("    mov DWORD PTR [rsp + ").append(destOffset).append("], eax\n");
-                }
-            }
-            default -> throw new IllegalStateException("Unexpected compiled-source location: " + source.kind());
-        }
-    }
-
-    private DispatchPlan buildI2iDispatchPlan(List<Character> logicalArgKinds) {
-        CallingLayout sourceLayout = buildInterpreterLayout(logicalArgKinds);
-        CallingLayout destLayout = buildDispatcherLayout(logicalArgKinds);
-        int callStackBytes = destLayout.stackSlotCount() * 8;
-        int entrySaveOffset = callStackBytes;
-        int retSaveOffset = entrySaveOffset + 8;
-        int desiredBytes = callStackBytes + 16;
-        int frameBytes = alignForPopCallFrame(desiredBytes);
-        return new DispatchPlan(logicalArgKinds, sourceLayout, destLayout, frameBytes, entrySaveOffset, retSaveOffset, -1);
-    }
-
-    private DispatchPlan buildC2iDispatchPlan(List<Character> logicalArgKinds) {
-        CallingLayout sourceLayout = buildJavaLayout(logicalArgKinds);
-        CallingLayout destLayout = buildDispatcherLayout(logicalArgKinds);
-        int callStackBytes = destLayout.stackSlotCount() * 8;
-        int entrySaveOffset = callStackBytes;
-        int gpSpillBaseOffset = entrySaveOffset + 8;
-        int frameBytes = alignUp(callStackBytes + 8 + (sourceLayout.gpRegisterCount() * 8), 16);
-        return new DispatchPlan(logicalArgKinds, sourceLayout, destLayout, frameBytes, entrySaveOffset, -1, gpSpillBaseOffset);
-    }
-
-    private CallingLayout buildJavaLayout(List<Character> logicalArgKinds) {
-        return buildAbiLayout(logicalArgKinds, 6, 8);
-    }
-
-    private CallingLayout buildDispatcherLayout(List<Character> logicalArgKinds) {
-        return buildAbiLayout(logicalArgKinds, 5, 8);
-    }
-
-    private CallingLayout buildAbiLayout(List<Character> logicalArgKinds, int gpRegisterLimit, int fpRegisterLimit) {
-        List<ArgLocation> locations = new ArrayList<>(logicalArgKinds.size());
-        int gpUsed = 0;
-        int fpUsed = 0;
-        int stackUsed = 0;
-        for (char kind : logicalArgKinds) {
-            if (isFloatingKind(kind)) {
-                if (fpUsed < fpRegisterLimit) {
-                    locations.add(new ArgLocation(ArgLocationKind.FP_REG, fpUsed++));
-                } else {
-                    locations.add(new ArgLocation(ArgLocationKind.STACK, stackUsed++));
-                }
-            } else if (gpUsed < gpRegisterLimit) {
-                locations.add(new ArgLocation(ArgLocationKind.GP_REG, gpUsed++));
-            } else {
-                locations.add(new ArgLocation(ArgLocationKind.STACK, stackUsed++));
-            }
-        }
-        return new CallingLayout(locations, stackUsed, gpUsed);
-    }
-
-    private CallingLayout buildInterpreterLayout(List<Character> logicalArgKinds) {
-        List<ArgLocation> locations = new ArrayList<>(logicalArgKinds.size());
-        int totalSlots = 0;
-        for (char kind : logicalArgKinds) {
-            totalSlots += slotsForKind(kind);
-        }
-        int remainingSlots = totalSlots;
-        for (char kind : logicalArgKinds) {
-            int slots = slotsForKind(kind);
-            locations.add(new ArgLocation(ArgLocationKind.INTERPRETER_STACK, remainingSlots - slots));
-            remainingSlots -= slots;
-        }
-        return new CallingLayout(locations, 0, 0);
-    }
-
-    private List<Character> buildLogicalArgKinds(SignatureShape signature, boolean instance) {
-        List<Character> logicalArgKinds = new ArrayList<>(signature.argKinds().size() + (instance ? 1 : 0));
-        if (instance) {
-            logicalArgKinds.add('L');
-        }
-        logicalArgKinds.addAll(signature.argKinds());
-        return logicalArgKinds;
-    }
-
-    private int alignForPopCallFrame(int bytes) {
-        int remainder = Math.floorMod(bytes, 16);
-        if (remainder == 8) {
-            return bytes;
-        }
-        return bytes + Math.floorMod(8 - remainder, 16);
-    }
-
-    private int alignUp(int value, int alignment) {
-        if (value == 0) {
-            return 0;
-        }
-        return ((value + alignment - 1) / alignment) * alignment;
-    }
-
-    private int slotsForKind(char kind) {
-        return isWideKind(kind) ? 2 : 1;
-    }
-
-    private String javaGpRegister64(int index) {
-        return switch (index) {
-            case 0 -> "rsi";
-            case 1 -> "rdx";
-            case 2 -> "rcx";
-            case 3 -> "r8";
-            case 4 -> "r9";
-            case 5 -> "rdi";
-            default -> throw new IllegalArgumentException("Unexpected Java GP register index: " + index);
-        };
-    }
-
-    private String dispatcherGpRegister(int index) {
-        return switch (index) {
-            case 0 -> "rsi";
-            case 1 -> "rdx";
-            case 2 -> "rcx";
-            case 3 -> "r8";
-            case 4 -> "r9";
-            default -> throw new IllegalArgumentException("Unexpected dispatcher GP register index: " + index);
-        };
-    }
-
-    private String dispatcherGpRegister32(int index) {
-        return switch (index) {
-            case 0 -> "esi";
-            case 1 -> "edx";
-            case 2 -> "ecx";
-            case 3 -> "r8d";
-            case 4 -> "r9d";
-            default -> throw new IllegalArgumentException("Unexpected dispatcher GP register index: " + index);
-        };
-    }
-
-    private String fpRegister(int index) {
-        return "xmm" + index;
-    }
-
-    private void appendZeroReturn(StringBuilder sb, char returnKind) {
-        if (returnKind == 'F' || returnKind == 'D') {
-            sb.append("    pxor xmm0, xmm0\n");
-        } else {
-            sb.append("    xor eax, eax\n");
-        }
-    }
-
-    private SignaturePlan buildSignaturePlan(List<NativeMethodBinding> bindings) {
-        LinkedHashMap<String, SignatureShape> signaturesByKey = new LinkedHashMap<>();
-        List<Integer> bindingSignatureIds = new ArrayList<>(bindings.size());
-        int maxArgCount = 0;
-        for (NativeMethodBinding binding : bindings) {
-            SignatureShape signature = registerSignatureShape(signaturesByKey, binding.descriptor());
-            bindingSignatureIds.add(signature.id());
-            maxArgCount = Math.max(maxArgCount, signature.argKinds().size());
-        }
-        for (List<ManifestInvokeSiteRef> sites : manifestInvokeSites.values()) {
-            for (ManifestInvokeSiteRef site : sites) {
-                SignatureShape signature = registerSignatureShape(signaturesByKey, site.desc());
-                maxArgCount = Math.max(maxArgCount, signature.argKinds().size());
-            }
-        }
-        Map<String, Integer> signatureIdsByKey = new LinkedHashMap<>();
-        for (SignatureShape signature : signaturesByKey.values()) {
-            signatureIdsByKey.put(signature.key(), signature.id());
-        }
-        return new SignaturePlan(List.copyOf(signaturesByKey.values()), List.copyOf(bindingSignatureIds), maxArgCount, Map.copyOf(signatureIdsByKey));
-    }
-
-    private SignatureShape registerSignatureShape(LinkedHashMap<String, SignatureShape> signaturesByKey, String descriptor) {
-        Type[] argumentTypes = Type.getArgumentTypes(descriptor);
-        List<Character> argKinds = new ArrayList<>(argumentTypes.length);
-        String key = signatureKey(descriptor);
-        char returnKind = collapseKind(Type.getReturnType(descriptor));
-        for (Type argumentType : argumentTypes) {
-            argKinds.add(collapseKind(argumentType));
-        }
-        return signaturesByKey.computeIfAbsent(key, ignored -> new SignatureShape(signaturesByKey.size(), key, returnKind, List.copyOf(argKinds)));
-    }
-
-    private String signatureKey(String descriptor) {
-        Type[] argumentTypes = Type.getArgumentTypes(descriptor);
-        StringBuilder key = new StringBuilder();
-        key.append('(');
-        for (Type argumentType : argumentTypes) {
-            key.append(collapseKind(argumentType));
-        }
-        return key.append(')').append(collapseKind(Type.getReturnType(descriptor))).toString();
-    }
-
-    private String rawFunctionReturnType(Type type) {
-        return rawType(collapseKind(type));
-    }
-
     private String rawFunctionReturnType(CType type) {
         return switch (type) {
             case VOID -> "void";
@@ -939,46 +437,8 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *reserved) {
         };
     }
 
-    private String rawFunctionParamType(Type type) {
-        return rawType(collapseKind(type));
-    }
-
     private String rawFunctionParamType(CVariable variable) {
         return rawFunctionReturnType(variable.type());
-    }
-
-    private String rawType(char kind) {
-        return switch (kind) {
-            case 'V' -> "void";
-            case 'J' -> "int64_t";
-            case 'F' -> "float";
-            case 'D' -> "double";
-            case 'L' -> "void*";
-            default -> "int32_t";
-        };
-    }
-
-    private char collapseKind(Type type) {
-        return switch (type.getSort()) {
-            case Type.VOID -> 'V';
-            case Type.BOOLEAN -> 'Z';
-            case Type.BYTE -> 'B';
-            case Type.SHORT -> 'S';
-            case Type.CHAR -> 'C';
-            case Type.INT -> 'I';
-            case Type.LONG -> 'J';
-            case Type.FLOAT -> 'F';
-            case Type.DOUBLE -> 'D';
-            default -> 'L';
-        };
-    }
-
-    private boolean isWideKind(char kind) {
-        return kind == 'J' || kind == 'D';
-    }
-
-    private boolean isFloatingKind(char kind) {
-        return kind == 'F' || kind == 'D';
     }
 
     private String renderParam(CVariable variable) {
@@ -989,18 +449,18 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *reserved) {
 
     public record SignatureInfo(int id, String key) {}
 
-    private enum ArgLocationKind {
+    public enum ArgLocationKind {
         GP_REG,
         FP_REG,
         STACK,
         INTERPRETER_STACK
     }
 
-    private record ArgLocation(ArgLocationKind kind, int index) {}
+    public record ArgLocation(ArgLocationKind kind, int index) {}
 
-    private record CallingLayout(List<ArgLocation> locations, int stackSlotCount, int gpRegisterCount) {}
+    public record CallingLayout(List<ArgLocation> locations, int stackSlotCount, int gpRegisterCount) {}
 
-    private record DispatchPlan(
+    public record DispatchPlan(
         List<Character> logicalArgKinds,
         CallingLayout sourceLayout,
         CallingLayout destLayout,
