@@ -177,7 +177,7 @@ static void *g_neko_libjvm_handle = NULL;
 static int neko_debug_enabled(void) {
     if (g_neko_debug_enabled < 0) {
         const char *value = getenv("NEKO_NATIVE_DEBUG");
-        g_neko_debug_enabled = (value != NULL && value[0] != '\0') ? 1 : 0;
+        g_neko_debug_enabled = (value != NULL && value[0] != '\\0') ? 1 : 0;
     }
     return g_neko_debug_enabled;
 }
@@ -185,7 +185,7 @@ static int neko_debug_enabled(void) {
 static void neko_vlog(FILE *stream, const char *fmt, va_list args) {
     fputs("neko: ", stream);
     vfprintf(stream, fmt, args);
-    fputc('\n', stream);
+    fputc('\\n', stream);
     fflush(stream);
 }
 
@@ -203,7 +203,7 @@ static void neko_native_debug_log(const char *fmt, ...) {
     va_start(args, fmt);
     fputs("[neko] ", stderr);
     vfprintf(stderr, fmt, args);
-    fputc('\n', stderr);
+    fputc('\\n', stderr);
     fflush(stderr);
     va_end(args);
 }
@@ -240,7 +240,7 @@ static uint32_t neko_fnv1a32_update_byte(uint32_t hash, uint8_t value) {
 static uint32_t neko_fnv1a32_update_string(uint32_t hash, const char *value) {
     const unsigned char *cur = (const unsigned char*)value;
     if (value == NULL) return hash;
-    while (*cur != '\0') {
+    while (*cur != '\\0') {
         hash = neko_fnv1a32_update_byte(hash, *cur++);
     }
     return hash;
@@ -665,7 +665,7 @@ static int neko_linux_module_search_cb(struct dl_phdr_info *info, size_t size, v
     (void)size;
     if (info == NULL || data == NULL) return 0;
     path = info->dlpi_name;
-    if (path == NULL || path[0] == '\0') return 0;
+    if (path == NULL || path[0] == '\\0') return 0;
     handle = dlopen(path, RTLD_NOLOAD | RTLD_NOW);
     if (handle == NULL) return 0;
     if (dlsym(handle, ((neko_linux_module_search*)data)->symbol_name) != NULL) {
@@ -706,7 +706,7 @@ static void* neko_resolve_libjvm_handle(void) {
     for (uint32_t i = 0; i < _dyld_image_count(); i++) {
         const char *path = _dyld_get_image_name(i);
         void *handle;
-        if (path == NULL || path[0] == '\0') continue;
+        if (path == NULL || path[0] == '\\0') continue;
         handle = dlopen(path, RTLD_NOLOAD | RTLD_NOW);
         if (handle == NULL) continue;
         if (dlsym(handle, "gHotSpotVMStructs") != NULL) {
@@ -765,8 +765,8 @@ static jboolean neko_resolve_vm_symbols(void) {
 }
 
 static int neko_parse_java_spec_version_text(const char *value) {
-    if (value == NULL || value[0] == '\0') return 0;
-    if (value[0] == '1' && value[1] == '.' && value[2] != '\0') {
+    if (value == NULL || value[0] == '\\0') return 0;
+    if (value[0] == '1' && value[1] == '.' && value[2] != '\\0') {
         return (int)strtol(value + 2, NULL, 10);
     }
     return (int)strtol(value, NULL, 10);
@@ -1216,7 +1216,7 @@ static char* neko_internal_name_from_signature(const char *signature) {
     value = (char*)malloc(length - 1u);
     if (value == NULL) return NULL;
     memcpy(value, signature + 1, length - 2u);
-    value[length - 2u] = '\0';
+    value[length - 2u] = '\\0';
     return value;
 }
 
