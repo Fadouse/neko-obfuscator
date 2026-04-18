@@ -57,12 +57,7 @@ public final class NativeTranslator {
                 selection.owner().name(),
                 selection.method().name(),
                 selection.method().descriptor(),
-                jniFunctionName(
-                    selection.owner().name(),
-                    selection.method().name(),
-                    selection.method().descriptor(),
-                    overloadCounts.getOrDefault(selection.owner().name() + '#' + selection.method().name(), 0) > 1
-                ),
+                "neko_impl_" + i,
                 null,
                 null,
                 selection.method().isStatic(),
@@ -83,7 +78,14 @@ public final class NativeTranslator {
 
         String source = codeGenerator.generateSource(functions, bindings);
         String header = codeGenerator.generateHeader(bindings);
-        return new TranslationResult(source, header, bindings.size(), bindings);
+        return new TranslationResult(
+            source,
+            header,
+            codeGenerator.generateAdditionalSources(bindings),
+            bindings.size(),
+            bindings,
+            codeGenerator.signatureInfos(bindings)
+        );
     }
 
     private CFunction translateMethod(MethodSelection selection, NativeMethodBinding binding, OpcodeTranslator opcodes) {
@@ -93,12 +95,12 @@ public final class NativeTranslator {
         CType cReturnType = mapType(returnType);
 
         List<CVariable> params = new ArrayList<>();
-        params.add(new CVariable("env", CType.JOBJECT, 0));
-        params.add(new CVariable(method.isStatic() ? "clazz" : "self", method.isStatic() ? CType.JCLASS : CType.JOBJECT, 1));
-
         Type[] argTypes = Type.getArgumentTypes(method.descriptor());
-        int paramIndex = 2;
+        int paramIndex = 0;
         int argsLocalsSize = method.isStatic() ? 0 : 1;
+        if (!method.isStatic()) {
+            params.add(new CVariable("_this", CType.JOBJECT, paramIndex++));
+        }
         for (int i = 0; i < argTypes.length; i++) {
             params.add(new CVariable("p" + i, mapType(argTypes[i]), paramIndex++));
             argsLocalsSize += argTypes[i].getSize();
@@ -201,7 +203,7 @@ public final class NativeTranslator {
     private void emitParamToLocals(CFunction fn, L1Method method, Type[] argTypes) {
         int localIndex = 0;
         if (!method.isStatic()) {
-            fn.addStatement(new CStatement.RawC("locals[0].o = self;"));
+            fn.addStatement(new CStatement.RawC("locals[0].o = _this;"));
             localIndex = 1;
         }
         for (int i = 0; i < argTypes.length; i++) {
@@ -439,11 +441,11 @@ public final class NativeTranslator {
     private void emitDefaultReturn(CFunction function, CType returnType) {
         switch (returnType) {
             case VOID -> function.addStatement(new CStatement.ReturnVoid());
-            case JLONG -> function.addStatement(new CStatement.RawC("return (jlong)0;"));
-            case JFLOAT -> function.addStatement(new CStatement.RawC("return (jfloat)0;"));
-            case JDOUBLE -> function.addStatement(new CStatement.RawC("return (jdouble)0;"));
+            case JLONG -> function.addStatement(new CStatement.RawC("return 0;"));
+            case JFLOAT -> function.addStatement(new CStatement.RawC("return 0.0f;"));
+            case JDOUBLE -> function.addStatement(new CStatement.RawC("return 0.0;"));
             case JOBJECT, JCLASS, JSTRING, JARRAY -> function.addStatement(new CStatement.RawC("return NULL;"));
-            default -> function.addStatement(new CStatement.RawC("return (" + returnType.jniName() + ")0;"));
+            default -> function.addStatement(new CStatement.RawC("return 0;"));
         }
     }
 
@@ -490,55 +492,15 @@ public final class NativeTranslator {
         return s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t");
     }
 
-    private String jniFunctionName(String ownerInternalName, String methodName, String descriptor, boolean overloaded) {
-        StringBuilder out = new StringBuilder("Java_")
-            .append(jniMangle(ownerInternalName))
-            .append('_')
-            .append(jniMangle(methodName));
-        if (overloaded) {
-            Type[] argTypes = Type.getArgumentTypes(descriptor);
-            StringBuilder params = new StringBuilder();
-            for (Type argType : argTypes) {
-                params.append(argType.getDescriptor());
-            }
-            out.append("__").append(jniMangle(params.toString()));
-        }
-        return out.toString();
-    }
-
-    private String jniMangle(String value) {
-        StringBuilder out = new StringBuilder(value.length() + 16);
-        for (int i = 0; i < value.length(); i++) {
-            char ch = value.charAt(i);
-            switch (ch) {
-                case '/' -> out.append('_');
-                case '_' -> out.append("_1");
-                case ';' -> out.append("_2");
-                case '[' -> out.append("_3");
-                default -> {
-                    if ((ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9')) {
-                        out.append(ch);
-                    } else {
-                        out.append("_0");
-                        String hex = Integer.toHexString(ch);
-                        for (int pad = hex.length(); pad < 4; pad++) {
-                            out.append('0');
-                        }
-                        out.append(hex);
-                    }
-                }
-            }
-        }
-        return out.toString();
-    }
-
     public record MethodSelection(L1Class owner, L1Method method) {}
 
     public record TranslationResult(
         String source,
         String header,
+        List<CCodeGenerator.GeneratedSource> additionalSources,
         int methodCount,
-        List<NativeMethodBinding> bindings
+        List<NativeMethodBinding> bindings,
+        List<CCodeGenerator.SignatureInfo> signatures
     ) {}
 
     public record NativeMethodBinding(

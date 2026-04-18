@@ -9,16 +9,16 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-final class SymbolTableGenerator {
+public final class SymbolTableGenerator {
     private final byte[] xorKey;
     private final Map<String, Integer> indexes = new LinkedHashMap<>();
     private final List<String> values = new ArrayList<>();
 
-    SymbolTableGenerator(long masterSeed) {
+    public SymbolTableGenerator(long masterSeed) {
         this.xorKey = deriveKey(masterSeed);
     }
 
-    int intern(String value) {
+    public int intern(String value) {
         Integer existing = indexes.get(value);
         if (existing != null) {
             return existing;
@@ -29,7 +29,7 @@ final class SymbolTableGenerator {
         return index;
     }
 
-    String emitC() {
+    public String emitC() {
         List<Integer> offsets = new ArrayList<>(values.size());
         List<Integer> lengths = new ArrayList<>(values.size());
         List<Byte> blob = new ArrayList<>();

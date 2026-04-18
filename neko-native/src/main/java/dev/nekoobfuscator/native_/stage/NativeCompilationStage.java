@@ -22,14 +22,18 @@ import org.objectweb.asm.tree.InsnNode;
 import org.objectweb.asm.tree.LdcInsnNode;
 import org.objectweb.asm.tree.MethodInsnNode;
 import org.objectweb.asm.tree.MethodNode;
+import org.objectweb.asm.tree.TypeInsnNode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.regex.Pattern;
 
 /**
@@ -39,7 +43,9 @@ public final class NativeCompilationStage {
     private static final Logger log = LoggerFactory.getLogger(NativeCompilationStage.class);
     private static final String NATIVE_TRANSLATE_DESC = "Ldev/nekoobfuscator/api/annotation/NativeTranslate;";
     private static final String NATIVE_LOADER_OWNER = "dev/nekoobfuscator/runtime/NekoNativeLoader";
-    private static final String NATIVE_BIND_DESC = "(Ljava/lang/Class;Ljava/lang/String;)V";
+    private static final String NATIVE_LOAD_DESC = "()V";
+    private static final String LINKAGE_ERROR_OWNER = "java/lang/LinkageError";
+    private static final String LINKAGE_ERROR_MESSAGE = "please check your native library load correctly";
 
     private final ObfuscationConfig.NativeConfig cfg;
     private final long masterSeed;
@@ -55,7 +61,7 @@ public final class NativeCompilationStage {
         List<ResourceEntry> originalResources = new ArrayList<>(resources);
 
         Map<String, ParsedClass> parsedClasses = parseClasses(allClasses);
-        List<MethodSelection> selectedMethods = new ArrayList<>();
+        List<MethodSelection> candidateMethods = new ArrayList<>();
         Map<String, List<String>> rejectionReasons = new LinkedHashMap<>();
         int rejectedMethodCount = 0;
 
@@ -67,14 +73,8 @@ public final class NativeCompilationStage {
                 if (!shouldTranslate(method, parsedClass.l1Class().name(), classAnnotated)) {
                     continue;
                 }
-                if (method.isConstructor() || method.isClassInit() || method.isAbstract() || method.isNative() || method.isBridge()) {
-                    continue;
-                }
 
                 List<String> reasons = new ArrayList<>();
-                if (parsedClass.l1Class().isInterface()) {
-                    reasons.add("interface methods cannot be marked ACC_NATIVE in valid classfiles");
-                }
                 if (!safetyChecker.isSafe(method, reasons)) {
                     rejectedMethodCount++;
                     rejectionReasons.put(methodKey(parsedClass.l1Class().name(), method), reasons);
@@ -84,9 +84,12 @@ public final class NativeCompilationStage {
                     }
                     continue;
                 }
-                selectedMethods.add(new MethodSelection(parsedClass.l1Class(), method));
+                candidateMethods.add(new MethodSelection(parsedClass.l1Class(), method));
             }
         }
+
+        List<MethodSelection> selectedMethods = enforceManifestInvokeSafety(candidateMethods, rejectionReasons);
+        rejectedMethodCount += candidateMethods.size() - selectedMethods.size();
 
         if (selectedMethods.isEmpty()) {
             log.info("Native stage selected no methods");
@@ -106,11 +109,27 @@ public final class NativeCompilationStage {
 
         Map<String, byte[]> builtLibraries;
         try {
-            builtLibraries = new NativeBuildEngine(cfg.zigPath()).build(
-                translationResult.source(),
-                translationResult.header(),
-                cfg.targets()
-            );
+            if (translationResult.additionalSources().isEmpty()) {
+                builtLibraries = new NativeBuildEngine(cfg.zigPath()).build(
+                    translationResult.source(),
+                    translationResult.header(),
+                    cfg.targets()
+                );
+            } else {
+                Path tempSourceDir = Files.createTempDirectory("neko_native_sources_");
+                List<Path> sourceFiles = new ArrayList<>();
+                Path cSourceFile = tempSourceDir.resolve("neko_native.c");
+                Path headerFile = tempSourceDir.resolve("neko_native.h");
+                Files.writeString(cSourceFile, translationResult.source());
+                Files.writeString(headerFile, translationResult.header());
+                sourceFiles.add(cSourceFile);
+                for (var additionalSource : translationResult.additionalSources()) {
+                    Path sourceFile = tempSourceDir.resolve(additionalSource.fileName());
+                    Files.writeString(sourceFile, additionalSource.content());
+                    sourceFiles.add(sourceFile);
+                }
+                builtLibraries = new NativeBuildEngine(cfg.zigPath()).build(sourceFiles, cfg.targets());
+            }
         } catch (Exception ex) {
             if (cfg.skipOnError()) {
                 log.error("Native compilation failed; continuing without native stage", ex);
@@ -148,6 +167,38 @@ public final class NativeCompilationStage {
             log.info("Native stage rejected {} method(s)", rejectionReasons.size());
         }
         return new NativeStageResult(mutatedClasses, updatedResources, translationResult.methodCount(), rejectedMethodCount);
+    }
+
+    private List<MethodSelection> enforceManifestInvokeSafety(
+        List<MethodSelection> candidateMethods,
+        Map<String, List<String>> rejectionReasons
+    ) {
+        List<MethodSelection> current = new ArrayList<>(candidateMethods);
+        boolean changed;
+        do {
+            changed = false;
+            LinkedHashSet<String> manifestMethodKeys = new LinkedHashSet<>();
+            for (MethodSelection selection : current) {
+                manifestMethodKeys.add(methodKey(selection.owner().name(), selection.method()));
+            }
+            List<MethodSelection> next = new ArrayList<>(current.size());
+            for (MethodSelection selection : current) {
+                String selectionKey = methodKey(selection.owner().name(), selection.method());
+                List<String> reasons = new ArrayList<>();
+                if (!safetyChecker.hasOnlyManifestInvokeTargets(selection.owner().name(), selection.method(), manifestMethodKeys, reasons)) {
+                    rejectionReasons.put(selectionKey, reasons);
+                    log.warn("Rejected native translation for {}: {}", selectionKey, String.join("; ", reasons));
+                    if (!cfg.skipOnError()) {
+                        throw new IllegalStateException("Unsafe native translation target: " + selectionKey);
+                    }
+                    changed = true;
+                    continue;
+                }
+                next.add(selection);
+            }
+            current = next;
+        } while (changed);
+        return current;
     }
 
     private Map<String, ParsedClass> parseClasses(Map<String, byte[]> allClasses) {
@@ -249,24 +300,41 @@ public final class NativeCompilationStage {
                 if (methodNode == null) {
                     continue;
                 }
-                methodNode.instructions.clear();
-                methodNode.tryCatchBlocks.clear();
-                if (methodNode.localVariables != null) {
-                    methodNode.localVariables.clear();
-                }
-                methodNode.visibleLocalVariableAnnotations = null;
-                methodNode.invisibleLocalVariableAnnotations = null;
-                methodNode.access = (methodNode.access | Opcodes.ACC_NATIVE) & ~Opcodes.ACC_STRICT;
-                methodNode.maxStack = 0;
-                methodNode.maxLocals = 0;
+                rewriteTranslatedMethod(methodNode);
             }
-        }
 
-        List<String> loaderOwners = new ArrayList<>(modifiedClasses);
-        for (String owner : loaderOwners) {
-            ensureClinitLoadsNative(parsedClasses.get(owner).classNode());
+            ensureClinitLoadsNative(parsedClass.classNode());
         }
         return modifiedClasses;
+    }
+
+    private void rewriteTranslatedMethod(MethodNode methodNode) {
+        methodNode.instructions.clear();
+        methodNode.instructions.add(new TypeInsnNode(Opcodes.NEW, LINKAGE_ERROR_OWNER));
+        methodNode.instructions.add(new InsnNode(Opcodes.DUP));
+        methodNode.instructions.add(new LdcInsnNode(LINKAGE_ERROR_MESSAGE));
+        methodNode.instructions.add(new MethodInsnNode(Opcodes.INVOKESPECIAL, LINKAGE_ERROR_OWNER, "<init>", "(Ljava/lang/String;)V", false));
+        methodNode.instructions.add(new InsnNode(Opcodes.ATHROW));
+
+        if (methodNode.tryCatchBlocks != null) {
+            methodNode.tryCatchBlocks.clear();
+        }
+        if (methodNode.localVariables != null) {
+            methodNode.localVariables.clear();
+        }
+        methodNode.visibleLocalVariableAnnotations = null;
+        methodNode.invisibleLocalVariableAnnotations = null;
+        methodNode.access &= ~Opcodes.ACC_NATIVE;
+        methodNode.maxStack = 3;
+        methodNode.maxLocals = parameterSlotCount(methodNode.access, methodNode.desc);
+    }
+
+    private int parameterSlotCount(int access, String descriptor) {
+        int slots = (access & Opcodes.ACC_STATIC) == 0 ? 1 : 0;
+        for (Type argumentType : Type.getArgumentTypes(descriptor)) {
+            slots += argumentType.getSize();
+        }
+        return slots;
     }
 
     private MethodNode findMethod(ClassNode classNode, String name, String desc) {
@@ -282,37 +350,34 @@ public final class NativeCompilationStage {
         MethodNode clinit = findMethod(classNode, "<clinit>", "()V");
         if (clinit == null) {
             clinit = new MethodNode(Opcodes.ACC_STATIC, "<clinit>", "()V", null, null);
-            appendNativeBootstrap(clinit.instructions, classNode.name);
+            appendNativeBootstrap(clinit.instructions);
             clinit.instructions.add(new InsnNode(Opcodes.RETURN));
-            clinit.maxStack = 2;
+            clinit.maxStack = 1;
             clinit.maxLocals = 0;
             classNode.methods.add(clinit);
             return;
         }
 
-        if (containsNativeBind(clinit)) {
+        if (containsNativeLoad(clinit)) {
             return;
         }
         InsnList loadCall = new InsnList();
-        appendNativeBootstrap(loadCall, classNode.name);
+        appendNativeBootstrap(loadCall);
         clinit.instructions.insert(loadCall);
-        clinit.maxStack = Math.max(clinit.maxStack, 2);
+        clinit.maxStack = Math.max(clinit.maxStack, 1);
     }
 
-    private void appendNativeBootstrap(InsnList instructions, String ownerInternalName) {
-        instructions.add(new MethodInsnNode(Opcodes.INVOKESTATIC, NATIVE_LOADER_OWNER, "load", "()V", false));
-        instructions.add(new LdcInsnNode(Type.getObjectType(ownerInternalName)));
-        instructions.add(new LdcInsnNode(ownerInternalName));
-        instructions.add(new MethodInsnNode(Opcodes.INVOKESTATIC, NATIVE_LOADER_OWNER, "bindClass", NATIVE_BIND_DESC, false));
+    private void appendNativeBootstrap(InsnList instructions) {
+        instructions.add(new MethodInsnNode(Opcodes.INVOKESTATIC, NATIVE_LOADER_OWNER, "load", NATIVE_LOAD_DESC, false));
     }
 
-    private boolean containsNativeBind(MethodNode clinit) {
+    private boolean containsNativeLoad(MethodNode clinit) {
         for (var insn = clinit.instructions.getFirst(); insn != null; insn = insn.getNext()) {
             if (insn instanceof MethodInsnNode methodInsn
                 && methodInsn.getOpcode() == Opcodes.INVOKESTATIC
                 && NATIVE_LOADER_OWNER.equals(methodInsn.owner)
-                && "bindClass".equals(methodInsn.name)
-                && NATIVE_BIND_DESC.equals(methodInsn.desc)) {
+                && "load".equals(methodInsn.name)
+                && NATIVE_LOAD_DESC.equals(methodInsn.desc)) {
                 return true;
             }
         }
@@ -320,16 +385,18 @@ public final class NativeCompilationStage {
     }
 
     private byte[] writeClass(ClassNode classNode) {
-        try {
-            ClassWriter writer = new ClassWriter(0);
-            classNode.accept(writer);
-            return writer.toByteArray();
-        } catch (Throwable plainWriteError) {
-            log.warn("Plain class write failed for {}; falling back to COMPUTE_MAXS: {}", classNode.name, plainWriteError.getMessage());
-            ClassWriter writer = new ClassWriter(ClassWriter.COMPUTE_MAXS);
-            classNode.accept(writer);
-            return writer.toByteArray();
-        }
+        ClassWriter writer = new ClassWriter(ClassWriter.COMPUTE_FRAMES | ClassWriter.COMPUTE_MAXS) {
+            @Override
+            protected String getCommonSuperClass(String type1, String type2) {
+                try {
+                    return super.getCommonSuperClass(type1, type2);
+                } catch (Throwable ignored) {
+                    return "java/lang/Object";
+                }
+            }
+        };
+        classNode.accept(writer);
+        return writer.toByteArray();
     }
 
     private String methodKey(String owner, L1Method method) {

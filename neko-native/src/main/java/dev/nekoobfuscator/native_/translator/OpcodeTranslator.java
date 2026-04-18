@@ -61,6 +61,7 @@ public final class OpcodeTranslator {
         this.indyIndex = 0;
         this.invokeSiteIndex = 0;
         this.codeGenerator.registerBindingOwner(owner);
+        this.codeGenerator.registerManifestMethod(this.currentMethodKey);
     }
 
     public int stringCacheCount() {
@@ -273,51 +274,29 @@ public final class OpcodeTranslator {
         } else if (ldc.cst instanceof Double d) {
             stmts.add(raw("PUSH_D(" + doubleLiteral(d) + ");"));
         } else if (ldc.cst instanceof String s) {
-            stmts.add(raw("PUSH_O(" + cachedStringExpression(s) + ");"));
+            String siteExpr = codeGenerator.reserveManifestStringLdcSite(currentMethodKey, currentOwnerInternalName, s);
+            stmts.add(raw("{ void *__ldc = neko_resolve_ldc_site_oop(thread, " + siteExpr + "); if (neko_pending_exception(thread) != NULL) goto __neko_exception_exit; PUSH_O(__ldc); }"));
         } else if (ldc.cst instanceof Type type) {
-            if (type.getSort() == Type.OBJECT && type.getInternalName().equals(currentOwnerInternalName)) {
-                stmts.add(raw("PUSH_O(" + cachedClassExpression(currentOwnerInternalName) + ");"));
+            if (type.getSort() == Type.METHOD) {
+                throw new IllegalStateException("LDC MethodType deferred to M4a (Wave 3)");
             } else {
-                stmts.add(raw("PUSH_O(" + cachedTypeClassExpression(type.getDescriptor()) + ");"));
+                String siteExpr = codeGenerator.reserveManifestClassLdcSite(currentMethodKey, currentOwnerInternalName, type.getDescriptor());
+                stmts.add(raw("{ void *__ldc = neko_resolve_ldc_site_oop(thread, " + siteExpr + "); if (neko_pending_exception(thread) != NULL) goto __neko_exception_exit; PUSH_O(__ldc); }"));
             }
+        } else if (ldc.cst instanceof Handle) {
+            throw new IllegalStateException("LDC MethodHandle deferred to M4a (Wave 3)");
         } else {
             stmts.add(raw("/* unsupported ldc constant */"));
         }
     }
 
     private String translateMethodInvoke(MethodInsnNode mi, int opcode) {
-        String intrinsic = intrinsicsEnabled() ? translateIntrinsicMethodInvoke(mi, opcode) : null;
-        if (intrinsic != null) {
-            return intrinsic;
-        }
-        if ("java/lang/invoke/MethodHandle".equals(mi.owner)
-            && ("invokeExact".equals(mi.name) || "invoke".equals(mi.name))) {
-            return translateMethodHandleInvoke(mi);
-        }
-        NativeMethodBinding binding = translatedBindings.get(bindingKey(mi.owner, mi.name, mi.desc));
-        if (canDirectInvoke(binding, opcode)) {
-            return translateDirectInvoke(mi, binding, opcode == Opcodes.INVOKESTATIC, opcode == Opcodes.INVOKESPECIAL);
-        }
-        if (opcode == Opcodes.INVOKEVIRTUAL || opcode == Opcodes.INVOKEINTERFACE) {
-            return translateVirtualDispatchWithCache(mi);
-        }
-
-        Type[] args = Type.getArgumentTypes(mi.desc);
-        Type ret = Type.getReturnType(mi.desc);
-        StringBuilder sb = new StringBuilder("{ ");
-        sb.append(declarePoppedArgs(args));
-        sb.append("jobject obj = POP_O(); ");
-        if (opcode == Opcodes.INVOKESPECIAL) {
-            sb.append("jclass cls = ").append(cachedClassExpression(mi.owner)).append("; ");
-            sb.append("jmethodID mid = ").append(cachedMethodExpression(mi.owner, mi.name, mi.desc, false)).append("; ");
-            sb.append(emitGuardedCallResult(ret, "cls != NULL && mid != NULL", nonvirtualCallWrapper(ret), "env, obj, cls, mid, __args"));
-        } else {
-            sb.append("jclass cls = ").append(cachedClassExpression(mi.owner)).append("; ");
-            sb.append("jmethodID mid = ").append(cachedMethodExpression(mi.owner, mi.name, mi.desc, false)).append("; ");
-            sb.append(emitGuardedCallResult(ret, "cls != NULL && mid != NULL", virtualCallWrapper(ret), "env, obj, mid, __args"));
-        }
-        sb.append(" }");
-        return sb.toString();
+        return switch (opcode) {
+            case Opcodes.INVOKESPECIAL -> translateCompiledInvoke(mi, false, true);
+            case Opcodes.INVOKEVIRTUAL -> throw new IllegalStateException("INVOKEVIRTUAL deferred pending Wave 3 vtable dispatch hardening");
+            case Opcodes.INVOKEINTERFACE -> throw new IllegalStateException("INVOKEINTERFACE deferred pending Wave 3 itable dispatch hardening");
+            default -> throw new IllegalStateException("unsupported invoke opcode: " + opcode);
+        };
     }
 
     private String translateVirtualDispatchWithCache(MethodInsnNode mi) {
@@ -438,20 +417,7 @@ public final class OpcodeTranslator {
     }
 
     private String translateStaticInvoke(MethodInsnNode mi) {
-        NativeMethodBinding binding = translatedBindings.get(bindingKey(mi.owner, mi.name, mi.desc));
-        if (binding != null && binding.isStatic()) {
-            return translateDirectInvoke(mi, binding, true, false);
-        }
-
-        Type[] args = Type.getArgumentTypes(mi.desc);
-        Type ret = Type.getReturnType(mi.desc);
-        StringBuilder sb = new StringBuilder("{ ");
-        sb.append(declarePoppedArgs(args));
-        sb.append("jclass cls = ").append(cachedClassExpression(mi.owner)).append("; ");
-        sb.append("jmethodID mid = ").append(cachedMethodExpression(mi.owner, mi.name, mi.desc, true)).append("; ");
-        sb.append(emitGuardedCallResult(ret, "cls != NULL && mid != NULL", staticCallWrapper(ret), "env, cls, mid, __args"));
-        sb.append(" }");
-        return sb.toString();
+        return translateCompiledInvoke(mi, true, false);
     }
 
     private String translateDirectInvoke(MethodInsnNode mi, NativeMethodBinding binding, boolean isStatic, boolean isSpecial) {
@@ -497,19 +463,125 @@ public final class OpcodeTranslator {
         return sb.toString();
     }
 
-    private String translateFieldGet(FieldInsnNode fi, boolean isStatic) {
-        if (isPrimitiveFastField(fi.desc)) {
-            return translatePrimitiveFieldGet(fi, isStatic);
-        }
+    private String translateCompiledInvoke(MethodInsnNode mi, boolean isStatic, boolean isSpecial) {
+        Type[] args = Type.getArgumentTypes(mi.desc);
+        Type ret = Type.getReturnType(mi.desc);
+        validateCompiledInvoke(mi, args, ret, isStatic, isSpecial);
+        String siteExpr = codeGenerator.reserveManifestInvokeSite(
+            currentMethodKey,
+            currentOwnerInternalName,
+            mi.owner,
+            mi.name,
+            mi.desc,
+            isStatic ? Opcodes.INVOKESTATIC : mi.getOpcode()
+        );
         StringBuilder sb = new StringBuilder("{ ");
-        if (isStatic) {
-            sb.append("jclass cls = ").append(cachedClassExpression(fi.owner)).append("; ");
-            sb.append("jfieldID fid = ").append(cachedFieldExpression(fi.owner, fi.name, fi.desc, true)).append("; ");
-            sb.append("if (cls != NULL && fid != NULL) { ").append(pushForType(Type.getType(fi.desc), staticFieldGetter(fi.desc) + "(env, cls, fid)")).append(" } ");
+        for (int i = args.length - 1; i >= 0; i--) {
+            sb.append(compiledEntryType(args[i])).append(" arg").append(i).append(" = ").append(popForType(args[i])).append("; ");
+        }
+        sb.append("NekoManifestInvokeSite *__site = ").append(siteExpr).append("; ");
+        if (!isStatic) {
+            sb.append("void *__recv = POP_O(); ");
+            sb.append("if (__recv == NULL) { neko_raise_null_pointer_exception(thread); goto __neko_exception_exit; } ");
+        }
+        sb.append("void *__method = neko_resolve_invoke_site(__site); ");
+        sb.append("if (__method == NULL) goto __neko_exception_exit; ");
+        sb.append("void *__entry = neko_method_compiled_entry(__method); ");
+        sb.append("if (__entry == NULL) goto __neko_exception_exit; ");
+        if (ret.getSort() == Type.VOID) {
+            sb.append("((").append(compiledEntryFunctionPointerType(args, ret, isStatic)).append(")__entry)(");
         } else {
-            sb.append("jobject obj = POP_O(); jclass cls = ").append(cachedClassExpression(fi.owner)).append("; ");
-            sb.append("jfieldID fid = ").append(cachedFieldExpression(fi.owner, fi.name, fi.desc, false)).append("; ");
-            sb.append("if (cls != NULL && fid != NULL) { ").append(pushForType(Type.getType(fi.desc), fieldGetter(fi.desc) + "(env, obj, fid)")).append(" } ");
+            sb.append(compiledEntryType(ret)).append(" __result = ((").append(compiledEntryFunctionPointerType(args, ret, isStatic)).append(")__entry)(");
+        }
+        appendCompiledInvokeCallArgs(sb, args, isStatic ? null : "__recv");
+        sb.append("); ");
+        sb.append("if (neko_pending_exception(thread) != NULL) goto __neko_exception_exit; ");
+        if (ret.getSort() != Type.VOID) {
+            sb.append(pushForType(ret, "__result")).append(' ');
+        }
+        sb.append("}");
+        return sb.toString();
+    }
+
+    private void validateCompiledInvoke(MethodInsnNode mi, Type[] args, Type ret, boolean isStatic, boolean isSpecial) {
+        if (ret.getSort() == Type.OBJECT || ret.getSort() == Type.ARRAY) {
+            throw new IllegalStateException("INVOKE with reference return deferred to Wave 4 (oop return adapter)");
+        }
+        for (Type arg : args) {
+            if (arg.getSort() == Type.OBJECT || arg.getSort() == Type.ARRAY) {
+                throw new IllegalStateException("INVOKE with reference arguments deferred pending JNI-free receiver spill hardening");
+            }
+        }
+        if (!isStatic && !isSpecial && mi.getOpcode() != Opcodes.INVOKEVIRTUAL) {
+            throw new IllegalStateException("unsupported compiled invoke opcode: " + mi.getOpcode());
+        }
+    }
+
+    private void appendCompiledInvokeCallArgs(StringBuilder sb, Type[] args, String receiverExpr) {
+        boolean first = true;
+        if (receiverExpr != null) {
+            sb.append(receiverExpr);
+            first = false;
+        }
+        for (int i = 0; i < args.length; i++) {
+            if (!first) {
+                sb.append(", ");
+            }
+            sb.append("arg").append(i);
+            first = false;
+        }
+    }
+
+    private String compiledEntryFunctionPointerType(Type[] args, Type ret, boolean isStatic) {
+        StringBuilder sb = new StringBuilder();
+        sb.append(compiledEntryType(ret)).append(" (*) (");
+        boolean first = true;
+        if (!isStatic) {
+            sb.append("void*");
+            first = false;
+        }
+        for (Type arg : args) {
+            if (!first) {
+                sb.append(", ");
+            }
+            sb.append(compiledEntryType(arg));
+            first = false;
+        }
+        if (first) {
+            sb.append("void");
+        }
+        sb.append(')');
+        return sb.toString();
+    }
+
+    private String compiledEntryType(Type type) {
+        return switch (type.getSort()) {
+            case Type.VOID -> "void";
+            case Type.LONG -> "int64_t";
+            case Type.FLOAT -> "float";
+            case Type.DOUBLE -> "double";
+            case Type.OBJECT, Type.ARRAY -> "void*";
+            default -> "int32_t";
+        };
+    }
+
+    private String translateFieldGet(FieldInsnNode fi, boolean isStatic) {
+        String siteExpr = codeGenerator.reserveManifestFieldSite(currentMethodKey, currentOwnerInternalName, fi.owner, fi.name, fi.desc, isStatic);
+        StringBuilder sb = new StringBuilder("{ ");
+        sb.append("NekoManifestFieldSite *__site = ").append(siteExpr).append("; ");
+        if (isPrimitiveFastField(fi.desc)) {
+            return translatePrimitiveFieldGet(sb, Type.getType(fi.desc), isStatic);
+        }
+        if (isStatic) {
+            sb.append("void *__base = neko_field_site_static_base(thread, __site); ");
+            sb.append("if (neko_pending_exception(thread) != NULL) goto __neko_exception_exit; ");
+            sb.append("if (__base == NULL) goto __neko_exception_exit; ");
+            sb.append("PUSH_O(neko_field_read_oop(__base, __site)); ");
+        } else {
+            sb.append("void *__recv = POP_O(); ");
+            sb.append("if (__recv == NULL) { neko_raise_null_pointer_exception(thread); goto __neko_exception_exit; } ");
+            sb.append("if (!neko_ensure_field_site_resolved(thread, __site)) goto __neko_exception_exit; ");
+            sb.append("PUSH_O(neko_field_read_oop(__recv, __site)); ");
         }
         sb.append("}");
         return sb.toString();
@@ -517,22 +589,13 @@ public final class OpcodeTranslator {
 
     private String translateFieldPut(FieldInsnNode fi, boolean isStatic) {
         Type type = Type.getType(fi.desc);
-        if (isPrimitiveFastField(fi.desc)) {
-            return translatePrimitiveFieldPut(fi, isStatic, type);
+        if (!isPrimitiveFastField(fi.desc)) {
+            throw new IllegalStateException((isStatic ? "reference PUTSTATIC deferred to M5h (GC write barriers)" : "reference PUTFIELD deferred to M5h (GC write barriers)"));
         }
+        String siteExpr = codeGenerator.reserveManifestFieldSite(currentMethodKey, currentOwnerInternalName, fi.owner, fi.name, fi.desc, isStatic);
         StringBuilder sb = new StringBuilder("{ ");
-        sb.append(jniTypeName(type)).append(" val = ").append(popForType(type)).append("; ");
-        if (isStatic) {
-            sb.append("jclass cls = ").append(cachedClassExpression(fi.owner)).append("; ");
-            sb.append("jfieldID fid = ").append(cachedFieldExpression(fi.owner, fi.name, fi.desc, true)).append("; ");
-            sb.append("if (cls != NULL && fid != NULL) { ").append(staticFieldSetter(fi.desc)).append("(env, cls, fid, val); } ");
-        } else {
-            sb.append("jobject obj = POP_O(); jclass cls = ").append(cachedClassExpression(fi.owner)).append("; ");
-            sb.append("jfieldID fid = ").append(cachedFieldExpression(fi.owner, fi.name, fi.desc, false)).append("; ");
-            sb.append("if (cls != NULL && fid != NULL) { ").append(fieldSetter(fi.desc)).append("(env, obj, fid, val); } ");
-        }
-        sb.append("}");
-        return sb.toString();
+        sb.append("NekoManifestFieldSite *__site = ").append(siteExpr).append("; ");
+        return translatePrimitiveFieldPut(sb, type, isStatic);
     }
 
     private String declarePoppedArgs(Type[] args) {
@@ -618,43 +681,36 @@ public final class OpcodeTranslator {
         return desc.length() == 1 && "ZBCSIJFD".indexOf(desc.charAt(0)) >= 0;
     }
 
-    private String translatePrimitiveFieldGet(FieldInsnNode fi, boolean isStatic) {
-        Type type = Type.getType(fi.desc);
-        char primitive = fi.desc.charAt(0);
-        StringBuilder sb = new StringBuilder("{ ");
+    private String translatePrimitiveFieldGet(StringBuilder sb, Type type, boolean isStatic) {
+        char primitive = type.getDescriptor().charAt(0);
         if (isStatic) {
-            sb.append("jclass cls = ").append(cachedClassExpression(fi.owner)).append("; ");
-            sb.append("jfieldID fid = ").append(cachedFieldExpression(fi.owner, fi.name, fi.desc, true)).append("; ");
-            sb.append("if (cls != NULL && fid != NULL) { ")
-                .append(pushForType(type, "neko_fast_get_static_" + primitive + "_field(env, cls, fid, "
-                    + codeGenerator.staticFieldBaseSlotName(fi.owner, fi.name, fi.desc, true) + ", "
-                    + codeGenerator.staticFieldOffsetSlotName(fi.owner, fi.name, fi.desc, true) + ")"))
-                .append(" } ");
+            sb.append("void *__base = neko_field_site_static_base(thread, __site); ");
+            sb.append("if (neko_pending_exception(thread) != NULL) goto __neko_exception_exit; ");
+            sb.append("if (__base == NULL) goto __neko_exception_exit; ");
+            sb.append(pushForType(type, "neko_field_read_" + primitive + "(__base, __site)")).append(' ');
         } else {
-            sb.append("jobject obj = POP_O(); jfieldID fid = ").append(cachedFieldExpression(fi.owner, fi.name, fi.desc, false)).append("; ");
-            sb.append("if (fid != NULL) { ")
-                .append(pushForType(type, "neko_fast_get_" + primitive + "_field(env, obj, fid, "
-                    + codeGenerator.fieldOffsetSlotName(fi.owner, fi.name, fi.desc, false) + ")"))
-                .append(" } ");
+            sb.append("void *__recv = POP_O(); ");
+            sb.append("if (__recv == NULL) { neko_raise_null_pointer_exception(thread); goto __neko_exception_exit; } ");
+            sb.append("if (!neko_ensure_field_site_resolved(thread, __site)) goto __neko_exception_exit; ");
+            sb.append(pushForType(type, "neko_field_read_" + primitive + "(__recv, __site)")).append(' ');
         }
         sb.append("}");
         return sb.toString();
     }
 
-    private String translatePrimitiveFieldPut(FieldInsnNode fi, boolean isStatic, Type type) {
-        char primitive = fi.desc.charAt(0);
-        StringBuilder sb = new StringBuilder("{ ");
+    private String translatePrimitiveFieldPut(StringBuilder sb, Type type, boolean isStatic) {
+        char primitive = type.getDescriptor().charAt(0);
         sb.append(jniTypeName(type)).append(" val = ").append(popForType(type)).append("; ");
         if (isStatic) {
-            sb.append("jclass cls = ").append(cachedClassExpression(fi.owner)).append("; ");
-            sb.append("jfieldID fid = ").append(cachedFieldExpression(fi.owner, fi.name, fi.desc, true)).append("; ");
-            sb.append("if (cls != NULL && fid != NULL) { neko_fast_set_static_").append(primitive).append("_field(env, cls, fid, ")
-                .append(codeGenerator.staticFieldBaseSlotName(fi.owner, fi.name, fi.desc, true)).append(", ")
-                .append(codeGenerator.staticFieldOffsetSlotName(fi.owner, fi.name, fi.desc, true)).append(", val); } ");
+            sb.append("void *__base = neko_field_site_static_base(thread, __site); ");
+            sb.append("if (neko_pending_exception(thread) != NULL) goto __neko_exception_exit; ");
+            sb.append("if (__base == NULL) goto __neko_exception_exit; ");
+            sb.append("neko_field_write_").append(primitive).append("(__base, __site, val); ");
         } else {
-            sb.append("jobject obj = POP_O(); jfieldID fid = ").append(cachedFieldExpression(fi.owner, fi.name, fi.desc, false)).append("; ");
-            sb.append("if (fid != NULL) { neko_fast_set_").append(primitive).append("_field(env, obj, fid, ")
-                .append(codeGenerator.fieldOffsetSlotName(fi.owner, fi.name, fi.desc, false)).append(", val); } ");
+            sb.append("void *__recv = POP_O(); ");
+            sb.append("if (__recv == NULL) { neko_raise_null_pointer_exception(thread); goto __neko_exception_exit; } ");
+            sb.append("if (!neko_ensure_field_site_resolved(thread, __site)) goto __neko_exception_exit; ");
+            sb.append("neko_field_write_").append(primitive).append("(__recv, __site, val); ");
         }
         sb.append("}");
         return sb.toString();
