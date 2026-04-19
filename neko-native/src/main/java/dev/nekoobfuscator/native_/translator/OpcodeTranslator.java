@@ -193,7 +193,7 @@ public final class OpcodeTranslator {
             case Opcodes.LRETURN -> stmts.add(raw("return POP_L();"));
             case Opcodes.FRETURN -> stmts.add(raw("return POP_F();"));
             case Opcodes.DRETURN -> stmts.add(raw("return POP_D();"));
-            case Opcodes.ARETURN -> stmts.add(raw("return POP_O();"));
+            case Opcodes.ARETURN -> stmts.add(raw("return (void*)POP_O();"));
             case Opcodes.RETURN -> stmts.add(raw("return;"));
 
             case Opcodes.ARRAYLENGTH -> stmts.add(raw("{ jarray arr = (jarray)POP_O(); PUSH_I(neko_get_array_length(env, arr)); }"));

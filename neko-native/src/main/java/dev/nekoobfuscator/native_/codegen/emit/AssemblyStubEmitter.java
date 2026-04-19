@@ -170,7 +170,8 @@ public final class AssemblyStubEmitter {
         sb.append(".text\n\n");
         sb.append("# Signature-stub sketch:\n");
         sb.append("#   i2i: lookup manifest entry by Method*, pop return address, unpack interpreter slots,\n");
-        sb.append("#        call hidden C dispatcher, restore sender_sp (r13) and jump to continuation.\n");
+        sb.append("#        call hidden C dispatcher, preserve primitive/void returns, preserve decoded raw oop\n");
+        sb.append("#        returns in rax, restore sender_sp (r13) and jump to continuation.\n");
         sb.append("#   c2i: lookup manifest entry by Method*, materialize any stack-overflow args for the\n");
         sb.append("#        hidden C dispatcher, put entry in rdi, call dispatcher, return to compiled caller.\n\n");
         for (SignatureShape signature : signaturePlan.signatures()) {
@@ -242,10 +243,6 @@ public final class AssemblyStubEmitter {
         emitRegisterLoadsFromInterpreter(sb, plan, labelPrefix);
         sb.append("    mov rdi, QWORD PTR [rsp + ").append(plan.entrySaveOffset()).append("]\n");
         sb.append("    call neko_sig_").append(signature.id()).append(instance ? "_dispatch_instance" : "_dispatch_static").append("\n");
-        if (signature.returnKind() == 'L') {
-            sb.append("    mov rdi, rax\n");
-            sb.append("    call neko_encode_heap_oop_runtime\n");
-        }
         sb.append("    mov r10, QWORD PTR [rsp + ").append(plan.retSaveOffset()).append("]\n");
         sb.append("    mov rsp, r13\n");
         sb.append("    jmp r10\n");
