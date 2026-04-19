@@ -685,8 +685,7 @@ public final class OpcodeTranslator {
         char primitive = type.getDescriptor().charAt(0);
         if (isStatic) {
             sb.append("void *__base = neko_field_site_static_base(thread, __site); ");
-            sb.append("if (neko_pending_exception(thread) != NULL) goto __neko_exception_exit; ");
-            sb.append("if (__base == NULL) goto __neko_exception_exit; ");
+            sb.append("if (__base == NULL) { if (neko_pending_exception(thread) == NULL) neko_wave2_capture_pending(env, thread, \"java/lang/IllegalStateException\", \"failed to resolve static field base\"); goto __neko_exception_exit; } ");
             sb.append(pushForType(type, "neko_field_read_" + primitive + "(__base, __site)")).append(' ');
         } else {
             sb.append("void *__recv = POP_O(); ");
@@ -703,8 +702,7 @@ public final class OpcodeTranslator {
         sb.append(jniTypeName(type)).append(" val = ").append(popForType(type)).append("; ");
         if (isStatic) {
             sb.append("void *__base = neko_field_site_static_base(thread, __site); ");
-            sb.append("if (neko_pending_exception(thread) != NULL) goto __neko_exception_exit; ");
-            sb.append("if (__base == NULL) goto __neko_exception_exit; ");
+            sb.append("if (__base == NULL) { if (neko_pending_exception(thread) == NULL) neko_wave2_capture_pending(env, thread, \"java/lang/IllegalStateException\", \"failed to resolve static field base\"); goto __neko_exception_exit; } ");
             sb.append("neko_field_write_").append(primitive).append("(__base, __site, val); ");
         } else {
             sb.append("void *__recv = POP_O(); ");
