@@ -78,11 +78,11 @@ static void neko_rt_close_scopes_for_ctx(NekoRtCtx *ctx) {
 
 static void neko_log_wave4a_status(void) {
     if (g_neko_vm_layout.wave4a_disabled) {
-        neko_native_debug_log("wave4a unavailable (%s)", g_neko_wave4a_unavailable_reason == NULL ? "unknown" : g_neko_wave4a_unavailable_reason);
+        neko_native_debug_log("w4x %s", g_neko_wave4a_unavailable_reason == NULL ? "u" : g_neko_wave4a_unavailable_reason);
         return;
     }
     neko_native_debug_log(
-        "wave4a ready (thread_state_off=%td, anchor_off=%td+%td, mirror_off=%td, oophandle_obj_off=%td, tlab_fast=%s)",
+        "w4r tso=%td ao=%td+%td mo=%td hoo=%td tf=%s",
         g_neko_vm_layout.off_thread_thread_state,
         g_neko_vm_layout.off_java_thread_anchor,
         g_neko_vm_layout.off_java_frame_anchor_sp,
@@ -178,7 +178,7 @@ __attribute__((visibility("default"))) NekoHandleScope* neko_rt_handles_open(Nek
     g_neko_rt_tls_scope_top = scope;
     if (!g_neko_wave4a_handle_caveat_logged) {
         g_neko_wave4a_handle_caveat_logged = 1;
-        neko_native_debug_log("wave4a handles are malloc-backed only (not GC-rooted yet)");
+        neko_native_debug_log("w4h mb");
     }
     return scope;
 }
@@ -226,27 +226,9 @@ __attribute__((visibility("default"))) oop neko_rt_oop_from_handle(NekoHandle h)
 """);
         sb.append("""
 
-static inline void* neko_resolve_mirror_locator_from_klass(const NekoVmLayout *layout, Klass *klass) {
-    if (layout == NULL || klass == NULL || layout->off_klass_java_mirror < 0) return NULL;
-    if (layout->java_spec_version >= 9) {
-        if (layout->off_oophandle_obj < 0) return NULL;
-        return *(void***)((uint8_t*)klass + layout->off_klass_java_mirror + layout->off_oophandle_obj);
-    }
-    return (void*)((uint8_t*)klass + layout->off_klass_java_mirror);
-}
-
-static inline oop neko_resolve_mirror_oop_from_klass(const NekoVmLayout *layout, Klass *klass) {
-    void *locator = neko_resolve_mirror_locator_from_klass(layout, klass);
-    if (locator == NULL) return NULL;
-    if (layout->java_spec_version >= 9) {
-        return (oop)(*(void**)locator);
-    }
-    return *(oop*)locator;
-}
-
 __attribute__((visibility("default"))) oop neko_rt_mirror_from_klass_nosafepoint(Klass *k) {
-    if (k == NULL || !neko_wave4a_enabled()) return NULL;
-    return neko_resolve_mirror_oop_from_klass(&g_neko_vm_layout, k);
+    (void)k;
+    return NULL;
 }
 
 __attribute__((visibility("default"))) oop neko_rt_static_base_from_holder_nosafepoint(Klass *holder) {

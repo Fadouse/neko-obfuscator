@@ -38,6 +38,8 @@ public final class OpcodeTranslator {
     private final Map<String, String> stringCacheVars = new LinkedHashMap<>();
     private String currentOwnerInternalName = "";
     private String currentMethodKey = "";
+    private String currentMethodDescriptor = "";
+    private int currentManifestMethodIndex = -1;
     private int indyIndex = 0;
     private int invokeSiteIndex = 0;
 
@@ -58,10 +60,11 @@ public final class OpcodeTranslator {
     public void beginMethod(String owner, String name, String desc, boolean isStatic) {
         this.currentOwnerInternalName = owner;
         this.currentMethodKey = owner + '#' + name + desc;
+        this.currentMethodDescriptor = desc;
         this.indyIndex = 0;
         this.invokeSiteIndex = 0;
         this.codeGenerator.registerBindingOwner(owner);
-        this.codeGenerator.registerManifestMethod(this.currentMethodKey);
+        this.currentManifestMethodIndex = this.codeGenerator.registerManifestMethod(this.currentMethodKey);
     }
 
     public int stringCacheCount() {
@@ -417,6 +420,10 @@ public final class OpcodeTranslator {
     }
 
     private String translateStaticInvoke(MethodInsnNode mi) {
+        NativeMethodBinding binding = translatedBindings.get(bindingKey(mi.owner, mi.name, mi.desc));
+        if (binding != null && binding.isStatic()) {
+            return translateDirectInvoke(mi, binding, true, false);
+        }
         return translateCompiledInvoke(mi, true, false);
     }
 
@@ -427,30 +434,34 @@ public final class OpcodeTranslator {
         for (int i = args.length - 1; i >= 0; i--) {
             sb.append(jniTypeName(args[i])).append(" arg").append(i).append(" = ").append(popForType(args[i])).append("; ");
         }
-        String receiverExpr;
+        String receiverExpr = null;
         String guardExpr = null;
         if (isStatic) {
-            sb.append("jclass receiverCls = ").append(cachedClassExpression(mi.owner)).append("; ");
-            receiverExpr = "receiverCls";
-            guardExpr = "receiverCls != NULL";
+            codeGenerator.registerOwnerClassReference(currentOwnerInternalName, mi.owner);
         } else {
             sb.append("jobject obj = POP_O(); ");
             receiverExpr = "obj";
         }
+        sb.append("NEKO_TRACE(2, \"[nk] di c=%d t=%d sig=\\\"%s\\\"\\n\", ")
+            .append(currentManifestMethodIndex)
+            .append(", ")
+            .append(binding.manifestIndex())
+            .append(", \"")
+            .append(cStringLiteral(mi.desc))
+            .append("\"); ");
         if (ret.getSort() == Type.VOID) {
             if (guardExpr != null) {
                 sb.append("if (").append(guardExpr).append(") ");
             }
-            sb.append(binding.cFunctionName()).append("(env, ").append(receiverExpr);
+            sb.append(binding.cFunctionName()).append('(');
+            appendDirectInvokeCallArgs(sb, args, receiverExpr);
         } else {
             sb.append(jniTypeName(ret)).append(" result = (").append(jniTypeName(ret)).append(")0; ");
             if (guardExpr != null) {
                 sb.append("if (").append(guardExpr).append(") ");
             }
-            sb.append("result = ").append(binding.cFunctionName()).append("(env, ").append(receiverExpr);
-        }
-        for (int i = 0; i < args.length; i++) {
-            sb.append(", arg").append(i);
+            sb.append("result = ").append(binding.cFunctionName()).append('(');
+            appendDirectInvokeCallArgs(sb, args, receiverExpr);
         }
         sb.append("); ");
         if (ret.getSort() != Type.VOID) {
@@ -461,6 +472,24 @@ public final class OpcodeTranslator {
         }
         sb.append("}");
         return sb.toString();
+    }
+
+    private void appendDirectInvokeCallArgs(StringBuilder sb, Type[] args, String receiverExpr) {
+        boolean first = true;
+        if (receiverExpr != null) {
+            sb.append(receiverExpr);
+            first = false;
+        }
+        for (int i = 0; i < args.length; i++) {
+            if (!first) {
+                sb.append(", ");
+            }
+            sb.append("arg").append(i);
+            first = false;
+        }
+        if (first) {
+            sb.append("void");
+        }
     }
 
     private String translateCompiledInvoke(MethodInsnNode mi, boolean isStatic, boolean isSpecial) {
@@ -686,7 +715,11 @@ public final class OpcodeTranslator {
         if (isStatic) {
             sb.append("void *__base = neko_field_site_static_base(thread, __site); ");
             sb.append("if (__base == NULL) { if (neko_pending_exception(thread) == NULL) neko_wave2_capture_pending(env, thread, \"java/lang/IllegalStateException\", \"failed to resolve static field base\"); goto __neko_exception_exit; } ");
-            sb.append(pushForType(type, "neko_field_read_" + primitive + "(__base, __site)")).append(' ');
+            if (isStaticIntLike(primitive)) {
+                sb.append(staticI32GetExpression(type));
+            } else {
+                sb.append(pushForType(type, staticGetHelper(primitive) + "(__site)")).append(' ');
+            }
         } else {
             sb.append("void *__recv = POP_O(); ");
             sb.append("if (__recv == NULL) { neko_raise_null_pointer_exception(thread); goto __neko_exception_exit; } ");
@@ -703,7 +736,11 @@ public final class OpcodeTranslator {
         if (isStatic) {
             sb.append("void *__base = neko_field_site_static_base(thread, __site); ");
             sb.append("if (__base == NULL) { if (neko_pending_exception(thread) == NULL) neko_wave2_capture_pending(env, thread, \"java/lang/IllegalStateException\", \"failed to resolve static field base\"); goto __neko_exception_exit; } ");
-            sb.append("neko_field_write_").append(primitive).append("(__base, __site, val); ");
+            if (isStaticIntLike(primitive)) {
+                sb.append(staticI32PutExpression(type));
+            } else {
+                sb.append(staticPutHelper(primitive)).append("(__site, val); ");
+            }
         } else {
             sb.append("void *__recv = POP_O(); ");
             sb.append("if (__recv == NULL) { neko_raise_null_pointer_exception(thread); goto __neko_exception_exit; } ");
@@ -713,6 +750,57 @@ public final class OpcodeTranslator {
         sb.append("}");
         return sb.toString();
     }
+
+    private boolean isStaticIntLike(char primitive) {
+        return "ZBCSI".indexOf(primitive) >= 0;
+    }
+
+    private String staticGetHelper(char primitive) {
+        return switch (primitive) {
+            case 'J' -> "neko_getstatic_i64";
+            case 'F' -> "neko_getstatic_f32";
+            case 'D' -> "neko_getstatic_f64";
+            default -> "neko_getstatic_i32";
+        };
+    }
+
+    private String staticPutHelper(char primitive) {
+        return switch (primitive) {
+            case 'J' -> "neko_putstatic_i64";
+            case 'F' -> "neko_putstatic_f32";
+            case 'D' -> "neko_putstatic_f64";
+            default -> "neko_putstatic_i32";
+        };
+    }
+
+    private String staticI32GetExpression(Type type) {
+        String typedValue = castStaticI32Value(type, "__cur");
+        return "int32_t __cur = neko_getstatic_i32(__site); "
+            + "{ void *m = neko_static_mirror(__site); int32_t *addr = neko_static_i32_addr(__site); "
+            + "NEKO_TRACE(2, \"[nk] sfg c=%d sig=\\\"%s\\\" site=%p slot=%p raw=%p mir=%p off=%ld addr=%p val=%d\\n\", "
+            + currentManifestMethodIndex + ", \"" + cStringLiteral(currentMethodDescriptor) + "\", (void*)__site, (void*)__site->static_base_slot, (void*)*(__site->static_base_slot), m, (long)__site->field_offset_cookie, (void*)addr, __cur); } "
+            + pushForType(type, typedValue) + ' ';
+    }
+
+    private String staticI32PutExpression(Type type) {
+        String valueExpr = castStaticI32Value(type, "val");
+        return "int32_t __nv = " + valueExpr + "; "
+            + "{ void *m = neko_static_mirror(__site); int32_t *addr = neko_static_i32_addr(__site); int32_t oldv = *addr; "
+            + "NEKO_TRACE(2, \"[nk] sfp c=%d sig=\\\"%s\\\" site=%p slot=%p raw=%p mir=%p off=%ld addr=%p old=%d new=%d\\n\", "
+            + currentManifestMethodIndex + ", \"" + cStringLiteral(currentMethodDescriptor) + "\", (void*)__site, (void*)__site->static_base_slot, (void*)*(__site->static_base_slot), m, (long)__site->field_offset_cookie, (void*)addr, oldv, __nv); "
+            + "neko_putstatic_i32(__site, __nv); "
+            + "NEKO_TRACE(2, \"[nk] sfd c=%d sig=\\\"%s\\\" addr=%p now=%d\\n\", " + currentManifestMethodIndex + ", \"" + cStringLiteral(currentMethodDescriptor) + "\", (void*)addr, *addr); "
+            + "{ uint8_t *p = (uint8_t*)addr - 8; NEKO_TRACE(2, \"[nk] sfbx %02x %02x %02x %02x %02x %02x %02x %02x | %02x %02x %02x %02x %02x %02x %02x %02x\\n\", p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7], p[8], p[9], p[10], p[11], p[12], p[13], p[14], p[15]); } } ";
+    }
+
+    private String castStaticI32Value(Type type, String expr) {
+        return switch (type.getSort()) {
+            case Type.BOOLEAN -> "((int32_t)(" + expr + " ? 1 : 0))";
+            case Type.CHAR -> "((int32_t)(uint32_t)" + expr + ")";
+            default -> "((int32_t)" + expr + ")";
+        };
+    }
+
 
     private String virtualCallWrapper(Type ret) {
         return switch (ret.getSort()) {

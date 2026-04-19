@@ -22,6 +22,13 @@ public final class ImplBodyEmitter {
         sb.append(") {\n");
         sb.append("    JNIEnv *env = neko_current_env();\n");
         sb.append("    void *thread = neko_get_current_thread();\n");
+        if (fn.debugIndex() >= 0 && fn.debugSignature() != null) {
+            sb.append("    NEKO_TRACE(2, \"[nk] e idx=%d sig=\\\"%s\\\"\\n\", ")
+                .append(fn.debugIndex())
+                .append(", \"")
+                .append(cStringLiteral(fn.debugSignature()))
+                .append("\");\n");
+        }
         if (requiresLocalCapacity(fn)) {
             sb.append("    if (env != NULL) neko_ensure_local_capacity(env, 8192);\n");
         }
@@ -91,5 +98,13 @@ public final class ImplBodyEmitter {
 
     private String renderParam(CVariable variable) {
         return rawFunctionParamType(variable) + " " + variable.name();
+    }
+
+    private String cStringLiteral(String s) {
+        return s.replace("\\", "\\\\")
+            .replace("\"", "\\\"")
+            .replace("\n", "\\n")
+            .replace("\r", "\\r")
+            .replace("\t", "\\t");
     }
 }
