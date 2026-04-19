@@ -10,7 +10,6 @@ import dev.nekoobfuscator.native_.codegen.CCodeGenerator.SignatureShape;
 import dev.nekoobfuscator.native_.codegen.CCodeGenerator.Utf8BlobRef;
 import dev.nekoobfuscator.native_.translator.NativeTranslator.NativeMethodBinding;
 import org.objectweb.asm.Opcodes;
-import org.objectweb.asm.Type;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -127,7 +126,9 @@ public final class ManifestEmitter {
         sb.append("    uint8_t is_volatile;\n");
         sb.append("    uint8_t _pad0;\n");
         sb.append("    void* cached_klass;\n");
-        sb.append("    void* static_base_handle;\n");
+        sb.append("    jobject static_base_global_ref;\n");
+        sb.append("    void *volatile *static_base_slot;\n");
+        sb.append("    ptrdiff_t field_offset_cookie;\n");
         sb.append("    ptrdiff_t resolved_offset;\n");
         sb.append("} NekoManifestFieldSite;\n\n");
         sb.append("typedef struct NekoManifestInvokeSite {\n");
@@ -296,7 +297,7 @@ public final class ManifestEmitter {
                 .append(c(site.name())).append("\", \"").append(c(site.desc())).append("\", &")
                 .append(generator.classSlotName(site.owner())).append(", ")
                 .append(site.isStatic() ? "1u" : "0u").append(", ")
-                .append(site.isReference() ? "1u" : "0u").append(", 0u, 0u, NULL, NULL, NEKO_FIELD_SITE_UNRESOLVED }");
+                .append(site.isReference() ? "1u" : "0u").append(", 0u, 0u, NULL, NULL, NULL, -1, NEKO_FIELD_SITE_UNRESOLVED }");
             sb.append(i + 1 == sites.size() ? '\n' : ',').append(i + 1 == sites.size() ? "" : "\n");
         }
         sb.append("};\n");

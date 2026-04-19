@@ -22,11 +22,11 @@ public final class ImplBodyEmitter {
         sb.append(") {\n");
         sb.append("    JNIEnv *env = neko_current_env();\n");
         sb.append("    void *thread = neko_get_current_thread();\n");
-        if (fn.debugIndex() >= 0 && fn.debugSignature() != null) {
+        if (fn.traceIndex() >= 0 && fn.traceSignature() != null) {
             sb.append("    NEKO_TRACE(2, \"[nk] e idx=%d sig=\\\"%s\\\"\\n\", ")
-                .append(fn.debugIndex())
+                .append(fn.traceIndex())
                 .append(", \"")
-                .append(cStringLiteral(fn.debugSignature()))
+                .append(cStringLiteral(fn.traceSignature()))
                 .append("\");\n");
         }
         if (requiresLocalCapacity(fn)) {

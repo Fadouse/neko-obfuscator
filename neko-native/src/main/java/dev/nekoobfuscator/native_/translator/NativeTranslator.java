@@ -57,6 +57,7 @@ public final class NativeTranslator {
                 selection.owner().name(),
                 selection.method().name(),
                 selection.method().descriptor(),
+                i,
                 "neko_impl_" + i,
                 null,
                 null,
@@ -107,6 +108,8 @@ public final class NativeTranslator {
         }
 
         CFunction fn = new CFunction(binding.cFunctionName(), cReturnType, params);
+        fn.setTraceIndex(binding.manifestIndex());
+        fn.setTraceSignature(method.descriptor());
         fn.setMaxStack(Math.max(method.maxStack(), 16));
         fn.setMaxLocals(Math.max(method.maxLocals(), argsLocalsSize));
 
@@ -507,12 +510,26 @@ public final class NativeTranslator {
         String ownerInternalName,
         String methodName,
         String descriptor,
+        int manifestIndex,
         String cFunctionName,
         String helperMethodName,
         String helperDescriptor,
         boolean isStatic,
         boolean directCallSafe
-    ) {}
+    ) {
+        public NativeMethodBinding(
+            String ownerInternalName,
+            String methodName,
+            String descriptor,
+            String cFunctionName,
+            String helperMethodName,
+            String helperDescriptor,
+            boolean isStatic,
+            boolean directCallSafe
+        ) {
+            this(ownerInternalName, methodName, descriptor, -1, cFunctionName, helperMethodName, helperDescriptor, isStatic, directCallSafe);
+        }
+    }
 
     private record TryHandler(String handlerLabel, String exceptionType) {}
 

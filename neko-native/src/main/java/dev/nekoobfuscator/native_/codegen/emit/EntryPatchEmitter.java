@@ -19,7 +19,7 @@ static jboolean neko_atomic_or_bits(void *address, size_t width, uint32_t mask) 
 
 static void neko_log_flag_patch_path_once(const char *path_name) {
     if (g_neko_flag_patch_path_logged) return;
-    neko_native_debug_log("flag patch via %s (jdk%d)", path_name, g_neko_vm_layout.java_spec_version);
+    neko_native_debug_log("fp %s j=%d", path_name, g_neko_vm_layout.java_spec_version);
     g_neko_flag_patch_path_logged = 1;
 }
 

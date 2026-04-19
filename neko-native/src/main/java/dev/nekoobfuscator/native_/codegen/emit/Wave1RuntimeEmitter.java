@@ -198,7 +198,7 @@ static void neko_log_runtime_helpers_ready(void) {
     const char *tlab_ready = (g_neko_vm_layout.off_thread_tlab_top >= 0 && g_neko_vm_layout.off_thread_tlab_end >= 0) ? "yes" : "no";
     const char *except_ready = g_neko_vm_layout.off_thread_pending_exception >= 0 ? "yes" : "no";
     neko_native_debug_log(
-        "runtime helpers v1 ready (oop shift=%d, klass shift=%d, tlab=%s, except=%s)",
+        "w1 os=%d ks=%d tl=%s ex=%s",
         g_neko_vm_layout.narrow_oop_shift,
         g_neko_vm_layout.narrow_klass_shift,
         tlab_ready,

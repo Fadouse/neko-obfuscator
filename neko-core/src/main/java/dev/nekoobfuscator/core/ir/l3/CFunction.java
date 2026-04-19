@@ -11,6 +11,8 @@ public final class CFunction {
     private final List<CStatement> body;
     private int maxStack;
     private int maxLocals;
+    private int traceIndex = -1;
+    private String traceSignature;
 
     public CFunction(String name, CType returnType, List<CVariable> params) {
         this.name = name;
@@ -27,11 +29,15 @@ public final class CFunction {
     public List<CStatement> body() { return body; }
     public int maxStack() { return maxStack; }
     public int maxLocals() { return maxLocals; }
+    public int traceIndex() { return traceIndex; }
+    public String traceSignature() { return traceSignature; }
 
     public void addLocal(CVariable var) { locals.add(var); }
     public void addStatement(CStatement stmt) { body.add(stmt); }
     public void setMaxStack(int maxStack) { this.maxStack = maxStack; }
     public void setMaxLocals(int maxLocals) { this.maxLocals = maxLocals; }
+    public void setTraceIndex(int traceIndex) { this.traceIndex = traceIndex; }
+    public void setTraceSignature(String traceSignature) { this.traceSignature = traceSignature; }
 
     public CVariable addStackVar(CType type, int index) {
         CVariable v = new CVariable("s" + index, type, index);

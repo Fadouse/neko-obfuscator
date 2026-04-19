@@ -244,7 +244,7 @@ __attribute__((visibility("default"))) void* neko_resolve_invoke_site(NekoManife
 }
 
 static void neko_log_wave3_ready(void) {
-    neko_native_debug_log("wave3 ready (invoke_sites=%u, static_fields_cached=%u)", g_neko_manifest_invoke_site_count, neko_count_cached_static_field_bases());
+    neko_native_debug_log("w3 is=%u sb=%u", g_neko_manifest_invoke_site_count, neko_count_cached_static_field_bases());
 }
 
 """;
