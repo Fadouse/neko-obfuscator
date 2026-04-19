@@ -1,6 +1,7 @@
 package dev.nekoobfuscator.test;
 
 import dev.nekoobfuscator.core.ir.l1.L1Class;
+import dev.nekoobfuscator.core.ir.l3.CExpression;
 import dev.nekoobfuscator.core.ir.l3.CFunction;
 import dev.nekoobfuscator.core.ir.l3.CStatement;
 import dev.nekoobfuscator.core.ir.l3.CType;
@@ -65,6 +66,69 @@ class CCodeGeneratorTest {
         assertTrue(source.contains("neko_hotspot_init("), source);
         assertTrue(source.contains("g_hotspot"), source);
         assertTrue(source.contains("JNI_OnLoad") && source.contains("neko_hotspot_init(env);"), source);
+    }
+
+    @Test
+    void signaturePlanDistinguishesReferenceReturns() {
+        NativeMethodBinding intBinding = new NativeMethodBinding(
+            "pkg/SignatureOwner",
+            "sum",
+            "(II)I",
+            "Java_pkg_SignatureOwner_sum",
+            "neko_binding_sum",
+            "(II)I",
+            true,
+            true
+        );
+        NativeMethodBinding objectBinding = new NativeMethodBinding(
+            "pkg/SignatureOwner",
+            "pick",
+            "(II)Ljava/lang/Object;",
+            "Java_pkg_SignatureOwner_pick",
+            "neko_binding_pick",
+            "(II)Ljava/lang/Object;",
+            true,
+            true
+        );
+
+        List<CCodeGenerator.SignatureInfo> signatures = new CCodeGenerator(12345L).signatureInfos(List.of(intBinding, objectBinding));
+        boolean sawPrimitive = false;
+        boolean sawReference = false;
+        for (CCodeGenerator.SignatureInfo signature : signatures) {
+            sawPrimitive |= "(II)I".equals(signature.key());
+            sawReference |= "(II)L".equals(signature.key());
+        }
+
+        assertTrue(signatures.size() == 2, () -> "Expected split signatures for primitive vs reference returns: " + signatures);
+        assertTrue(sawPrimitive, () -> "Missing primitive signature key: " + signatures);
+        assertTrue(sawReference, () -> "Missing reference signature key: " + signatures);
+    }
+
+    @Test
+    void objectReturnFunctionsUseRawOopAbiType() {
+        CFunction function = new CFunction(
+            "Java_pkg_ObjectReturn_identity",
+            CType.JOBJECT,
+            List.of(new CVariable("_this", CType.JOBJECT, 0))
+        );
+        function.setMaxStack(1);
+        function.setMaxLocals(1);
+        function.addStatement(new CStatement.Return(new CExpression.VarRef(function.params().getFirst())));
+
+        NativeMethodBinding binding = new NativeMethodBinding(
+            "pkg/ObjectReturn",
+            "identity",
+            "()Ljava/lang/Object;",
+            function.name(),
+            "neko_binding_identity",
+            "()Ljava/lang/Object;",
+            false,
+            true
+        );
+
+        String source = new CCodeGenerator(12345L).generateSource(List.of(function), List.of(binding));
+
+        assertTrue(source.contains("void* Java_pkg_ObjectReturn_identity(void* _this)"), source);
     }
 
     @Test
