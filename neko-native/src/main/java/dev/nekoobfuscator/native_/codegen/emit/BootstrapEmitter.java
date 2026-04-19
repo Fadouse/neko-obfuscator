@@ -69,6 +69,7 @@ typedef struct NekoVmLayout {
     ptrdiff_t off_const_method_size_of_parameters;
     ptrdiff_t off_const_method_method_idnum;
     ptrdiff_t off_const_method_flags_bits;
+    ptrdiff_t off_constant_pool_holder;
     ptrdiff_t off_klass_layout_helper;
     ptrdiff_t off_klass_name;
     ptrdiff_t off_klass_java_mirror;
@@ -147,6 +148,7 @@ typedef struct NekoVmLayout {
     char java_thread_last_Java_pc_strategy;
     char java_thread_jni_environment_strategy;
     char oophandle_obj_strategy;
+    jboolean constant_pool_holder_is_narrow;
     jboolean has_narrow_oop_base;
     jboolean has_narrow_oop_shift;
     jboolean has_narrow_klass_base;
@@ -296,7 +298,7 @@ static void neko_log_offset_strategy(const char *label, ptrdiff_t offset, char s
 }
 
 static void neko_derive_wave2_layout_offsets(JNIEnv *env);
-static void neko_resolve_prepared_class_field_sites(JNIEnv *env, jclass klass, const char *owner_internal);
+static void neko_resolve_prepared_class_field_sites(JNIEnv *env, jclass klass, const char *owner_internal, void *owner_klass);
 static jboolean neko_prewarm_ldc_sites(JNIEnv *env);
 static void neko_log_wave2_ready(void);
 
@@ -556,6 +558,7 @@ static void neko_reset_vm_layout(void) {
     g_neko_vm_layout.off_const_method_size_of_parameters = -1;
     g_neko_vm_layout.off_const_method_method_idnum = -1;
     g_neko_vm_layout.off_const_method_flags_bits = -1;
+    g_neko_vm_layout.off_constant_pool_holder = -1;
     g_neko_vm_layout.off_klass_layout_helper = -1;
     g_neko_vm_layout.off_klass_name = -1;
     g_neko_vm_layout.off_klass_java_mirror = -1;
@@ -901,6 +904,7 @@ static const char* neko_validate_vm_layout(void) {
     if (g_neko_vm_layout.off_const_method_max_locals < 0) return "ConstMethod::_max_locals";
     if (g_neko_vm_layout.off_const_method_size_of_parameters < 0) return "ConstMethod::_size_of_parameters";
     if (g_neko_vm_layout.off_const_method_method_idnum < 0) return "ConstMethod::_method_idnum";
+    if (g_neko_vm_layout.off_constant_pool_holder < 0) return "ConstantPool::_pool_holder";
     if (g_neko_vm_layout.off_klass_layout_helper < 0) return "Klass::_layout_helper";
     if (g_neko_vm_layout.off_klass_name < 0) return "Klass::_name";
     if (g_neko_vm_layout.off_klass_java_mirror < 0) return "Klass::_java_mirror";
@@ -1001,6 +1005,11 @@ static jboolean neko_parse_vm_layout(JNIEnv *env) {
             else if (neko_streq(field_name, "_size_of_parameters")) g_neko_vm_layout.off_const_method_size_of_parameters = (ptrdiff_t)offset;
             else if (neko_streq(field_name, "_method_idnum")) g_neko_vm_layout.off_const_method_method_idnum = (ptrdiff_t)offset;
             else if (neko_streq(field_name, "_flags._flags")) g_neko_vm_layout.off_const_method_flags_bits = (ptrdiff_t)offset;
+        } else if (neko_streq(type_name, "ConstantPool")) {
+            if (neko_streq(field_name, "_pool_holder")) {
+                g_neko_vm_layout.off_constant_pool_holder = (ptrdiff_t)offset;
+                g_neko_vm_layout.constant_pool_holder_is_narrow = type_string != NULL && strstr(type_string, "narrowKlass") != NULL;
+            }
         } else if (neko_streq(type_name, "Klass")) {
             if (neko_streq(field_name, "_layout_helper")) g_neko_vm_layout.off_klass_layout_helper = (ptrdiff_t)offset;
             else if (neko_streq(field_name, "_name")) g_neko_vm_layout.off_klass_name = (ptrdiff_t)offset;
@@ -1220,6 +1229,20 @@ static char* neko_internal_name_from_signature(const char *signature) {
     return value;
 }
 
+static inline void* neko_method_holder_klass(void *method_star) {
+    void *const_method;
+    void *constant_pool;
+    if (method_star == NULL || g_neko_vm_layout.off_method_const_method < 0 || g_neko_vm_layout.off_const_method_constants < 0 || g_neko_vm_layout.off_constant_pool_holder < 0) return NULL;
+    const_method = *(void**)((uint8_t*)method_star + g_neko_vm_layout.off_method_const_method);
+    if (const_method == NULL) return NULL;
+    constant_pool = *(void**)((uint8_t*)const_method + g_neko_vm_layout.off_const_method_constants);
+    if (constant_pool == NULL) return NULL;
+    if (g_neko_vm_layout.constant_pool_holder_is_narrow) {
+        return neko_decode_klass_pointer(*(u4*)((uint8_t*)constant_pool + g_neko_vm_layout.off_constant_pool_holder));
+    }
+    return *(void**)((uint8_t*)constant_pool + g_neko_vm_layout.off_constant_pool_holder);
+}
+
 static jboolean neko_discover_class(JNIEnv *env, jvmtiEnv *jvmti, jclass klass) {
     char *signature = NULL;
     char *owner_internal = NULL;
@@ -1227,6 +1250,7 @@ static jboolean neko_discover_class(JNIEnv *env, jvmtiEnv *jvmti, jclass klass) 
     jint method_count = 0;
     jvmtiError err;
     uint32_t owner_hash;
+    void *owner_klass = NULL;
     if (g_neko_manifest_method_count == 0u) return JNI_TRUE;
     err = (*jvmti)->GetClassSignature(jvmti, klass, &signature, NULL);
     if (err != JVMTI_ERROR_NONE) {
@@ -1263,6 +1287,7 @@ static jboolean neko_discover_class(JNIEnv *env, jvmtiEnv *jvmti, jclass klass) 
             neko_log_jvmti_error(jvmti, "JVMTI GetMethodName", err);
             return JNI_FALSE;
         }
+        if (owner_klass == NULL && methods[i] != NULL) owner_klass = neko_method_holder_klass(*(void**)methods[i]);
         name_desc_hash = neko_fnv1a32_pair(name, desc);
         for (uint32_t manifest_index = 0; manifest_index < g_neko_manifest_method_count; manifest_index++) {
             const NekoManifestMethod *entry = &g_neko_manifest_methods[manifest_index];
@@ -1277,20 +1302,21 @@ static jboolean neko_discover_class(JNIEnv *env, jvmtiEnv *jvmti, jclass klass) 
         neko_jvmti_deallocate(jvmti, name);
     }
     neko_jvmti_deallocate(jvmti, methods);
-    neko_resolve_prepared_class_field_sites(env, klass, owner_internal);
+    neko_resolve_prepared_class_field_sites(env, klass, owner_internal, owner_klass);
     free(owner_internal);
     neko_jvmti_deallocate(jvmti, signature);
     (void)env;
     return JNI_TRUE;
 }
 
-static jboolean neko_discover_class_via_reflection(JNIEnv *env, jvmtiEnv *jvmti, jclass klass, const char *owner_internal) {
+static jboolean neko_discover_class_via_reflection(JNIEnv *env, jvmtiEnv *jvmti, jclass klass, const char *owner_internal, void **owner_klass_out) {
     static jclass g_neko_class_cls = NULL;
     static jmethodID g_neko_get_declared_methods = NULL;
     jobjectArray reflected_methods = NULL;
     uint32_t owner_hash;
     jsize method_count;
     if (env == NULL || jvmti == NULL || klass == NULL || owner_internal == NULL) return JNI_FALSE;
+    if (owner_klass_out != NULL) *owner_klass_out = NULL;
     reflected_methods = (jobjectArray)neko_call_object_method_a(
         env,
         klass,
@@ -1325,6 +1351,7 @@ static jboolean neko_discover_class_via_reflection(JNIEnv *env, jvmtiEnv *jvmti,
             neko_delete_local_ref(env, reflected);
             continue;
         }
+        if (owner_klass_out != NULL && *owner_klass_out == NULL) *owner_klass_out = neko_method_holder_klass(*(void**)reflected_mid);
         err = (*jvmti)->GetMethodName(jvmti, reflected_mid, &name, &desc, NULL);
         if (err != JVMTI_ERROR_NONE) {
             neko_delete_local_ref(env, reflected);
@@ -1401,6 +1428,7 @@ static jboolean neko_discover_manifest_owners(JNIEnv *env, jvmtiEnv *jvmti) {
     for (uint32_t i = 0; i < g_neko_manifest_owner_count; i++) {
         const char *owner = g_neko_manifest_owners[i];
         jclass klass;
+        void *owner_klass = NULL;
         if (owner == NULL) continue;
         klass = neko_load_class_noinit(env, owner);
         if (klass == NULL || neko_exception_check(env)) {
@@ -1410,11 +1438,11 @@ static jboolean neko_discover_manifest_owners(JNIEnv *env, jvmtiEnv *jvmti) {
             neko_error_log("failed to load manifest owner %s for discovery, falling back to throw body", owner);
             return JNI_FALSE;
         }
-        if (!neko_discover_class_via_reflection(env, jvmti, klass, owner)) {
+        if (!neko_discover_class_via_reflection(env, jvmti, klass, owner, &owner_klass)) {
             neko_delete_local_ref(env, klass);
             return JNI_FALSE;
         }
-        neko_resolve_prepared_class_field_sites(env, klass, owner);
+        neko_resolve_prepared_class_field_sites(env, klass, owner, owner_klass);
         neko_delete_local_ref(env, klass);
     }
     return JNI_TRUE;

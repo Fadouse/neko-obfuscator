@@ -126,6 +126,7 @@ public final class ManifestEmitter {
         sb.append("    uint8_t is_reference;\n");
         sb.append("    uint8_t is_volatile;\n");
         sb.append("    uint8_t _pad0;\n");
+        sb.append("    void* cached_klass;\n");
         sb.append("    void* static_base_handle;\n");
         sb.append("    ptrdiff_t resolved_offset;\n");
         sb.append("} NekoManifestFieldSite;\n\n");
@@ -295,7 +296,7 @@ public final class ManifestEmitter {
                 .append(c(site.name())).append("\", \"").append(c(site.desc())).append("\", &")
                 .append(generator.classSlotName(site.owner())).append(", ")
                 .append(site.isStatic() ? "1u" : "0u").append(", ")
-                .append(site.isReference() ? "1u" : "0u").append(", 0u, 0u, NULL, NEKO_FIELD_SITE_UNRESOLVED }");
+                .append(site.isReference() ? "1u" : "0u").append(", 0u, 0u, NULL, NULL, NEKO_FIELD_SITE_UNRESOLVED }");
             sb.append(i + 1 == sites.size() ? '\n' : ',').append(i + 1 == sites.size() ? "" : "\n");
         }
         sb.append("};\n");
