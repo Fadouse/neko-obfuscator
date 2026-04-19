@@ -79,6 +79,8 @@ typedef struct NekoVmLayout {
     ptrdiff_t off_instance_klass_java_fields_count;
     ptrdiff_t off_instance_klass_init_state;
     ptrdiff_t off_instance_klass_java_mirror;
+    ptrdiff_t off_instance_klass_static_field_size;
+    ptrdiff_t off_instance_klass_static_oop_field_count;
     ptrdiff_t off_string_value;
     ptrdiff_t off_string_coder;
     ptrdiff_t off_array_base_byte;
@@ -483,12 +485,25 @@ static void neko_derive_oophandle_obj_offset(void) {
     neko_log_offset_strategy("oophandle_obj_offset", g_neko_vm_layout.off_oophandle_obj, g_neko_vm_layout.oophandle_obj_strategy);
 }
 
+static void neko_log_instance_klass_static_field_offsets(void) {
+    neko_log_offset_strategy(
+        "instance_klass_static_field_size_offset",
+        g_neko_vm_layout.off_instance_klass_static_field_size,
+        g_neko_vm_layout.off_instance_klass_static_field_size >= 0 ? 'A' : 'D'
+    );
+    neko_log_offset_strategy(
+        "instance_klass_static_oop_field_count_offset",
+        g_neko_vm_layout.off_instance_klass_static_oop_field_count,
+        g_neko_vm_layout.off_instance_klass_static_oop_field_count >= 0 ? 'A' : 'D'
+    );
+}
+
 static const char* neko_validate_wave4a_layout(void) {
     if (g_neko_vm_layout.off_thread_thread_state < 0) return "JavaThread::_thread_state";
     if (g_neko_vm_layout.off_java_thread_last_Java_sp < 0) return "JavaThread::_anchor._last_Java_sp";
     if (g_neko_vm_layout.off_java_thread_last_Java_fp < 0) return "JavaThread::_anchor._last_Java_fp";
     if (g_neko_vm_layout.off_java_thread_last_Java_pc < 0) return "JavaThread::_anchor._last_Java_pc";
-    if (g_neko_vm_layout.off_instance_klass_java_mirror < 0) return "InstanceKlass::_java_mirror";
+    if (g_neko_vm_layout.off_klass_java_mirror < 0) return "Klass::_java_mirror";
     if (g_neko_vm_layout.thread_state_in_java < 0) return "_thread_in_Java";
     if (g_neko_vm_layout.thread_state_in_vm < 0) return "_thread_in_vm";
     return NULL;
@@ -568,6 +583,8 @@ static void neko_reset_vm_layout(void) {
     g_neko_vm_layout.off_instance_klass_java_fields_count = -1;
     g_neko_vm_layout.off_instance_klass_init_state = -1;
     g_neko_vm_layout.off_instance_klass_java_mirror = -1;
+    g_neko_vm_layout.off_instance_klass_static_field_size = -1;
+    g_neko_vm_layout.off_instance_klass_static_oop_field_count = -1;
     g_neko_vm_layout.off_string_value = -1;
     g_neko_vm_layout.off_string_coder = -1;
     g_neko_vm_layout.off_array_base_byte = -1;
@@ -1022,6 +1039,8 @@ static jboolean neko_parse_vm_layout(JNIEnv *env) {
             else if (neko_streq(field_name, "_java_fields_count")) g_neko_vm_layout.off_instance_klass_java_fields_count = (ptrdiff_t)offset;
             else if (neko_streq(field_name, "_init_state")) g_neko_vm_layout.off_instance_klass_init_state = (ptrdiff_t)offset;
             else if (neko_streq(field_name, "_java_mirror")) g_neko_vm_layout.off_instance_klass_java_mirror = (ptrdiff_t)offset;
+            else if (neko_streq(field_name, "_static_field_size")) g_neko_vm_layout.off_instance_klass_static_field_size = (ptrdiff_t)offset;
+            else if (neko_streq(field_name, "_static_oop_field_count")) g_neko_vm_layout.off_instance_klass_static_oop_field_count = (ptrdiff_t)offset;
         } else if (neko_streq(type_name, "java_lang_String")) {
             if (neko_streq(field_name, "_value")) g_neko_vm_layout.off_string_value = (ptrdiff_t)offset;
             else if (neko_streq(field_name, "_coder")) g_neko_vm_layout.off_string_coder = (ptrdiff_t)offset;
@@ -1099,6 +1118,7 @@ static jboolean neko_parse_vm_layout(JNIEnv *env) {
         g_neko_vm_layout.off_klass_java_mirror = g_neko_vm_layout.off_instance_klass_java_mirror;
     }
     neko_derive_wave2_layout_offsets(env);
+    neko_log_instance_klass_static_field_offsets();
     neko_derive_method_flags_status_offset();
     neko_derive_thread_tlab_top_offset();
     neko_derive_thread_tlab_start_offset();
