@@ -93,24 +93,24 @@ class NativeTranslationSafetyCheckerTest {
         ClassNode classNode = new ClassNode();
         classNode.version = Opcodes.V1_8;
         classNode.access = Opcodes.ACC_PUBLIC;
-        classNode.name = "pkg/CalcLike";
+        classNode.name = "nk/test/sample/SampleClass";
         classNode.superName = "java/lang/Object";
         classNode.fields = new ArrayList<>();
         classNode.methods = new ArrayList<>();
-        classNode.fields.add(new FieldNode(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC, "count", "I", null, null));
+        classNode.fields.add(new FieldNode(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC, "counter", "I", null, null));
 
-        MethodNode methodNode = new MethodNode(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC, "runAdd", "()V", null, null);
-        methodNode.instructions.add(new FieldInsnNode(Opcodes.GETSTATIC, classNode.name, "count", "I"));
+        MethodNode methodNode = new MethodNode(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC, "sampleMethod", "()V", null, null);
+        methodNode.instructions.add(new FieldInsnNode(Opcodes.GETSTATIC, classNode.name, "counter", "I"));
         methodNode.instructions.add(new InsnNode(Opcodes.ICONST_1));
         methodNode.instructions.add(new InsnNode(Opcodes.IADD));
-        methodNode.instructions.add(new FieldInsnNode(Opcodes.PUTSTATIC, classNode.name, "count", "I"));
+        methodNode.instructions.add(new FieldInsnNode(Opcodes.PUTSTATIC, classNode.name, "counter", "I"));
         methodNode.instructions.add(new InsnNode(Opcodes.RETURN));
         methodNode.maxStack = 2;
         methodNode.maxLocals = 0;
         classNode.methods.add(methodNode);
 
         L1Class owner = new L1Class(classNode);
-        L1Method method = owner.findMethod("runAdd", "()V");
+        L1Method method = owner.findMethod("sampleMethod", "()V");
         List<String> reasons = new ArrayList<>();
 
         assertTrue(checker.isSafe(method, reasons), () -> String.join("; ", reasons));

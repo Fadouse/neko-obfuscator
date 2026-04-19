@@ -155,17 +155,24 @@ class CCodeGeneratorTest {
     }
 
     @Test
-    void mirrorResolverUsesSingleDerefForJdk8() throws Exception {
-        String output = compileAndRunMirrorResolverHarness(8);
+    void jniGlobalRefSlotDecoderUsesRawSlotForJdk8() throws Exception {
+        String output = compileAndRunJniGlobalRefHarness(8);
 
-        assertTrue(output.contains("single-deref"), output);
+        assertTrue(output.contains("raw-slot"), output);
     }
 
     @Test
-    void mirrorResolverUsesDoubleDerefForJdk11() throws Exception {
-        String output = compileAndRunMirrorResolverHarness(11);
+    void jniGlobalRefSlotDecoderUsesRawSlotForJdk11() throws Exception {
+        String output = compileAndRunJniGlobalRefHarness(11);
 
-        assertTrue(output.contains("double-deref"), output);
+        assertTrue(output.contains("raw-slot"), output);
+    }
+
+    @Test
+    void jniGlobalRefSlotDecoderUntagsJdk21StrongGlobals() throws Exception {
+        String output = compileAndRunJniGlobalRefHarness(21);
+
+        assertTrue(output.contains("raw-slot"), output);
     }
 
     @Test
@@ -267,11 +274,11 @@ class CCodeGeneratorTest {
         return source.substring(functionIndex);
     }
 
-    private static String compileAndRunMirrorResolverHarness(int javaSpecVersion) throws Exception {
-        Path tempDir = Files.createTempDirectory("neko_mirror_resolver_");
-        Path sourceFile = tempDir.resolve("mirror_resolver.c");
-        Path binaryFile = tempDir.resolve("mirror_resolver");
-        Files.writeString(sourceFile, mirrorResolverHarnessSource(javaSpecVersion));
+    private static String compileAndRunJniGlobalRefHarness(int javaSpecVersion) throws Exception {
+        Path tempDir = Files.createTempDirectory("neko_jni_global_ref_");
+        Path sourceFile = tempDir.resolve("jni_global_ref.c");
+        Path binaryFile = tempDir.resolve("jni_global_ref");
+        Files.writeString(sourceFile, jniGlobalRefHarnessSource(javaSpecVersion));
 
         ProcessBuilder compile = new ProcessBuilder("cc", "-std=c11", sourceFile.toString(), "-o", binaryFile.toString());
         compile.redirectErrorStream(true);
@@ -287,61 +294,59 @@ class CCodeGeneratorTest {
         return runOutput;
     }
 
-    private static String mirrorResolverHarnessSource(int javaSpecVersion) {
+    private static String jniGlobalRefHarnessSource(int javaSpecVersion) {
         return """
             #include <stddef.h>
             #include <stdint.h>
             #include <stdio.h>
-            #include <string.h>
 
             typedef void* oop;
+            typedef void* jobject;
             typedef struct Klass Klass;
             typedef struct NekoVmLayout {
                 int java_spec_version;
-                ptrdiff_t off_klass_java_mirror;
-                ptrdiff_t off_oophandle_obj;
             } NekoVmLayout;
 
-            """ + mirrorResolverHelpers() + """
+            """ + jniGlobalRefHelpers() + """
 
             int main(void) {
-                uint8_t klass_bytes[64] = {0};
                 uintptr_t marker = 0x12345678u;
                 oop mirror = (oop)&marker;
-                NekoVmLayout layout = { %d, 16, 0 };
+                oop slot = mirror;
+                void *volatile *raw_slot = (void *volatile *)&slot;
+                NekoVmLayout layout = { %d };
+                uintptr_t handle = layout.java_spec_version >= 21 ? ((uintptr_t)raw_slot + 2u) : (uintptr_t)raw_slot;
+                (void)layout;
 
-                if (layout.java_spec_version >= 9) {
-                    oop mirror_slot = mirror;
-                    void *cell = &mirror_slot;
-                    memcpy(klass_bytes + layout.off_klass_java_mirror + layout.off_oophandle_obj, &cell, sizeof(cell));
-                } else {
-                    memcpy(klass_bytes + layout.off_klass_java_mirror, &mirror, sizeof(mirror));
+                if (neko_decode_jni_global_ref_slot((jobject)handle, layout.java_spec_version) != raw_slot) {
+                    fputs("slot-mismatch\\n", stderr);
+                    return 1;
                 }
 
-                if (neko_resolve_mirror_oop_from_klass(&layout, (Klass*)klass_bytes) != mirror) {
+                if (*neko_decode_jni_global_ref_slot((jobject)handle, layout.java_spec_version) != mirror) {
                     fputs("mirror-mismatch\\n", stderr);
                     return 1;
                 }
 
-                puts(layout.java_spec_version >= 9 ? "double-deref" : "single-deref");
+                puts("raw-slot");
                 return 0;
             }
             """.formatted(javaSpecVersion);
     }
 
-    private static String mirrorResolverHelpers() {
+    private static String jniGlobalRefHelpers() {
         String source = minimalGeneratedSource();
-        String startMarker = "static inline void* neko_resolve_mirror_locator_from_klass(const NekoVmLayout *layout, Klass *klass) {";
-        String endMarker = "__attribute__((visibility(\"default\"))) oop neko_rt_mirror_from_klass_nosafepoint";
+        String startMarker = "static inline void *volatile *neko_decode_jni_global_ref_slot(jobject global_ref, int jdk_feature) {";
+        String endMarker = "static jboolean neko_resolve_field_site_with_class(JNIEnv *env, void *thread, NekoManifestFieldSite *site, jclass owner_class) {";
         int start = source.indexOf(startMarker);
         int end = source.indexOf(endMarker, start);
-        assertTrue(start >= 0 && end > start, () -> "Missing mirror resolver helpers in generated C.\n" + source);
+        assertTrue(start >= 0 && end > start, () -> "Missing JNI global-ref helpers in generated C.\n" + source);
         return source.substring(start, end);
     }
 
     private static String minimalGeneratedSource() {
         CFunction function = new CFunction(
-            "Java_pkg_MirrorProbe_demo",
+            "Java_nk_test_sample_SampleProbe_run",
             CType.VOID,
             List.of(new CVariable("env", CType.JOBJECT, 0), new CVariable("self", CType.JOBJECT, 1))
         );
@@ -350,11 +355,11 @@ class CCodeGeneratorTest {
         function.addStatement(new CStatement.ReturnVoid());
 
         NativeMethodBinding binding = new NativeMethodBinding(
-            "pkg/MirrorProbe",
-            "demo",
+            "nk/test/sample/SampleProbe",
+            "run",
             "()V",
             function.name(),
-            "neko_binding_mirror_probe",
+            "neko_binding_sample_probe",
             "()V",
             false,
             false
