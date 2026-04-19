@@ -215,6 +215,7 @@ class OpcodeTranslatorUnitTest {
         String code = render(List.of(
             translator.translate(new InsnNode(Opcodes.IRETURN)).getFirst(),
             translator.translate(new InsnNode(Opcodes.LRETURN)).getFirst(),
+            translator.translate(new InsnNode(Opcodes.ARETURN)).getFirst(),
             translator.translate(new InsnNode(Opcodes.RETURN)).getFirst(),
             translator.translate(new InsnNode(Opcodes.NOP)).getFirst(),
             translator.translate(new IincInsnNode(4, 3)).getFirst()
@@ -223,6 +224,7 @@ class OpcodeTranslatorUnitTest {
         assertContains(code,
             "return POP_I();",
             "return POP_L();",
+            "return (void*)POP_O();",
             "return;",
             "/* nop */",
             "locals[4].i += 3;"

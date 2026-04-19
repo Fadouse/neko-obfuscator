@@ -132,6 +132,26 @@ class CCodeGeneratorTest {
     }
 
     @Test
+    void objectReturnStubsLeaveRaxUndisturbed() {
+        NativeMethodBinding binding = new NativeMethodBinding(
+            "pkg/ObjectReturn",
+            "identity",
+            "(Ljava/lang/Object;)Ljava/lang/Object;",
+            "neko_impl_0",
+            "neko_binding_identity",
+            "(Ljava/lang/Object;)Ljava/lang/Object;",
+            true,
+            true
+        );
+
+        String assembly = new CCodeGenerator(12345L).generateAdditionalSources(List.of(binding)).getFirst().content();
+
+        assertTrue(assembly.contains("call neko_sig_0_dispatch_static"), assembly);
+        assertTrue(assembly.contains("mov rsp, r13\n    jmp r10"), assembly);
+        assertFalse(assembly.contains("neko_encode_heap_oop_runtime"), assembly);
+    }
+
+    @Test
     void bindTimeResolved() {
         ClassNode classNode = new ClassNode();
         classNode.version = Opcodes.V1_8;
