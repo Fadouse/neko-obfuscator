@@ -8,12 +8,18 @@ import dev.nekoobfuscator.native_.codegen.CCodeGenerator.ManifestInvokeSiteRef;
 import dev.nekoobfuscator.native_.codegen.CCodeGenerator.ManifestLdcSiteRef;
 import dev.nekoobfuscator.native_.codegen.CCodeGenerator.OwnerResolution;
 import dev.nekoobfuscator.native_.codegen.SymbolTableGenerator;
+import org.objectweb.asm.Type;
 
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 
 public final class CEmissionContext {
+    /**
+     * Reference returns and parameters use decoded raw oop pointers in the native ABI.
+     */
+    public static final String RAW_OOP_ABI_C_TYPE = "void*";
+
     private final SymbolTableGenerator symbols;
     private final LinkedHashMap<String, Integer> classSlotIndex = new LinkedHashMap<>();
     private final LinkedHashMap<String, Integer> methodSlotIndex = new LinkedHashMap<>();
@@ -101,5 +107,49 @@ public final class CEmissionContext {
 
     public void setStringCacheCount(int stringCacheCount) {
         this.stringCacheCount = stringCacheCount;
+    }
+
+    public String signatureKey(String descriptor) {
+        Type[] argumentTypes = Type.getArgumentTypes(descriptor);
+        StringBuilder key = new StringBuilder();
+        key.append('(');
+        for (Type argumentType : argumentTypes) {
+            key.append(collapseKind(argumentType));
+        }
+        return key.append(')').append(returnKind(descriptor)).toString();
+    }
+
+    public char returnKind(String descriptor) {
+        return collapseKind(Type.getReturnType(descriptor));
+    }
+
+    public String rawAbiType(Type type) {
+        return rawAbiType(collapseKind(type));
+    }
+
+    public String rawAbiType(char kind) {
+        return switch (kind) {
+            case 'V' -> "void";
+            case 'J' -> "int64_t";
+            case 'F' -> "float";
+            case 'D' -> "double";
+            case 'L' -> RAW_OOP_ABI_C_TYPE;
+            default -> "int32_t";
+        };
+    }
+
+    public char collapseKind(Type type) {
+        return switch (type.getSort()) {
+            case Type.VOID -> 'V';
+            case Type.BOOLEAN -> 'Z';
+            case Type.BYTE -> 'B';
+            case Type.SHORT -> 'S';
+            case Type.CHAR -> 'C';
+            case Type.INT -> 'I';
+            case Type.LONG -> 'J';
+            case Type.FLOAT -> 'F';
+            case Type.DOUBLE -> 'D';
+            default -> 'L';
+        };
     }
 }

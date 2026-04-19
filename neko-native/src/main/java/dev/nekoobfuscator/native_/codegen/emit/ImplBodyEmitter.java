@@ -80,7 +80,7 @@ public final class ImplBodyEmitter {
             case JLONG -> "int64_t";
             case JFLOAT -> "float";
             case JDOUBLE -> "double";
-            case JOBJECT, JCLASS, JSTRING, JARRAY -> "void*";
+            case JOBJECT, JCLASS, JSTRING, JARRAY -> CEmissionContext.RAW_OOP_ABI_C_TYPE;
             default -> "int32_t";
         };
     }

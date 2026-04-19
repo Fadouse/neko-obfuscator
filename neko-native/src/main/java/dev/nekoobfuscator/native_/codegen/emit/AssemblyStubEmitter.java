@@ -98,7 +98,7 @@ public final class AssemblyStubEmitter {
 
     private String renderSignatureDispatcher(SignatureShape signature, boolean instance) {
         StringBuilder sb = new StringBuilder();
-        String returnType = rawType(signature.returnKind());
+        String returnType = ctx.rawAbiType(signature.returnKind());
         String dispatcherName = "neko_sig_" + signature.id() + (instance ? "_dispatch_instance" : "_dispatch_static");
         String functionPointerType = "neko_sig_" + signature.id() + (instance ? "_instance_fn" : "_static_fn");
         List<String> params = new ArrayList<>();
@@ -110,7 +110,7 @@ public final class AssemblyStubEmitter {
             args.add("_this");
         }
         for (int i = 0; i < signature.argKinds().size(); i++) {
-            params.add(rawType(signature.argKinds().get(i)) + " p" + i);
+            params.add(ctx.rawAbiType(signature.argKinds().get(i)) + " p" + i);
             args.add("p" + i);
         }
 
@@ -118,14 +118,14 @@ public final class AssemblyStubEmitter {
         if (instance) {
             sb.append("void*");
             for (int i = 0; i < signature.argKinds().size(); i++) {
-                sb.append(", ").append(rawType(signature.argKinds().get(i)));
+                sb.append(", ").append(ctx.rawAbiType(signature.argKinds().get(i)));
             }
         } else {
             for (int i = 0; i < signature.argKinds().size(); i++) {
                 if (i > 0) {
                     sb.append(", ");
                 }
-                sb.append(rawType(signature.argKinds().get(i)));
+                sb.append(ctx.rawAbiType(signature.argKinds().get(i)));
             }
             if (signature.argKinds().isEmpty()) {
                 sb.append("void");
@@ -514,56 +514,20 @@ public final class AssemblyStubEmitter {
     private SignatureShape registerSignatureShape(LinkedHashMap<String, SignatureShape> signaturesByKey, String descriptor) {
         Type[] argumentTypes = Type.getArgumentTypes(descriptor);
         List<Character> argKinds = new ArrayList<>(argumentTypes.length);
-        String key = signatureKey(descriptor);
-        char returnKind = collapseKind(Type.getReturnType(descriptor));
+        String key = ctx.signatureKey(descriptor);
+        char returnKind = ctx.returnKind(descriptor);
         for (Type argumentType : argumentTypes) {
-            argKinds.add(collapseKind(argumentType));
+            argKinds.add(ctx.collapseKind(argumentType));
         }
         return signaturesByKey.computeIfAbsent(key, ignored -> new SignatureShape(signaturesByKey.size(), key, returnKind, List.copyOf(argKinds)));
     }
 
-    private String signatureKey(String descriptor) {
-        Type[] argumentTypes = Type.getArgumentTypes(descriptor);
-        StringBuilder key = new StringBuilder();
-        key.append('(');
-        for (Type argumentType : argumentTypes) {
-            key.append(collapseKind(argumentType));
-        }
-        return key.append(')').append(collapseKind(Type.getReturnType(descriptor))).toString();
-    }
-
     private String rawFunctionReturnType(Type type) {
-        return rawType(collapseKind(type));
+        return ctx.rawAbiType(type);
     }
 
     private String rawFunctionParamType(Type type) {
-        return rawType(collapseKind(type));
-    }
-
-    private String rawType(char kind) {
-        return switch (kind) {
-            case 'V' -> "void";
-            case 'J' -> "int64_t";
-            case 'F' -> "float";
-            case 'D' -> "double";
-            case 'L' -> "void*";
-            default -> "int32_t";
-        };
-    }
-
-    private char collapseKind(Type type) {
-        return switch (type.getSort()) {
-            case Type.VOID -> 'V';
-            case Type.BOOLEAN -> 'Z';
-            case Type.BYTE -> 'B';
-            case Type.SHORT -> 'S';
-            case Type.CHAR -> 'C';
-            case Type.INT -> 'I';
-            case Type.LONG -> 'J';
-            case Type.FLOAT -> 'F';
-            case Type.DOUBLE -> 'D';
-            default -> 'L';
-        };
+        return ctx.rawAbiType(type);
     }
 
     private boolean isWideKind(char kind) {

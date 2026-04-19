@@ -60,7 +60,7 @@ public final class ManifestEmitter {
             name,
             desc,
             opcode,
-            signatureKey(desc)
+            ctx.signatureKey(desc)
         ));
         return "&" + manifestInvokeSiteArrayName(methodId) + '[' + siteIndex + ']';
     }
@@ -500,31 +500,6 @@ public final class ManifestEmitter {
 
     private String renderUint16Literal(int value) {
         return String.format("0x%04Xu", value & 0xFFFF);
-    }
-
-    private String signatureKey(String descriptor) {
-        Type[] argumentTypes = Type.getArgumentTypes(descriptor);
-        StringBuilder key = new StringBuilder();
-        key.append('(');
-        for (Type argumentType : argumentTypes) {
-            key.append(collapseKind(argumentType));
-        }
-        return key.append(')').append(collapseKind(Type.getReturnType(descriptor))).toString();
-    }
-
-    private char collapseKind(Type type) {
-        return switch (type.getSort()) {
-            case Type.VOID -> 'V';
-            case Type.BOOLEAN -> 'Z';
-            case Type.BYTE -> 'B';
-            case Type.SHORT -> 'S';
-            case Type.CHAR -> 'C';
-            case Type.INT -> 'I';
-            case Type.LONG -> 'J';
-            case Type.FLOAT -> 'F';
-            case Type.DOUBLE -> 'D';
-            default -> 'L';
-        };
     }
 
     private boolean isPrimitiveFieldDescriptor(String desc) {
