@@ -67,13 +67,15 @@ public final class NativeTranslationSafetyChecker {
                      Opcodes.MULTIANEWARRAY -> addReason(reasons, opcodeName(opcode) + " deferred beyond Wave 2");
                 case Opcodes.GETFIELD -> {
                 }
-                case Opcodes.GETSTATIC -> addReason(reasons, "GETSTATIC deferred pending static field base correctness (Wave 4+ with neko_rt_* layer)");
+                case Opcodes.GETSTATIC -> {
+                    if (insn instanceof FieldInsnNode fieldInsn && !isPrimitiveDescriptor(fieldInsn.desc)) {
+                        addReason(reasons, "reference GETSTATIC deferred pending oop static field support");
+                    }
+                }
                 case Opcodes.PUTFIELD,
                      Opcodes.PUTSTATIC -> {
                     if (opcode == Opcodes.PUTSTATIC) {
-                        if (insn instanceof FieldInsnNode fieldInsn && isPrimitiveDescriptor(fieldInsn.desc)) {
-                            addReason(reasons, "PUTSTATIC deferred pending static field base correctness (Wave 4+ with neko_rt_* layer)");
-                        } else if (insn instanceof FieldInsnNode fieldInsn && !isPrimitiveDescriptor(fieldInsn.desc)) {
+                        if (insn instanceof FieldInsnNode fieldInsn && !isPrimitiveDescriptor(fieldInsn.desc)) {
                             addReason(reasons, "reference PUTSTATIC deferred to M5h (GC write barriers)");
                         }
                         break;
