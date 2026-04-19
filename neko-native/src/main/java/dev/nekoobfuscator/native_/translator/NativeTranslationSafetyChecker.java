@@ -76,23 +76,18 @@ public final class NativeTranslationSafetyChecker {
                 }
                 case Opcodes.GETSTATIC -> {
                     if (insn instanceof FieldInsnNode fieldInsn) {
-                        // Wave 4b-1 cached_klass infrastructure (ManifestEmitter NekoManifest_FieldSite.cached_klass + BootstrapEmitter holder derivation)
-                        // is in place and resolves the SIGSEGV that occurred when class_klass_offset was unavailable on JDK 21.
-                        // However, mirror+offset arithmetic for static fields on JDK 9+ still returns wrong values (Calc fixture detects mismatch).
-                        // Re-close until a future wave investigates the actual JDK 21 static field base semantics
-                        // (likely involves _static_fields_addr or different offset scheme than Unsafe.staticFieldOffset returns).
-                        addReason(reasons, isPrimitiveDescriptor(fieldInsn.desc)
-                            ? "GETSTATIC deferred pending static field base correctness on JDK 21 (cached_klass infrastructure landed Wave 4b-1)"
-                            : "reference GETSTATIC deferred pending oop static field support");
+                        if (!isPrimitiveDescriptor(fieldInsn.desc)) {
+                            addReason(reasons, "reference GETSTATIC deferred pending oop static field support");
+                        }
                     }
                 }
                 case Opcodes.PUTFIELD,
                      Opcodes.PUTSTATIC -> {
                     if (opcode == Opcodes.PUTSTATIC) {
                         if (insn instanceof FieldInsnNode fieldInsn) {
-                            addReason(reasons, isPrimitiveDescriptor(fieldInsn.desc)
-                                ? "PUTSTATIC deferred pending static field base correctness on JDK 21 (cached_klass infrastructure landed Wave 4b-1)"
-                                : "reference PUTSTATIC deferred to M5h (GC write barriers)");
+                            if (!isPrimitiveDescriptor(fieldInsn.desc)) {
+                                addReason(reasons, "reference PUTSTATIC deferred to M5h (GC write barriers)");
+                            }
                         }
                         break;
                     }
