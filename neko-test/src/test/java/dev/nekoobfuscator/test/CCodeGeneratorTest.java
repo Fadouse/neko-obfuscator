@@ -331,7 +331,7 @@ class CCodeGeneratorTest {
 
     private static String mirrorResolverHelpers() {
         String source = minimalGeneratedSource();
-        String startMarker = "static inline void* neko_resolve_mirror_locator_from_klass";
+        String startMarker = "static inline void* neko_resolve_mirror_locator_from_klass(const NekoVmLayout *layout, Klass *klass) {";
         String endMarker = "__attribute__((visibility(\"default\"))) oop neko_rt_mirror_from_klass_nosafepoint";
         int start = source.indexOf(startMarker);
         int end = source.indexOf(endMarker, start);
