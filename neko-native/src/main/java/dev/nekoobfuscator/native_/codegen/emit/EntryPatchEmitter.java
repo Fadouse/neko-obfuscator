@@ -19,7 +19,7 @@ static jboolean neko_atomic_or_bits(void *address, size_t width, uint32_t mask) 
 
 static void neko_log_flag_patch_path_once(const char *path_name) {
     if (g_neko_flag_patch_path_logged) return;
-    neko_native_debug_log("fp %s j=%d", path_name, g_neko_vm_layout.java_spec_version);
+    NEKO_TRACE(1, "[nk] fp %s j=%d", path_name, g_neko_vm_layout.java_spec_version);
     g_neko_flag_patch_path_logged = 1;
 }
 
@@ -82,7 +82,7 @@ static int neko_patch_method(const NekoManifestMethod *entry, void *method_star)
     compiled_code = __atomic_load_n((void**)((uint8_t*)method_star + g_neko_vm_layout.off_method_code), __ATOMIC_ACQUIRE);
     if (compiled_code != NULL) {
         g_neko_manifest_patch_states[index] = NEKO_PATCH_STATE_FAILED;
-        neko_debug_log("method %s.%s%s already compiled, skipping patch", entry->owner_internal, entry->method_name, entry->method_desc);
+    NEKO_TRACE(1, "[nk] pc %s.%s%s", entry->owner_internal, entry->method_name, entry->method_desc);
         return -1;
     }
     if (!neko_apply_no_compile_flags(method_star)) {
@@ -110,7 +110,7 @@ static int neko_patch_method(const NekoManifestMethod *entry, void *method_star)
 
     g_neko_manifest_patch_states[index] = NEKO_PATCH_STATE_APPLIED;
     g_neko_manifest_patch_count++;
-    neko_debug_log("patched %s.%s%s sig=%u", entry->owner_internal, entry->method_name, entry->method_desc, entry->signature_id);
+    NEKO_TRACE(1, "[nk] pp %s.%s%s s=%u", entry->owner_internal, entry->method_name, entry->method_desc, entry->signature_id);
     return 0;
 }
 

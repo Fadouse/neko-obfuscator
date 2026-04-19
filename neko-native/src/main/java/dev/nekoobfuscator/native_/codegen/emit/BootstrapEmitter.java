@@ -326,9 +326,9 @@ static ptrdiff_t neko_known_pointer_field_offset(ptrdiff_t base_offset, size_t p
 
 static void neko_log_offset_strategy(const char *label, ptrdiff_t offset, char strategy) {
     if (offset >= 0) {
-        neko_native_debug_log("%s=%td (strategy=%c)", label, offset, strategy);
+        NEKO_TRACE(1, "[nk] o %s=%td s=%c", label, offset, strategy);
     } else {
-        neko_native_debug_log("%s unavailable (strategy=%c)", label, strategy);
+        NEKO_TRACE(1, "[nk] o %s u s=%c", label, strategy);
     }
 }
 
@@ -581,11 +581,7 @@ static void neko_derive_method_flags_status_offset(void) {
     if (g_neko_vm_layout.java_spec_version >= 21 && g_neko_vm_layout.off_method_flags_status < 0) {
         neko_error_log("failed to derive MethodFlags::_status offset for jdk%d, refusing native patch path", g_neko_vm_layout.java_spec_version);
     }
-    neko_native_debug_log(
-        "method_flags_status_offset=%u (strategy=%c)",
-        g_neko_vm_layout.off_method_flags_status >= 0 ? (uint32_t)g_neko_vm_layout.off_method_flags_status : 0u,
-        g_neko_vm_layout.method_flags_status_strategy
-    );
+    NEKO_TRACE(1, "[nk] mf off=%u s=%c", g_neko_vm_layout.off_method_flags_status >= 0 ? (uint32_t)g_neko_vm_layout.off_method_flags_status : 0u, g_neko_vm_layout.method_flags_status_strategy);
 }
 
 static void neko_reset_vm_layout(void) {
@@ -813,7 +809,7 @@ static jboolean neko_resolve_vm_symbols(void) {
     } while (0);
     NEKO_REQUIRED_VM_SYMBOLS(NEKO_RESOLVE_REQUIRED_SYMBOL);
 #undef NEKO_RESOLVE_REQUIRED_SYMBOL
-    neko_debug_log("libjvm resolved (%u/%u symbols)", resolved, NEKO_REQUIRED_VM_SYMBOL_COUNT);
+    NEKO_TRACE(0, "[nk] lj %u/%u", resolved, NEKO_REQUIRED_VM_SYMBOL_COUNT);
     return JNI_TRUE;
 }
 
@@ -1163,11 +1159,11 @@ static jboolean neko_parse_vm_layout(JNIEnv *env) {
     neko_derive_java_thread_jni_environment_offset();
     missing = neko_validate_vm_layout();
     if (missing != NULL) {
-        neko_error_log("VMStructs layout incomplete, field %s not found, falling back to throw body", missing);
+        neko_error_log("vm layout missing %s", missing);
         return JNI_FALSE;
     }
     neko_configure_wave4a_layout();
-    neko_debug_log("VMStructs layout parsed (java_spec_version=%d)", g_neko_vm_layout.java_spec_version);
+    NEKO_TRACE(0, "[nk] vm j=%d", g_neko_vm_layout.java_spec_version);
     return JNI_TRUE;
 }
 
@@ -1207,7 +1203,7 @@ static void neko_record_manifest_match(uint32_t index, void *method_star) {
     if (g_neko_manifest_method_stars[index] == NULL) {
         g_neko_manifest_method_stars[index] = method_star;
         g_neko_manifest_match_count++;
-        neko_debug_log("matched Method* for %s.%s%s at %p", entry->owner_internal, entry->method_name, entry->method_desc, method_star);
+        NEKO_TRACE(1, "[nk] mm %s.%s%s %p", entry->owner_internal, entry->method_name, entry->method_desc, method_star);
     } else {
         g_neko_manifest_method_stars[index] = method_star;
     }
@@ -1265,7 +1261,7 @@ static void neko_resolve_discovered_invoke_sites(const char *owner_internal, con
         if (strcmp(site->method_name, name) != 0 || strcmp(site->method_desc, desc) != 0) continue;
         if (__atomic_load_n(&site->resolved_method, __ATOMIC_ACQUIRE) != NULL) continue;
         __atomic_store_n(&site->resolved_method, method_star, __ATOMIC_RELEASE);
-        neko_native_debug_log("resolved invoke site %s.%s%s -> %p", owner_internal, name, desc, method_star);
+        NEKO_TRACE(1, "[nk] ri %s.%s%s %p", owner_internal, name, desc, method_star);
     }
 }
 
