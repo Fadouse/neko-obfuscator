@@ -7,6 +7,7 @@ import dev.nekoobfuscator.core.ir.l3.CStatement;
 import dev.nekoobfuscator.core.ir.l3.CType;
 import dev.nekoobfuscator.core.ir.l3.CVariable;
 import dev.nekoobfuscator.native_.codegen.CCodeGenerator;
+import dev.nekoobfuscator.native_.codegen.emit.Wave4aRuntimeApiEmitter;
 import dev.nekoobfuscator.native_.translator.NativeTranslator;
 import dev.nekoobfuscator.native_.translator.NativeTranslator.MethodSelection;
 import dev.nekoobfuscator.native_.translator.NativeTranslator.NativeMethodBinding;
@@ -21,6 +22,8 @@ import org.objectweb.asm.tree.MethodInsnNode;
 import org.objectweb.asm.tree.MethodNode;
 import org.objectweb.asm.tree.VarInsnNode;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Matcher;
@@ -152,6 +155,20 @@ class CCodeGeneratorTest {
     }
 
     @Test
+    void mirrorResolverUsesSingleDerefForJdk8() throws Exception {
+        String output = compileAndRunMirrorResolverHarness(8);
+
+        assertTrue(output.contains("single-deref"), output);
+    }
+
+    @Test
+    void mirrorResolverUsesDoubleDerefForJdk11() throws Exception {
+        String output = compileAndRunMirrorResolverHarness(11);
+
+        assertTrue(output.contains("double-deref"), output);
+    }
+
+    @Test
     void bindTimeResolved() {
         ClassNode classNode = new ClassNode();
         classNode.version = Opcodes.V1_8;
@@ -248,6 +265,104 @@ class CCodeGeneratorTest {
         int functionIndex = source.indexOf("JNIEXPORT jobject JNICALL " + functionName);
         assertTrue(functionIndex >= 0, () -> "Missing translated function `" + functionName + "` in generated C.\n" + source);
         return source.substring(functionIndex);
+    }
+
+    private static String compileAndRunMirrorResolverHarness(int javaSpecVersion) throws Exception {
+        Path tempDir = Files.createTempDirectory("neko_mirror_resolver_");
+        Path sourceFile = tempDir.resolve("mirror_resolver.c");
+        Path binaryFile = tempDir.resolve("mirror_resolver");
+        Files.writeString(sourceFile, mirrorResolverHarnessSource(javaSpecVersion));
+
+        ProcessBuilder compile = new ProcessBuilder("cc", "-std=c11", sourceFile.toString(), "-o", binaryFile.toString());
+        compile.redirectErrorStream(true);
+        Process compileProcess = compile.start();
+        String compileOutput = new String(compileProcess.getInputStream().readAllBytes());
+        assertTrue(compileProcess.waitFor() == 0, compileOutput);
+
+        ProcessBuilder run = new ProcessBuilder(binaryFile.toString());
+        run.redirectErrorStream(true);
+        Process runProcess = run.start();
+        String runOutput = new String(runProcess.getInputStream().readAllBytes());
+        assertTrue(runProcess.waitFor() == 0, runOutput);
+        return runOutput;
+    }
+
+    private static String mirrorResolverHarnessSource(int javaSpecVersion) {
+        return """
+            #include <stddef.h>
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+
+            typedef void* oop;
+            typedef struct Klass Klass;
+            typedef struct NekoVmLayout {
+                int java_spec_version;
+                ptrdiff_t off_klass_java_mirror;
+                ptrdiff_t off_oophandle_obj;
+            } NekoVmLayout;
+
+            """ + mirrorResolverHelpers() + """
+
+            int main(void) {
+                uint8_t klass_bytes[64] = {0};
+                uintptr_t marker = 0x12345678u;
+                oop mirror = (oop)&marker;
+                NekoVmLayout layout = { %d, 16, 0 };
+
+                if (layout.java_spec_version >= 9) {
+                    oop mirror_slot = mirror;
+                    void *cell = &mirror_slot;
+                    memcpy(klass_bytes + layout.off_klass_java_mirror + layout.off_oophandle_obj, &cell, sizeof(cell));
+                } else {
+                    memcpy(klass_bytes + layout.off_klass_java_mirror, &mirror, sizeof(mirror));
+                }
+
+                if (neko_resolve_mirror_oop_from_klass(&layout, (Klass*)klass_bytes) != mirror) {
+                    fputs("mirror-mismatch\\n", stderr);
+                    return 1;
+                }
+
+                puts(layout.java_spec_version >= 9 ? "double-deref" : "single-deref");
+                return 0;
+            }
+            """.formatted(javaSpecVersion);
+    }
+
+    private static String mirrorResolverHelpers() {
+        String source = minimalGeneratedSource();
+        String startMarker = "static inline void* neko_resolve_mirror_locator_from_klass";
+        String endMarker = "__attribute__((visibility(\"default\"))) oop neko_rt_mirror_from_klass_nosafepoint";
+        int start = source.indexOf(startMarker);
+        int end = source.indexOf(endMarker, start);
+        assertTrue(start >= 0 && end > start, () -> "Missing mirror resolver helpers in generated C.\n" + source);
+        return source.substring(start, end);
+    }
+
+    private static String minimalGeneratedSource() {
+        CFunction function = new CFunction(
+            "Java_pkg_MirrorProbe_demo",
+            CType.VOID,
+            List.of(new CVariable("env", CType.JOBJECT, 0), new CVariable("self", CType.JOBJECT, 1))
+        );
+        function.setMaxStack(0);
+        function.setMaxLocals(1);
+        function.addStatement(new CStatement.ReturnVoid());
+
+        NativeMethodBinding binding = new NativeMethodBinding(
+            "pkg/MirrorProbe",
+            "demo",
+            "()V",
+            function.name(),
+            "neko_binding_mirror_probe",
+            "()V",
+            false,
+            false
+        );
+
+        String source = new CCodeGenerator(12345L).generateSource(List.of(function), List.of(binding));
+        assertTrue(source.contains(new Wave4aRuntimeApiEmitter().renderWave4ASupport().substring(0, 32)), source);
+        return source;
     }
 
     private static String failure(String needle, String text) {

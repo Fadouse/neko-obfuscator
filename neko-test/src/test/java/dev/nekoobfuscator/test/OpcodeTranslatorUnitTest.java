@@ -289,13 +289,15 @@ class OpcodeTranslatorUnitTest {
             String staticGetBody = translatedBodySection(translateSingleMethod(
                 primitiveFieldOwner("FieldGetStatic" + primitive, "value", desc, 0, primitiveReturnInsn(primitive), true)
             ));
-            assertTrue(staticGetBody.contains("neko_fast_get_static_" + primitive + "_field("), staticGetBody);
+            assertTrue(staticGetBody.contains("neko_field_site_static_base(thread, __site)"), staticGetBody);
+            assertTrue(staticGetBody.contains("neko_field_read_" + primitive + "(__base, __site)"), staticGetBody);
             assertFalse(staticGetBody.contains(jniStaticFieldGetterName(primitive) + "(env,"), staticGetBody);
 
             String staticPutBody = translatedBodySection(translateSingleMethod(
                 primitiveFieldOwner("FieldPutStatic" + primitive, "value", desc, primitiveLoadOpcode(primitive), Opcodes.RETURN, true)
             ));
-            assertTrue(staticPutBody.contains("neko_fast_set_static_" + primitive + "_field("), staticPutBody);
+            assertTrue(staticPutBody.contains("neko_field_site_static_base(thread, __site)"), staticPutBody);
+            assertTrue(staticPutBody.contains("neko_field_write_" + primitive + "(__base, __site, val)"), staticPutBody);
             assertFalse(staticPutBody.contains(jniStaticFieldSetterName(primitive) + "(env,"), staticPutBody);
         }
     }

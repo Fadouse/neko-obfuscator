@@ -6,6 +6,8 @@ import dev.nekoobfuscator.native_.translator.NativeTranslationSafetyChecker;
 import org.junit.jupiter.api.Test;
 import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.tree.ClassNode;
+import org.objectweb.asm.tree.FieldInsnNode;
+import org.objectweb.asm.tree.FieldNode;
 import org.objectweb.asm.tree.InsnNode;
 import org.objectweb.asm.tree.LdcInsnNode;
 import org.objectweb.asm.tree.MethodNode;
@@ -84,6 +86,34 @@ class NativeTranslationSafetyCheckerTest {
         List<String> reasons = new ArrayList<>();
         assertFalse(checker.isSafe(method, reasons));
         assertTrue(reasons.contains("reference return requires no GC-permitting op between last write and ARETURN"), () -> String.join("; ", reasons));
+    }
+
+    @Test
+    void admitsPrimitiveStaticFieldFlow() {
+        ClassNode classNode = new ClassNode();
+        classNode.version = Opcodes.V1_8;
+        classNode.access = Opcodes.ACC_PUBLIC;
+        classNode.name = "pkg/CalcLike";
+        classNode.superName = "java/lang/Object";
+        classNode.fields = new ArrayList<>();
+        classNode.methods = new ArrayList<>();
+        classNode.fields.add(new FieldNode(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC, "count", "I", null, null));
+
+        MethodNode methodNode = new MethodNode(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC, "runAdd", "()V", null, null);
+        methodNode.instructions.add(new FieldInsnNode(Opcodes.GETSTATIC, classNode.name, "count", "I"));
+        methodNode.instructions.add(new InsnNode(Opcodes.ICONST_1));
+        methodNode.instructions.add(new InsnNode(Opcodes.IADD));
+        methodNode.instructions.add(new FieldInsnNode(Opcodes.PUTSTATIC, classNode.name, "count", "I"));
+        methodNode.instructions.add(new InsnNode(Opcodes.RETURN));
+        methodNode.maxStack = 2;
+        methodNode.maxLocals = 0;
+        classNode.methods.add(methodNode);
+
+        L1Class owner = new L1Class(classNode);
+        L1Method method = owner.findMethod("runAdd", "()V");
+        List<String> reasons = new ArrayList<>();
+
+        assertTrue(checker.isSafe(method, reasons), () -> String.join("; ", reasons));
     }
 
     private static L1Method method(String name, String desc, int access, MethodBody body, int maxStack, int maxLocals) {
