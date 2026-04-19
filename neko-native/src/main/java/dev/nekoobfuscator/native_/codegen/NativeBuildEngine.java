@@ -12,11 +12,22 @@ import java.util.*;
  */
 public final class NativeBuildEngine {
     private static final Logger log = LoggerFactory.getLogger(NativeBuildEngine.class);
+    private static final String NATIVE_DEBUG_PROPERTY = "neko.native.debug";
+    private static final String NATIVE_DEBUG_ENV = "NEKO_NATIVE_BUILD_DEBUG";
 
     private final String zigPath;
 
     public NativeBuildEngine(String zigPath) {
         this.zigPath = zigPath;
+    }
+
+    private static boolean isNativeDebugEnabled() {
+        String property = System.getProperty(NATIVE_DEBUG_PROPERTY);
+        if (property != null) {
+            return Boolean.parseBoolean(property);
+        }
+        String env = System.getenv(NATIVE_DEBUG_ENV);
+        return env != null && Boolean.parseBoolean(env);
     }
 
     public Map<String, byte[]> build(String cSource, String headerSource, List<String> targets) throws IOException {
@@ -73,6 +84,11 @@ public final class NativeBuildEngine {
                 "-target", zigTarget,
                 "-I", jniInclude.toString()
             ));
+            if (isNativeDebugEnabled()) {
+                // `./gradlew :neko-cli:installDist -PnekoNativeDebug=true` injects `-Dneko.native.debug=true`
+                // into the installed CLI launcher so obfuscation runs emit debug-enabled native builds.
+                cmd.add("-DNEKO_DEBUG_ENABLED=1");
+            }
             if (jniPlatformInclude != null) {
                 cmd.addAll(List.of("-I", jniPlatformInclude.toString()));
             }

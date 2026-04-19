@@ -6,6 +6,10 @@ plugins {
 
 application {
     mainClass.set("dev.nekoobfuscator.cli.Main")
+    if ((findProperty("nekoNativeDebug")?.toString()?.toBoolean() == true)
+        || (System.getenv("NEKO_NATIVE_BUILD_DEBUG")?.toBoolean() == true)) {
+        applicationDefaultJvmArgs = listOf("-Dneko.native.debug=true")
+    }
 }
 
 dependencies {

@@ -166,7 +166,12 @@ static JavaVM *g_neko_java_vm = NULL;
 static jvmtiEnv *g_neko_jvmti = NULL;
 static jrawMonitorID g_neko_manifest_lock = NULL;
 static uint32_t g_neko_manifest_match_count = 0u;
-static int g_neko_debug_enabled = -1;
+#ifdef NEKO_DEBUG_ENABLED
+static int neko_debug_level = 0;
+#define NEKO_TRACE(level, ...) do { if (neko_debug_level >= (level)) fprintf(stderr, __VA_ARGS__); } while(0)
+#else
+#define NEKO_TRACE(level, ...) ((void)0)
+#endif
 static int g_neko_flag_patch_path_logged = 0;
 static const char *g_neko_wave4a_unavailable_reason = "uninitialized";
 static int g_neko_wave4a_handle_caveat_logged = 0;
@@ -179,11 +184,15 @@ static void *g_neko_libjvm_handle = NULL;
 #endif
 
 static int neko_debug_enabled(void) {
-    if (g_neko_debug_enabled < 0) {
-        const char *value = getenv("NEKO_NATIVE_DEBUG");
-        g_neko_debug_enabled = (value != NULL && value[0] != '\\0') ? 1 : 0;
-    }
-    return g_neko_debug_enabled;
+#ifdef NEKO_DEBUG_ENABLED
+    return neko_debug_level;
+#else
+    return 0;
+#endif
+}
+
+static int neko_debug_level_at_least(int level) {
+    return neko_debug_enabled() >= level;
 }
 
 static void neko_vlog(FILE *stream, const char *fmt, va_list args) {
@@ -194,22 +203,46 @@ static void neko_vlog(FILE *stream, const char *fmt, va_list args) {
 }
 
 static void neko_debug_log(const char *fmt, ...) {
+#ifdef NEKO_DEBUG_ENABLED
     va_list args;
     if (!neko_debug_enabled()) return;
     va_start(args, fmt);
     neko_vlog(stderr, fmt, args);
     va_end(args);
+#else
+    (void)fmt;
+#endif
 }
 
 static void neko_native_debug_log(const char *fmt, ...) {
+#ifdef NEKO_DEBUG_ENABLED
     va_list args;
     if (!neko_debug_enabled()) return;
     va_start(args, fmt);
-    fputs("[neko] ", stderr);
+    fputs("[nk] n ", stderr);
     vfprintf(stderr, fmt, args);
     fputc('\\n', stderr);
     fflush(stderr);
     va_end(args);
+#else
+    (void)fmt;
+#endif
+}
+
+static void neko_native_trace_log(int level, const char *fmt, ...) {
+#ifdef NEKO_DEBUG_ENABLED
+    va_list args;
+    if (!neko_debug_level_at_least(level)) return;
+    va_start(args, fmt);
+    fputs("[nk] t ", stderr);
+    vfprintf(stderr, fmt, args);
+    fputc('\\n', stderr);
+    fflush(stderr);
+    va_end(args);
+#else
+    (void)level;
+    (void)fmt;
+#endif
 }
 
 static void neko_error_log(const char *fmt, ...) {
