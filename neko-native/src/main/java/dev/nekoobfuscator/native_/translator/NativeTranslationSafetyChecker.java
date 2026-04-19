@@ -5,9 +5,13 @@ import org.objectweb.asm.Handle;
 import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.Type;
 import org.objectweb.asm.tree.AbstractInsnNode;
+import org.objectweb.asm.tree.FrameNode;
 import org.objectweb.asm.tree.FieldInsnNode;
+import org.objectweb.asm.tree.InsnNode;
 import org.objectweb.asm.tree.LdcInsnNode;
+import org.objectweb.asm.tree.LineNumberNode;
 import org.objectweb.asm.tree.MethodInsnNode;
+import org.objectweb.asm.tree.VarInsnNode;
 
 import java.util.Set;
 import java.util.List;
@@ -41,8 +45,11 @@ public final class NativeTranslationSafetyChecker {
         if ((access & (Opcodes.ACC_ABSTRACT | Opcodes.ACC_NATIVE)) == 0 && !method.hasCode()) {
             reasons.add("method has no translatable bytecode body");
         }
-        if (returnType.getSort() == Type.OBJECT || returnType.getSort() == Type.ARRAY) {
-            reasons.add("reference return types deferred until oop return adapters land");
+        if (isReferenceType(returnType)) {
+            String referenceReturnReason = unsupportedReferenceReturnReason(method);
+            if (referenceReturnReason != null) {
+                addReason(reasons, referenceReturnReason);
+            }
         }
 
         for (AbstractInsnNode insn = method.instructions().getFirst(); insn != null; insn = insn.getNext()) {
@@ -166,6 +173,149 @@ public final class NativeTranslationSafetyChecker {
         }
     }
 
+    private String unsupportedReferenceReturnReason(L1Method method) {
+        AbstractInsnNode firstRealInsn = nextRealInsn(method.instructions().getFirst());
+        if (firstRealInsn == null) {
+            return "reference return requires bytecode body";
+        }
+
+        boolean sawReferenceReturn = false;
+        for (AbstractInsnNode insn = firstRealInsn; insn != null; insn = nextRealInsn(insn.getNext())) {
+            if (insn.getOpcode() != Opcodes.ARETURN) {
+                continue;
+            }
+
+            sawReferenceReturn = true;
+            AbstractInsnNode producer = previousRealInsn(insn.getPrevious());
+            if (producer == null) {
+                return "reference return flow could not be proven";
+            }
+            if (!isSafeReferenceReturnProducer(producer)) {
+                return "reference return requires direct ALOAD/ACONST_NULL producer";
+            }
+            if (producer instanceof VarInsnNode varInsn) {
+                String localReason = validateReferenceReturnLocal(method, firstRealInsn, insn, varInsn.var);
+                if (localReason != null) {
+                    return localReason;
+                }
+            }
+        }
+
+        return sawReferenceReturn ? null : "reference return requires explicit ARETURN";
+    }
+
+    private boolean isSafeReferenceReturnProducer(AbstractInsnNode insn) {
+        if (insn == null) {
+            return false;
+        }
+        if (insn instanceof VarInsnNode varInsn) {
+            return varInsn.getOpcode() == Opcodes.ALOAD;
+        }
+        return insn instanceof InsnNode && insn.getOpcode() == Opcodes.ACONST_NULL;
+    }
+
+    private AbstractInsnNode nextRealInsn(AbstractInsnNode insn) {
+        AbstractInsnNode cursor = insn;
+        while (cursor instanceof LineNumberNode || cursor instanceof FrameNode) {
+            cursor = cursor.getNext();
+        }
+        return cursor;
+    }
+
+    private AbstractInsnNode previousRealInsn(AbstractInsnNode insn) {
+        AbstractInsnNode cursor = insn;
+        while (cursor instanceof LineNumberNode || cursor instanceof FrameNode) {
+            cursor = cursor.getPrevious();
+        }
+        return cursor;
+    }
+
+    private String validateReferenceReturnLocal(L1Method method, AbstractInsnNode firstRealInsn, AbstractInsnNode areturnInsn, int localIndex) {
+        AbstractInsnNode lastWrite = previousReferenceLocalWrite(areturnInsn, localIndex);
+        AbstractInsnNode gcScanStart = firstRealInsn;
+        if (lastWrite != null) {
+            AbstractInsnNode writeProducer = previousRealInsn(lastWrite.getPrevious());
+            if (!isSafeReferenceReturnProducer(writeProducer)) {
+                return "reference return requires direct ALOAD/ACONST_NULL producer";
+            }
+            gcScanStart = nextRealInsn(lastWrite.getNext());
+        } else if (!isReferenceParameterLocal(method, localIndex)) {
+            return "reference return requires parameter/local source";
+        }
+
+        if (hasGcPermittingOpcodeBetween(gcScanStart, areturnInsn)) {
+            return "reference return requires no GC-permitting op between last write and ARETURN";
+        }
+        return null;
+    }
+
+    private AbstractInsnNode previousReferenceLocalWrite(AbstractInsnNode areturnInsn, int localIndex) {
+        for (AbstractInsnNode insn = previousRealInsn(areturnInsn.getPrevious()); insn != null; insn = previousRealInsn(insn.getPrevious())) {
+            if (insn instanceof VarInsnNode varInsn && varInsn.getOpcode() == Opcodes.ASTORE && varInsn.var == localIndex) {
+                return insn;
+            }
+        }
+        return null;
+    }
+
+    private boolean isReferenceParameterLocal(L1Method method, int localIndex) {
+        int slot = 0;
+        if (!method.isStatic()) {
+            if (localIndex == 0) {
+                return true;
+            }
+            slot = 1;
+        }
+        for (Type argumentType : method.argumentTypes()) {
+            if (slot == localIndex && isReferenceType(argumentType)) {
+                return true;
+            }
+            slot += argumentType.getSize();
+        }
+        return false;
+    }
+
+    private boolean hasGcPermittingOpcodeBetween(AbstractInsnNode startInsn, AbstractInsnNode endInsnExclusive) {
+        for (AbstractInsnNode insn = startInsn; insn != null && insn != endInsnExclusive; insn = nextRealInsn(insn.getNext())) {
+            if (isGcPermittingOpcode(insn)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean isGcPermittingOpcode(AbstractInsnNode insn) {
+        int opcode = insn.getOpcode();
+        if (opcode == -1) {
+            return false;
+        }
+        return switch (opcode) {
+            case Opcodes.INVOKEVIRTUAL,
+                 Opcodes.INVOKESPECIAL,
+                 Opcodes.INVOKESTATIC,
+                 Opcodes.INVOKEINTERFACE,
+                 Opcodes.INVOKEDYNAMIC,
+                 Opcodes.NEW,
+                 Opcodes.NEWARRAY,
+                 Opcodes.ANEWARRAY,
+                 Opcodes.MULTIANEWARRAY,
+                 Opcodes.GETFIELD,
+                 Opcodes.PUTFIELD,
+                 Opcodes.GETSTATIC,
+                 Opcodes.PUTSTATIC,
+                 Opcodes.AALOAD,
+                 Opcodes.AASTORE,
+                 Opcodes.ARRAYLENGTH,
+                 Opcodes.ATHROW,
+                 Opcodes.MONITORENTER,
+                 Opcodes.MONITOREXIT,
+                 Opcodes.CHECKCAST,
+                 Opcodes.INSTANCEOF,
+                 Opcodes.LDC -> true;
+            default -> false;
+        };
+    }
+
     private String unsupportedLdcReason(LdcInsnNode ldcInsn) {
         Object constant = ldcInsn.cst;
         if (constant instanceof Integer
@@ -211,6 +361,10 @@ public final class NativeTranslationSafetyChecker {
 
     private boolean isPrimitiveDescriptor(String desc) {
         return desc != null && desc.length() == 1 && "ZBCSIJFD".indexOf(desc.charAt(0)) >= 0;
+    }
+
+    private boolean isReferenceType(Type type) {
+        return type.getSort() == Type.OBJECT || type.getSort() == Type.ARRAY;
     }
 
     private String opcodeName(int opcode) {
