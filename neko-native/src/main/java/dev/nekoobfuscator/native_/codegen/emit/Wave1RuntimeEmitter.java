@@ -866,8 +866,13 @@ static const neko_hotspot_state g_hotspot = {0};
 #endif
 
 NEKO_FAST_INLINE void* neko_handle_oop(jobject handle) {
+    uintptr_t raw_handle;
+    void *volatile *slot;
     if (handle == NULL) return NULL;
-    return (void*)handle;
+    raw_handle = (uintptr_t)handle;
+    if (g_neko_vm_layout.java_spec_version >= 21 && (raw_handle & 0x3u) == 0x2u) raw_handle -= 2u;
+    slot = (void *volatile *)(uintptr_t)raw_handle;
+    return slot == NULL ? NULL : *slot;
 }
 
 NEKO_FAST_INLINE jint neko_fast_array_length(JNIEnv *env, jarray arr) {
