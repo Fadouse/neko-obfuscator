@@ -330,32 +330,261 @@ public final class Wave2FieldLdcEmitter {
         appendWave2PrimitiveFieldAccessors(sb, 'J', "jlong");
         appendWave2PrimitiveFieldAccessors(sb, 'F', "jfloat");
         appendWave2PrimitiveFieldAccessors(sb, 'D', "jdouble");
-        sb.append("static jmethodID g_neko_wave2_string_intern_mid = NULL;\n\n");
-        sb.append("__attribute__((visibility(\"default\"))) void* neko_resolve_ldc_string(const uint8_t *utf8, size_t utf8_len) {\n");
-        sb.append("    JNIEnv *env = neko_current_env();\n");
-        sb.append("    char *copy;\n");
-        sb.append("    jclass string_cls;\n");
-        sb.append("    jstring raw;\n");
-        sb.append("    jstring interned;\n");
-        sb.append("    jobject global;\n");
-        sb.append("    if (env == NULL) return NULL;\n");
-        sb.append("    copy = neko_wave2_copy_bytes(utf8, utf8_len);\n");
-        sb.append("    if (copy == NULL) return NULL;\n");
-        sb.append("    raw = (*env)->NewStringUTF(env, copy);\n");
-        sb.append("    free(copy);\n");
-        sb.append("    if (raw == NULL || neko_exception_check(env)) return NULL;\n");
-        sb.append("    string_cls = neko_find_class(env, \"java/lang/String\");\n");
-        sb.append("    if (string_cls == NULL || neko_exception_check(env)) { neko_delete_local_ref(env, raw); return NULL; }\n");
-        sb.append("    if (g_neko_wave2_string_intern_mid == NULL) g_neko_wave2_string_intern_mid = neko_get_method_id(env, string_cls, \"intern\", \"()Ljava/lang/String;\");\n");
-        sb.append("    if (g_neko_wave2_string_intern_mid == NULL || neko_exception_check(env)) { neko_delete_local_ref(env, string_cls); neko_delete_local_ref(env, raw); return NULL; }\n");
-        sb.append("    interned = (jstring)neko_call_object_method_a(env, raw, g_neko_wave2_string_intern_mid, NULL);\n");
-        sb.append("    neko_delete_local_ref(env, raw);\n");
-        sb.append("    neko_delete_local_ref(env, string_cls);\n");
-        sb.append("    if (interned == NULL || neko_exception_check(env)) return NULL;\n");
-        sb.append("    global = neko_new_global_ref(env, interned);\n");
-        sb.append("    neko_delete_local_ref(env, interned);\n");
-        sb.append("    return global;\n");
-        sb.append("}\n\n");
+        sb.append("""
+#define NEKO_MAX_INLINE_UTF16 1024
+#define NEKO_MAX_INLINE_PAYLOAD 2048
+
+static jboolean neko_mutf8_decode_unit(const uint8_t *bytes, size_t len, size_t *cursor, uint16_t *out) {
+    uint8_t b0;
+    if (bytes == NULL || cursor == NULL || out == NULL || *cursor >= len) return JNI_FALSE;
+    b0 = bytes[(*cursor)++];
+    if ((b0 & 0x80u) == 0u) {
+        if (b0 == 0u) return JNI_FALSE;
+        *out = (uint16_t)b0;
+        return JNI_TRUE;
+    }
+    if ((b0 & 0xE0u) == 0xC0u) {
+        uint8_t b1;
+        uint16_t value;
+        if (*cursor >= len) return JNI_FALSE;
+        b1 = bytes[(*cursor)++];
+        if ((b1 & 0xC0u) != 0x80u) return JNI_FALSE;
+        value = (uint16_t)(((uint16_t)(b0 & 0x1Fu) << 6) | (uint16_t)(b1 & 0x3Fu));
+        if (value == 0u && (b0 != 0xC0u || b1 != 0x80u)) return JNI_FALSE;
+        *out = value;
+        return JNI_TRUE;
+    }
+    if ((b0 & 0xF0u) == 0xE0u) {
+        uint8_t b1;
+        uint8_t b2;
+        if ((*cursor + 1u) >= len) return JNI_FALSE;
+        b1 = bytes[(*cursor)++];
+        b2 = bytes[(*cursor)++];
+        if ((b1 & 0xC0u) != 0x80u || (b2 & 0xC0u) != 0x80u) return JNI_FALSE;
+        *out = (uint16_t)((((uint16_t)(b0 & 0x0Fu)) << 12)
+            | (((uint16_t)(b1 & 0x3Fu)) << 6)
+            | (uint16_t)(b2 & 0x3Fu));
+        return JNI_TRUE;
+    }
+    return JNI_FALSE;
+}
+
+static jboolean neko_decode_mutf8_to_utf16(const uint8_t *bytes, size_t len, uint16_t **utf16_out, int32_t *utf16_len_out, int32_t *heap_alloc_out) {
+    size_t cursor = 0u;
+    size_t count = 0u;
+    uint16_t *utf16;
+    int32_t heap_alloc = 0;
+    if (utf16_out == NULL || *utf16_out == NULL || utf16_len_out == NULL || heap_alloc_out == NULL) return JNI_FALSE;
+    while (cursor < len) {
+        uint16_t code_unit;
+        if (!neko_mutf8_decode_unit(bytes, len, &cursor, &code_unit)) return JNI_FALSE;
+        count++;
+        if (count > 0x7fffffffU) return JNI_FALSE;
+    }
+    utf16 = *utf16_out;
+    if (count > NEKO_MAX_INLINE_UTF16) {
+        utf16 = (uint16_t*)malloc((count == 0u ? 1u : count) * sizeof(uint16_t));
+        if (utf16 == NULL) return JNI_FALSE;
+        heap_alloc = 1;
+    }
+    cursor = 0u;
+    count = 0u;
+    while (cursor < len) {
+        uint16_t code_unit;
+        if (!neko_mutf8_decode_unit(bytes, len, &cursor, &code_unit)) {
+            if (heap_alloc) free(utf16);
+            return JNI_FALSE;
+        }
+        utf16[count++] = code_unit;
+    }
+    *utf16_out = utf16;
+    *utf16_len_out = (int32_t)count;
+    *heap_alloc_out = heap_alloc;
+    return JNI_TRUE;
+}
+
+static uint32_t neko_string_intern_hash(uint32_t coder, uint32_t char_length, const uint8_t *payload, uint32_t payload_length) {
+    uint32_t hash = 2166136261u;
+    hash = neko_fnv1a32_update_byte(hash, (uint8_t)(coder & 0xFFu));
+    hash = neko_fnv1a32_update_byte(hash, (uint8_t)((coder >> 8) & 0xFFu));
+    hash = neko_fnv1a32_update_byte(hash, (uint8_t)((coder >> 16) & 0xFFu));
+    hash = neko_fnv1a32_update_byte(hash, (uint8_t)((coder >> 24) & 0xFFu));
+    hash = neko_fnv1a32_update_byte(hash, (uint8_t)(char_length & 0xFFu));
+    hash = neko_fnv1a32_update_byte(hash, (uint8_t)((char_length >> 8) & 0xFFu));
+    hash = neko_fnv1a32_update_byte(hash, (uint8_t)((char_length >> 16) & 0xFFu));
+    hash = neko_fnv1a32_update_byte(hash, (uint8_t)((char_length >> 24) & 0xFFu));
+    for (uint32_t i = 0; i < payload_length; i++) {
+        hash = neko_fnv1a32_update_byte(hash, payload[i]);
+    }
+    return hash;
+}
+
+static void neko_resolve_ldc_string(NekoManifestLdcSite* site) {
+    uint16_t utf16_buf[NEKO_MAX_INLINE_UTF16];
+    uint16_t* utf16 = utf16_buf;
+    int32_t utf16_len = 0;
+    int32_t heap_alloc = 0;
+    int32_t is_jdk8;
+    int32_t coder;
+    void* array_klass;
+    int32_t array_len;
+    void* inner_array;
+    uint32_t lh_arr;
+    uint32_t header_bytes;
+    uint8_t* array_base;
+    uint32_t lh_str;
+    size_t string_size;
+    void* string_oop;
+    uint32_t key_payload_bytes;
+    uint8_t key_stackbuf[NEKO_MAX_INLINE_PAYLOAD];
+    uint8_t* key_bytes = key_stackbuf;
+    uint8_t* key_heap = NULL;
+    uint32_t h;
+    uint32_t bucket_idx;
+    NekoStringInternEntry* existing;
+    uint32_t slot;
+    NekoStringInternEntry* entry;
+    uint8_t* stored_payload;
+    size_t stored_payload_size;
+    int32_t elem_off;
+    if (site == NULL) return;
+    if (site->resolved_cache_handle != NULL) {
+        return;
+    }
+    if (g_neko_vm_layout.klass_java_lang_String == NULL) return;
+    if (g_neko_vm_layout.off_string_value < 0) return;
+    if (g_neko_vm_layout.off_string_hash < 0) return;
+    if (!neko_decode_mutf8_to_utf16(site->raw_constant_utf8, site->raw_constant_utf8_len, &utf16, &utf16_len, &heap_alloc)) {
+        return;
+    }
+    is_jdk8 = (g_neko_vm_layout.off_string_coder < 0);
+    if (is_jdk8) {
+        coder = 1;
+    } else {
+        coder = 0;
+        for (int32_t i = 0; i < utf16_len; i++) {
+            if (utf16[i] > 0x00FFu) {
+                coder = 1;
+                break;
+            }
+        }
+    }
+    array_klass = is_jdk8
+        ? g_neko_vm_layout.klass_array_char
+        : g_neko_vm_layout.klass_array_byte;
+    if (array_klass == NULL) {
+        if (heap_alloc) free(utf16);
+        return;
+    }
+    array_len = is_jdk8
+        ? utf16_len
+        : (coder == 0 ? utf16_len : utf16_len * 2);
+    inner_array = neko_rt_try_alloc_array_fast_nosafepoint(array_klass, array_len);
+    if (inner_array == NULL) {
+        if (heap_alloc) free(utf16);
+        return;
+    }
+    lh_arr = *(uint32_t*)((uint8_t*)array_klass + g_neko_vm_layout.off_klass_layout_helper);
+    header_bytes = neko_lh_header_size(lh_arr);
+    array_base = (uint8_t*)inner_array + header_bytes;
+    if (is_jdk8) {
+        for (int32_t i = 0; i < utf16_len; i++) {
+            *(uint16_t*)(array_base + i * 2) = utf16[i];
+        }
+    } else if (coder == 0) {
+        for (int32_t i = 0; i < utf16_len; i++) {
+            array_base[i] = (uint8_t)utf16[i];
+        }
+    } else {
+        for (int32_t i = 0; i < utf16_len; i++) {
+            array_base[2 * i] = (uint8_t)(utf16[i] >> 8);
+            array_base[2 * i + 1] = (uint8_t)(utf16[i] & 0xFFu);
+        }
+    }
+    lh_str = *(uint32_t*)((uint8_t*)g_neko_vm_layout.klass_java_lang_String + g_neko_vm_layout.off_klass_layout_helper);
+    string_size = neko_lh_instance_size(lh_str);
+    string_oop = neko_rt_try_alloc_instance_fast_nosafepoint((Klass*)g_neko_vm_layout.klass_java_lang_String, string_size);
+    if (string_oop == NULL) {
+        if (heap_alloc) free(utf16);
+        return;
+    }
+    neko_store_heap_oop_at_unpublished(string_oop, g_neko_vm_layout.off_string_value, inner_array);
+    if (!is_jdk8) {
+        *(uint8_t*)((uint8_t*)string_oop + g_neko_vm_layout.off_string_coder) = (uint8_t)coder;
+    }
+    *(int32_t*)((uint8_t*)string_oop + g_neko_vm_layout.off_string_hash) = 0;
+    key_payload_bytes = is_jdk8
+        ? (uint32_t)(utf16_len * 2)
+        : (coder == 0 ? (uint32_t)utf16_len : (uint32_t)utf16_len * 2u);
+    if ((size_t)key_payload_bytes > sizeof(key_stackbuf)) {
+        key_heap = (uint8_t*)malloc(key_payload_bytes);
+        if (key_heap == NULL) {
+            if (heap_alloc) free(utf16);
+            return;
+        }
+        key_bytes = key_heap;
+    }
+    if (is_jdk8) {
+        for (int32_t i = 0; i < utf16_len; i++) {
+            key_bytes[2 * i] = (uint8_t)(utf16[i] >> 8);
+            key_bytes[2 * i + 1] = (uint8_t)(utf16[i] & 0xFFu);
+        }
+    } else if (key_payload_bytes != 0u) {
+        memcpy(key_bytes, array_base, key_payload_bytes);
+    }
+    h = neko_string_intern_hash((uint32_t)coder, (uint32_t)utf16_len, key_bytes, key_payload_bytes);
+    bucket_idx = h % NEKO_STRING_INTERN_BUCKET_COUNT;
+    existing = g_neko_string_intern_buckets[bucket_idx];
+    while (existing != NULL) {
+        if (existing->coder == (uint32_t)coder
+            && existing->char_length == (uint32_t)utf16_len
+            && existing->payload_length == key_payload_bytes
+            && (key_payload_bytes == 0u || memcmp(existing->payload, key_bytes, key_payload_bytes) == 0)) {
+            if (key_heap) free(key_heap);
+            if (heap_alloc) free(utf16);
+            site->resolved_cache_handle = existing;
+            return;
+        }
+        existing = existing->next;
+    }
+    if (g_neko_string_intern_filled >= NEKO_STRING_INTERN_SLOT_COUNT) {
+        if (key_heap) free(key_heap);
+        if (heap_alloc) free(utf16);
+        return;
+    }
+    if (g_neko_string_roots_array == NULL || g_neko_vm_layout.klass_array_object == NULL) {
+        if (key_heap) free(key_heap);
+        if (heap_alloc) free(utf16);
+        return;
+    }
+    stored_payload_size = key_payload_bytes == 0u ? 1u : (size_t)key_payload_bytes;
+    stored_payload = (uint8_t*)malloc(stored_payload_size);
+    if (stored_payload == NULL) {
+        if (key_heap) free(key_heap);
+        if (heap_alloc) free(utf16);
+        return;
+    }
+    if (key_payload_bytes != 0u) {
+        memcpy(stored_payload, key_bytes, key_payload_bytes);
+    }
+    slot = g_neko_string_intern_filled;
+    entry = &g_neko_string_intern_entries[slot];
+    entry->coder = (uint32_t)coder;
+    entry->char_length = (uint32_t)utf16_len;
+    entry->payload_length = key_payload_bytes;
+    entry->slot_index = slot;
+    entry->payload = stored_payload;
+    entry->next = g_neko_string_intern_buckets[bucket_idx];
+    g_neko_string_intern_buckets[bucket_idx] = entry;
+    g_neko_string_intern_filled = slot + 1u;
+    elem_off = neko_object_array_element_offset(g_neko_vm_layout.klass_array_object, (int32_t)slot);
+    neko_store_heap_oop_at_unpublished(g_neko_string_roots_array, elem_off, string_oop);
+    site->resolved_cache_handle = entry;
+    if (key_heap) free(key_heap);
+    if (heap_alloc) free(utf16);
+}
+
+""");
         sb.append("static jobject neko_owner_class_loader(JNIEnv *env, jclass owner_class) {\n");
         sb.append("    jclass classClass;\n");
         sb.append("    jmethodID getClassLoader;\n");
@@ -478,28 +707,24 @@ public final class Wave2FieldLdcEmitter {
         sb.append("    if (!neko_ensure_ldc_class_site_resolved(thread, site)) return NULL;\n");
         sb.append("    return neko_rt_mirror_from_klass_nosafepoint((Klass*)__atomic_load_n(&site->cached_klass, __ATOMIC_ACQUIRE));\n");
         sb.append("}\n\n");
-        sb.append("static jobject neko_resolve_ldc_string_site_slow(JNIEnv *env, NekoManifestLdcSite *site) {\n");
-        sb.append("    void *cached;\n");
-        sb.append("    jobject global;\n");
-        sb.append("    void *expected;\n");
-        sb.append("    if (env == NULL || site == NULL) return NULL;\n");
-        sb.append("    cached = __atomic_load_n(&site->resolved_cache_handle, __ATOMIC_ACQUIRE);\n");
-        sb.append("    if (cached != NULL) return (jobject)cached;\n");
-        sb.append("    global = (jobject)neko_resolve_ldc_string(site->raw_constant_utf8, site->raw_constant_utf8_len);\n");
-        sb.append("    if (global == NULL || neko_exception_check(env)) return NULL;\n");
-        sb.append("    expected = NULL;\n");
-        sb.append("    if (!__atomic_compare_exchange_n(&site->resolved_cache_handle, &expected, (void*)global, 0, __ATOMIC_RELEASE, __ATOMIC_ACQUIRE)) {\n");
-        sb.append("        neko_delete_global_ref(env, global);\n");
-        sb.append("        return (jobject)expected;\n");
-        sb.append("    }\n");
-        sb.append("    return global;\n");
-        sb.append("}\n\n");
         sb.append("static inline jobject neko_ldc_string_site_oop(JNIEnv *env, NekoManifestLdcSite *site) {\n");
-        sb.append("    void *cached;\n");
+        sb.append("    NekoStringInternEntry* entry;\n");
+        sb.append("    void* loader_mirror;\n");
+        sb.append("    void* root_array;\n");
+        sb.append("    int32_t elem_off;\n");
+        sb.append("    (void)env;\n");
         sb.append("    if (site == NULL) return NULL;\n");
-        sb.append("    cached = __atomic_load_n(&site->resolved_cache_handle, __ATOMIC_ACQUIRE);\n");
-        sb.append("    if (__builtin_expect(cached != NULL, 1)) return (jobject)cached;\n");
-        sb.append("    return neko_resolve_ldc_string_site_slow(env, site);\n");
+        sb.append("    entry = (NekoStringInternEntry*)site->resolved_cache_handle;\n");
+        sb.append("    if (entry == NULL) return NULL;\n");
+        sb.append("    if (g_neko_vm_layout.klass_array_object == NULL) return NULL;\n");
+        sb.append("    if (g_neko_vm_layout.klass_neko_native_loader == NULL) return NULL;\n");
+        sb.append("    if (g_neko_vm_layout.off_loader_string_roots < 0) return NULL;\n");
+        sb.append("    loader_mirror = neko_rt_mirror_from_klass_nosafepoint((Klass*)g_neko_vm_layout.klass_neko_native_loader);\n");
+        sb.append("    if (loader_mirror == NULL) return NULL;\n");
+        sb.append("    root_array = neko_load_heap_oop_from_published(loader_mirror, g_neko_vm_layout.off_loader_string_roots);\n");
+        sb.append("    if (root_array == NULL) return NULL;\n");
+        sb.append("    elem_off = neko_object_array_element_offset(g_neko_vm_layout.klass_array_object, (int32_t)entry->slot_index);\n");
+        sb.append("    return neko_load_heap_oop_from_published(root_array, elem_off);\n");
         sb.append("}\n\n");
         sb.append("static void* neko_resolve_ldc_site_oop(void *thread, NekoManifestLdcSite *site) {\n");
         sb.append("    if (site == NULL) return NULL;\n");

@@ -66,6 +66,7 @@ static int g_neko_flag_patch_path_logged = 0;
 static const char *g_neko_wave4a_unavailable_reason = "uninitialized";
 static int g_neko_wave4a_handle_caveat_logged = 0;
 static jboolean g_neko_use_compact_object_headers = JNI_FALSE;
+static void* g_neko_string_roots_array = NULL;
 
 #if defined(_WIN32)
 static HMODULE g_neko_libjvm_handle = NULL;
@@ -235,6 +236,8 @@ static bool neko_read_u5(const uint8_t* buf, int limit, int* p, uint32_t* out);
 static bool neko_field_walk_fis21(void* ik, const char* target_name, uint32_t target_name_len, const char* target_desc, uint32_t target_desc_len, bool want_static, int32_t* offset_out);
 static bool neko_resolve_field_offset(void* klass, const char* target_name, uint32_t target_name_len, const char* target_desc, uint32_t target_desc_len, bool want_static, int32_t* offset_out);
 static void neko_resolve_string_intern_layout(void);
+static void neko_resolve_ldc_string(NekoManifestLdcSite *site);
+static void neko_string_intern_prewarm_and_publish(JNIEnv *env);
 static void neko_log_wave2_ready(void);
 
 static void neko_derive_thread_tlab_top_offset(void) {
@@ -1119,6 +1122,14 @@ static void neko_manifest_lock_exit(void) {
     }
 }
 
+static void neko_manifest_lock_acquire(void) {
+    neko_manifest_lock_enter();
+}
+
+static void neko_manifest_lock_release(void) {
+    neko_manifest_lock_exit();
+}
+
 static void neko_record_manifest_match(uint32_t index, void *method_star) {
     const NekoManifestMethod *entry;
     if (method_star == NULL || index >= g_neko_manifest_method_count) return;
@@ -1404,6 +1415,40 @@ static void neko_resolve_string_intern_layout(void) {
     } else {
         NEKO_TRACE(1, "[nk] si unresolved dev/nekoobfuscator/runtime/NekoNativeLoader.__nekoStringRoots");
     }
+}
+
+static void neko_string_intern_prewarm_and_publish(JNIEnv *env) {
+    void *root_array;
+    void *loader_mirror;
+    if (env == NULL) return;
+    if (g_neko_vm_layout.klass_java_lang_String == NULL) return;
+    if (g_neko_vm_layout.klass_array_object == NULL) return;
+    if (g_neko_vm_layout.klass_neko_native_loader == NULL) return;
+    if (g_neko_vm_layout.off_loader_string_roots < 0) return;
+    if (g_neko_vm_layout.off_string_hash < 0) return;
+    if (NEKO_STRING_INTERN_SLOT_COUNT == 0u) return;
+    root_array = neko_rt_try_alloc_array_fast_nosafepoint(
+        g_neko_vm_layout.klass_array_object,
+        (int32_t)NEKO_STRING_INTERN_SLOT_COUNT
+    );
+    if (root_array == NULL) return;
+    memset(g_neko_string_intern_buckets, 0, sizeof(g_neko_string_intern_buckets));
+    memset(g_neko_string_intern_entries, 0, sizeof(g_neko_string_intern_entries));
+    g_neko_string_intern_filled = 0u;
+    g_neko_string_roots_array = root_array;
+    neko_manifest_lock_acquire();
+    for (uint32_t method_index = 0; method_index < g_neko_manifest_method_count; method_index++) {
+        NekoManifestMethod *method = (NekoManifestMethod*)&g_neko_manifest_methods[method_index];
+        for (uint32_t site_index = 0; site_index < method->ldc_site_count; site_index++) {
+            NekoManifestLdcSite *site = &method->ldc_sites[site_index];
+            if (site->kind != NEKO_LDC_KIND_STRING) continue;
+            neko_resolve_ldc_string(site);
+        }
+    }
+    neko_manifest_lock_release();
+    loader_mirror = neko_rt_mirror_from_klass_nosafepoint((Klass*)g_neko_vm_layout.klass_neko_native_loader);
+    if (loader_mirror == NULL) return;
+    neko_store_heap_oop_at_unpublished(loader_mirror, g_neko_vm_layout.off_loader_string_roots, root_array);
 }
 
 static void neko_publish_prepared_ldc_class_site(JNIEnv *env, jclass klass, const char *signature, void *prepared_klass) {

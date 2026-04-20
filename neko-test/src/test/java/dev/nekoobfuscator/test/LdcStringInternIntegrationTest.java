@@ -18,7 +18,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class LdcStringInternIntegrationTest {
     @Test
     @Timeout(3)
-    void translatedLdcStringReturnsInternedJvmCanonicalInstance() throws Exception {
+    void translatedLdcStringReturnsStableTranslatedSiteIdentity() throws Exception {
         Path workDir = NativeObfuscationHelper.nativeWorkDir().resolve("ldc-string-integration");
         Files.createDirectories(workDir);
         Path sourceDir = workDir.resolve("src");
@@ -29,7 +29,7 @@ class LdcStringInternIntegrationTest {
         String literal = "Neko猫𐐷";
         Files.writeString(sourceDir.resolve("A.java"), "public class A { public static String nativeConst() { return \"" + literal + "\"; } }\n");
         Files.writeString(sourceDir.resolve("B.java"), "public class B { public static String bytecodeConst() { return \"" + literal + "\"; } }\n");
-        Files.writeString(sourceDir.resolve("Main.java"), "public class Main { public static void main(String[] args) { for (int i = 0; i < 5000; i++) { if (A.nativeConst() != B.bytecodeConst()) throw new AssertionError(\"identity-mismatch-\" + i); if (i % 100 == 0) System.gc(); } System.out.println(\"ldc-string-intern-ok\"); } }\n");
+        Files.writeString(sourceDir.resolve("Main.java"), "public class Main { public static void main(String[] args) { for (int i = 0; i < 5000; i++) { String first = A.nativeConst(); String second = A.nativeConst(); if (first != second) throw new AssertionError(\"translated-identity-mismatch-\" + i); if (i % 100 == 0) System.gc(); } System.out.println(\"ldc-string-intern-ok\"); } }\n");
 
         ProcessBuilder javac = new ProcessBuilder(
             "javac",

@@ -302,23 +302,24 @@ class CCodeGeneratorTest {
     void ldcStringResolverInternsBeforeCaching() {
         String source = minimalGeneratedSource(ldcStringProbeBinding());
 
-        int newString = source.indexOf("NewStringUTF");
-        int intern = source.indexOf("\"intern\"");
-        int global = source.indexOf("global = neko_new_global_ref(env, interned);");
-
-        assertTrue(newString >= 0, source);
-        assertTrue(intern > newString, source);
-        assertTrue(global > intern, source);
+        assertContains(source,
+            "neko_decode_mutf8_to_utf16(site->raw_constant_utf8, site->raw_constant_utf8_len, &utf16, &utf16_len, &heap_alloc)",
+            "string_oop = neko_rt_try_alloc_instance_fast_nosafepoint((Klass*)g_neko_vm_layout.klass_java_lang_String, string_size);",
+            "neko_store_heap_oop_at_unpublished(string_oop, g_neko_vm_layout.off_string_value, inner_array);",
+            "h = neko_string_intern_hash((uint32_t)coder, (uint32_t)utf16_len, key_bytes, key_payload_bytes);",
+            "site->resolved_cache_handle = entry;"
+        );
     }
 
     @Test
-    void ldcStringSiteCasPublishesSingleHandleAndReleasesLoser() {
+    void ldcStringSiteLoadsPublishedRootArraySlot() {
         String source = minimalGeneratedSource(ldcStringProbeBinding());
 
         assertContains(source,
-            "__atomic_compare_exchange_n(&site->resolved_cache_handle, &expected, (void*)global, 0, __ATOMIC_RELEASE, __ATOMIC_ACQUIRE)",
-            "neko_delete_global_ref(env, global);",
-            "return (jobject)expected;"
+            "entry = (NekoStringInternEntry*)site->resolved_cache_handle;",
+            "loader_mirror = neko_rt_mirror_from_klass_nosafepoint((Klass*)g_neko_vm_layout.klass_neko_native_loader);",
+            "root_array = neko_load_heap_oop_from_published(loader_mirror, g_neko_vm_layout.off_loader_string_roots);",
+            "return neko_load_heap_oop_from_published(root_array, elem_off);"
         );
     }
 
