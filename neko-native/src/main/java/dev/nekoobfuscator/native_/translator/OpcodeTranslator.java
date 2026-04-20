@@ -278,7 +278,7 @@ public final class OpcodeTranslator {
             stmts.add(raw("PUSH_D(" + doubleLiteral(d) + ");"));
         } else if (ldc.cst instanceof String s) {
             String siteExpr = codeGenerator.reserveManifestStringLdcSite(currentMethodKey, currentOwnerInternalName, s);
-            stmts.add(raw("{ jobject __ldc = neko_ldc_string_site_oop(env, " + siteExpr + "); if (neko_exception_check(env)) goto __neko_exception_exit; PUSH_O(__ldc); }"));
+            stmts.add(raw("{ jobject __ldc = neko_ldc_string_site_oop(env, " + siteExpr + "); if (neko_exception_check(env)) goto __neko_exception_exit; PUSH_O(neko_handle_oop(__ldc)); }"));
         } else if (ldc.cst instanceof Type type) {
             if (type.getSort() == Type.METHOD) {
                 throw new IllegalStateException("LDC MethodType deferred to M4a (Wave 3)");

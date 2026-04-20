@@ -26,6 +26,9 @@ import org.objectweb.asm.tree.VarInsnNode;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
+import java.io.ByteArrayOutputStream;
+import java.io.DataOutputStream;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Matcher;
@@ -275,6 +278,51 @@ class CCodeGeneratorTest {
     }
 
     @Test
+    void shouldEmitLdcStringSiteForAsciiLiteral() {
+        String source = translatedLdcStringSource("nk/test/sample/SampleStringAscii", "hello-neko");
+
+        assertContains(source,
+            "neko_ldc_string_site_oop(env,",
+            expectedUtf8BlobFragment("hello-neko")
+        );
+    }
+
+    @Test
+    void shouldEmitLdcStringSiteForUnicodeSupplementaryLiteral() {
+        String literal = "Neko猫𐐷";
+        String source = translatedLdcStringSource("nk/test/sample/SampleStringUnicode", literal);
+
+        assertContains(source,
+            "neko_ldc_string_site_oop(env,",
+            expectedModifiedUtf8BlobFragment(literal)
+        );
+    }
+
+    @Test
+    void ldcStringResolverInternsBeforeCaching() {
+        String source = minimalGeneratedSource(ldcStringProbeBinding());
+
+        int newString = source.indexOf("NewStringUTF");
+        int intern = source.indexOf("\"intern\"");
+        int global = source.indexOf("global = neko_new_global_ref(env, interned);");
+
+        assertTrue(newString >= 0, source);
+        assertTrue(intern > newString, source);
+        assertTrue(global > intern, source);
+    }
+
+    @Test
+    void ldcStringSiteCasPublishesSingleHandleAndReleasesLoser() {
+        String source = minimalGeneratedSource(ldcStringProbeBinding());
+
+        assertContains(source,
+            "__atomic_compare_exchange_n(&site->resolved_cache_handle, &expected, (void*)global, 0, __ATOMIC_RELEASE, __ATOMIC_ACQUIRE)",
+            "neko_delete_global_ref(env, global);",
+            "return (jobject)expected;"
+        );
+    }
+
+    @Test
     void ldcClassMirrorResolverUsesJdk9DoubleDerefPath() throws Exception {
         String output = compileAndRunLdcClassMirrorHarness(11);
 
@@ -445,6 +493,19 @@ class CCodeGeneratorTest {
         );
     }
 
+    private static NativeMethodBinding ldcStringProbeBinding() {
+        return new NativeMethodBinding(
+            "nk/test/sample/SampleStringProbe",
+            "sampleMethod",
+            "()Ljava/lang/String;",
+            "Java_nk_test_sample_SampleStringProbe_sampleMethod",
+            "neko_binding_sample_string_probe",
+            "()Ljava/lang/String;",
+            true,
+            true
+        );
+    }
+
     private static String translatedLdcClassSource(String ownerName, Type type) {
         ClassNode classNode = new ClassNode();
         classNode.version = Opcodes.V1_8;
@@ -463,6 +524,26 @@ class CCodeGeneratorTest {
         L1Class owner = new L1Class(classNode);
         NativeTranslator translator = new NativeTranslator("ldc-class", false, false, 12345L);
         return translator.translate(List.of(new MethodSelection(owner, owner.findMethod("sampleMethod", "()Ljava/lang/Class;")))).source();
+    }
+
+    private static String translatedLdcStringSource(String ownerName, String literal) {
+        ClassNode classNode = new ClassNode();
+        classNode.version = Opcodes.V1_8;
+        classNode.access = Opcodes.ACC_PUBLIC;
+        classNode.name = ownerName;
+        classNode.superName = "java/lang/Object";
+        classNode.methods = new ArrayList<>();
+
+        MethodNode method = new MethodNode(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC, "sampleMethod", "()Ljava/lang/String;", null, null);
+        method.instructions.add(new LdcInsnNode(literal));
+        method.instructions.add(new InsnNode(Opcodes.ARETURN));
+        method.maxStack = 1;
+        method.maxLocals = 0;
+        classNode.methods.add(method);
+
+        L1Class owner = new L1Class(classNode);
+        NativeTranslator translator = new NativeTranslator("ldc-string", false, false, 12345L);
+        return translator.translate(List.of(new MethodSelection(owner, owner.findMethod("sampleMethod", "()Ljava/lang/String;")))).source();
     }
 
     private static String compileAndRunLdcClassMirrorHarness(int javaSpecVersion) throws Exception {
@@ -577,6 +658,27 @@ class CCodeGeneratorTest {
         StringBuilder sb = new StringBuilder();
         for (int i = 0; i < bytes.length; i++) {
             if (i > 0) {
+                sb.append(", ");
+            }
+            sb.append(String.format("0x%02X", bytes[i] & 0xFF));
+        }
+        return sb.toString();
+    }
+
+    private static String expectedModifiedUtf8BlobFragment(String literal) {
+        byte[] bytes;
+        try {
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            DataOutputStream data = new DataOutputStream(out);
+            data.writeUTF(literal);
+            data.flush();
+            bytes = out.toByteArray();
+        } catch (IOException e) {
+            throw new IllegalStateException(e);
+        }
+        StringBuilder sb = new StringBuilder();
+        for (int i = 2; i < bytes.length; i++) {
+            if (i > 2) {
                 sb.append(", ");
             }
             sb.append(String.format("0x%02X", bytes[i] & 0xFF));

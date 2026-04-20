@@ -37,15 +37,14 @@ class NativeTranslationSafetyCheckerTest {
     }
 
     @Test
-    void rejectsStringConstantReferenceReturn() {
+    void admitsDirectLdcStringReferenceReturn() {
         L1Method method = method("constant", "()Ljava/lang/String;", Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC, insns -> {
             insns.add(new LdcInsnNode("PASS"));
             insns.add(new InsnNode(Opcodes.ARETURN));
         }, 1, 0);
 
         List<String> reasons = new ArrayList<>();
-        assertFalse(checker.isSafe(method, reasons));
-        assertTrue(reasons.contains("reference return requires direct ALOAD/ACONST_NULL producer"), () -> String.join("; ", reasons));
+        assertTrue(checker.isSafe(method, reasons), () -> String.join("; ", reasons));
     }
 
     @Test
