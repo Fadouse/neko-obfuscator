@@ -25,6 +25,7 @@ import org.objectweb.asm.tree.VarInsnNode;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Matcher;
@@ -239,35 +240,38 @@ class CCodeGeneratorTest {
 
     @Test
     void shouldEmitLdcClassSiteForNamedType() {
+        String descriptor = "Lnk/test/sample/SampleA;";
         String source = translatedLdcClassSource("nk/test/sample/SampleA", Type.getObjectType("nk/test/sample/SampleA"));
 
         assertContains(source,
             "uint32_t owner_class_index;",
             "jclass *owner_class_slot;",
             "void* cached_klass;",
-            "neko_ldc_class_site_oop(thread,",
-            "\"Lnk/test/sample/SampleA;\""
+            "neko_ldc_class_site_oop(thread,"
         );
+        assertLdcClassBlob(source, descriptor);
     }
 
     @Test
     void shouldEmitLdcClassSiteForInterface() {
+        String descriptor = "Lnk/test/sample/SampleIface;";
         String source = translatedLdcClassSource("nk/test/sample/SampleIface", Type.getObjectType("nk/test/sample/SampleIface"));
 
         assertContains(source,
-            "neko_ldc_class_site_oop(thread,",
-            "\"Lnk/test/sample/SampleIface;\""
+            "neko_ldc_class_site_oop(thread,"
         );
+        assertLdcClassBlob(source, descriptor);
     }
 
     @Test
     void shouldEmitLdcClassSiteForArray() {
+        String descriptor = "[Lnk/test/sample/SampleA;";
         String source = translatedLdcClassSource("nk/test/sample/SampleArray", Type.getType("[Lnk/test/sample/SampleA;"));
 
         assertContains(source,
-            "neko_ldc_class_site_oop(thread,",
-            "\"[Lnk/test/sample/SampleA;\""
+            "neko_ldc_class_site_oop(thread,"
         );
+        assertLdcClassBlob(source, descriptor);
     }
 
     @Test
@@ -568,6 +572,18 @@ class CCodeGeneratorTest {
         return "Unexpected match for `" + needle + "` at line " + lineNumber(text, index) + ": " + context(text, index);
     }
 
+    private static String expectedUtf8BlobFragment(String descriptor) {
+        byte[] bytes = descriptor.getBytes(StandardCharsets.UTF_8);
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < bytes.length; i++) {
+            if (i > 0) {
+                sb.append(", ");
+            }
+            sb.append(String.format("0x%02X", bytes[i] & 0xFF));
+        }
+        return sb.toString();
+    }
+
     private static int lineNumber(String text, int index) {
         if (index < 0) {
             return -1;
@@ -594,5 +610,13 @@ class CCodeGeneratorTest {
         for (String expectedPart : expectedParts) {
             assertTrue(text.contains(expectedPart), () -> "Expected generated text to contain `" + expectedPart + "` but got:\n" + text);
         }
+    }
+
+    private static void assertLdcClassBlob(String source, String descriptor) {
+        assertContains(source,
+            "static const uint8_t g_neko_utf8_",
+            expectedUtf8BlobFragment(descriptor)
+        );
+        assertTrue(Pattern.compile("\\{[^\\n]*g_neko_utf8_\\d+_\\d+, " + descriptor.length() + "u,").matcher(source).find(), source);
     }
 }
