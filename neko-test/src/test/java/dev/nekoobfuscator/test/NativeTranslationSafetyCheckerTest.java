@@ -10,7 +10,10 @@ import org.objectweb.asm.tree.FieldInsnNode;
 import org.objectweb.asm.tree.FieldNode;
 import org.objectweb.asm.tree.InsnNode;
 import org.objectweb.asm.tree.LdcInsnNode;
+import org.objectweb.asm.Handle;
 import org.objectweb.asm.tree.MethodNode;
+import org.objectweb.asm.tree.TryCatchBlockNode;
+import org.objectweb.asm.Type;
 import org.objectweb.asm.tree.VarInsnNode;
 
 import java.util.ArrayList;
@@ -114,6 +117,85 @@ class NativeTranslationSafetyCheckerTest {
         List<String> reasons = new ArrayList<>();
 
         assertTrue(checker.isSafe(method, reasons), () -> String.join("; ", reasons));
+    }
+
+    @Test
+    void admitsLdcClassReferenceReturn() {
+        L1Method method = method("sampleClass", "()Ljava/lang/Class;", Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC, insns -> {
+            insns.add(new LdcInsnNode(Type.getObjectType("nk/test/sample/SampleType")));
+            insns.add(new InsnNode(Opcodes.ARETURN));
+        }, 1, 0);
+
+        List<String> reasons = new ArrayList<>();
+        assertTrue(checker.isSafe(method, reasons), () -> String.join("; ", reasons));
+    }
+
+    @Test
+    void admitsLdcArrayReferenceReturn() {
+        L1Method method = method("sampleArray", "()Ljava/lang/Class;", Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC, insns -> {
+            insns.add(new LdcInsnNode(Type.getType("[Lnk/test/sample/SampleType;")));
+            insns.add(new InsnNode(Opcodes.ARETURN));
+        }, 1, 0);
+
+        List<String> reasons = new ArrayList<>();
+        assertTrue(checker.isSafe(method, reasons), () -> String.join("; ", reasons));
+    }
+
+    @Test
+    void admitsLdcClassInTryCatch() {
+        ClassNode classNode = new ClassNode();
+        classNode.version = Opcodes.V1_8;
+        classNode.access = Opcodes.ACC_PUBLIC;
+        classNode.name = "pkg/SafetyCheckerTryCatchOwner";
+        classNode.superName = "java/lang/Object";
+        classNode.methods = new ArrayList<>();
+
+        MethodNode methodNode = new MethodNode(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC, "sampleTry", "()Ljava/lang/Class;", null, null);
+        org.objectweb.asm.tree.LabelNode start = new org.objectweb.asm.tree.LabelNode();
+        org.objectweb.asm.tree.LabelNode end = new org.objectweb.asm.tree.LabelNode();
+        org.objectweb.asm.tree.LabelNode handler = new org.objectweb.asm.tree.LabelNode();
+        methodNode.instructions.add(start);
+        methodNode.instructions.add(new LdcInsnNode(Type.getObjectType("nk/test/sample/SampleType")));
+        methodNode.instructions.add(new InsnNode(Opcodes.ARETURN));
+        methodNode.instructions.add(end);
+        methodNode.instructions.add(handler);
+        methodNode.instructions.add(new InsnNode(Opcodes.ACONST_NULL));
+        methodNode.instructions.add(new InsnNode(Opcodes.ARETURN));
+        methodNode.tryCatchBlocks = new ArrayList<>();
+        methodNode.tryCatchBlocks.add(new TryCatchBlockNode(start, end, handler, "java/lang/Throwable"));
+        methodNode.maxStack = 1;
+        methodNode.maxLocals = 0;
+        classNode.methods.add(methodNode);
+
+        L1Class owner = new L1Class(classNode);
+        L1Method method = owner.findMethod("sampleTry", "()Ljava/lang/Class;");
+        List<String> reasons = new ArrayList<>();
+        assertTrue(checker.isSafe(method, reasons), () -> String.join("; ", reasons));
+    }
+
+    @Test
+    void rejectsLdcPrimitiveClassReferenceReturn() {
+        L1Method method = method("samplePrimitive", "()Ljava/lang/Class;", Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC, insns -> {
+            insns.add(new LdcInsnNode(Type.INT_TYPE));
+            insns.add(new InsnNode(Opcodes.ARETURN));
+        }, 1, 0);
+
+        List<String> reasons = new ArrayList<>();
+        assertFalse(checker.isSafe(method, reasons));
+        assertTrue(reasons.contains("unsupported LDC Type sort: 5"), () -> String.join("; ", reasons));
+    }
+
+    @Test
+    void rejectsLdcMethodHandleReferenceReturn() {
+        Handle handle = new Handle(Opcodes.H_INVOKESTATIC, "pkg/HandleOwner", "call", "()V", false);
+        L1Method method = method("sampleHandle", "()Ljava/lang/Object;", Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC, insns -> {
+            insns.add(new LdcInsnNode(handle));
+            insns.add(new InsnNode(Opcodes.ARETURN));
+        }, 1, 0);
+
+        List<String> reasons = new ArrayList<>();
+        assertFalse(checker.isSafe(method, reasons));
+        assertTrue(reasons.contains("LDC MethodHandle deferred to M4a (Wave 3)"), () -> String.join("; ", reasons));
     }
 
     private static L1Method method(String name, String desc, int access, MethodBody body, int maxStack, int maxLocals) {

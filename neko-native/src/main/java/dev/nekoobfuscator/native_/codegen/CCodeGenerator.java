@@ -391,7 +391,15 @@ public final class CCodeGenerator {
         String signatureKey
     ) {}
 
-    public record ManifestLdcSiteRef(int methodId, int siteIndex, LdcKind kind, String rawConstant, Utf8BlobRef blob) {
+    public record ManifestLdcSiteRef(
+        int methodId,
+        int siteIndex,
+        int ownerClassIndex,
+        String ownerInternal,
+        LdcKind kind,
+        String rawConstant,
+        Utf8BlobRef blob
+    ) {
         public String arrayElementExpression() {
             return "&" + "g_neko_ldc_sites_" + methodId + '[' + siteIndex + ']';
         }

@@ -226,9 +226,27 @@ __attribute__((visibility("default"))) oop neko_rt_oop_from_handle(NekoHandle h)
 """);
         sb.append("""
 
+static inline void* neko_resolve_mirror_locator_from_klass(const NekoVmLayout *layout, Klass *klass) {
+    if (layout == NULL || klass == NULL || layout->off_klass_java_mirror < 0) return NULL;
+    if (layout->java_spec_version >= 9) {
+        if (layout->off_oophandle_obj < 0) return NULL;
+        return *(void***)((uint8_t*)klass + layout->off_klass_java_mirror + layout->off_oophandle_obj);
+    }
+    return (void*)((uint8_t*)klass + layout->off_klass_java_mirror);
+}
+
+static inline oop neko_resolve_mirror_oop_from_klass(const NekoVmLayout *layout, Klass *klass) {
+    void *locator = neko_resolve_mirror_locator_from_klass(layout, klass);
+    if (locator == NULL) return NULL;
+    if (layout->java_spec_version >= 9) {
+        return (oop)(*(void**)locator);
+    }
+    return *(oop*)locator;
+}
+
 __attribute__((visibility("default"))) oop neko_rt_mirror_from_klass_nosafepoint(Klass *k) {
-    (void)k;
-    return NULL;
+    if (k == NULL || !neko_wave4a_enabled()) return NULL;
+    return neko_resolve_mirror_oop_from_klass(&g_neko_vm_layout, k);
 }
 
 __attribute__((visibility("default"))) oop neko_rt_static_base_from_holder_nosafepoint(Klass *holder) {
