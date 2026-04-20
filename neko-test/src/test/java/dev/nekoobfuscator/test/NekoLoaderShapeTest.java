@@ -67,7 +67,7 @@ class NekoLoaderShapeTest {
             .map(Field::getName)
             .collect(toSet());
 
-        assertEquals(Set.of("loaded", "__nekoStringRoots", "LOCK"), fieldNames);
+        assertEquals(Set.of("loaded", "LOCK"), fieldNames);
         for (Field field : declaredFields) {
             assertTrue(Modifier.isPrivate(field.getModifiers()), () -> field.getName() + " must be private");
             assertTrue(Modifier.isStatic(field.getModifiers()), () -> field.getName() + " must be static");

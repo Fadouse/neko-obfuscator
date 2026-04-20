@@ -9,8 +9,6 @@ import java.nio.file.StandardCopyOption;
 public final class NekoNativeLoader {
     private static volatile boolean loaded;
     private static final Object LOCK = new Object();
-    @SuppressWarnings({"unused", "FieldCanBeLocal"})
-    private static Object[] __nekoStringRoots;
 
     private NekoNativeLoader() {
     }
