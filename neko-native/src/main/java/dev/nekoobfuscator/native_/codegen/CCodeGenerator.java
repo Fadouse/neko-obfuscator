@@ -440,6 +440,10 @@ public final class CCodeGenerator {
             static jclass neko_load_class_noinit_with_loader(JNIEnv *env, const char *internalName, jobject loader);
             static jboolean neko_ldc_site_matches_loaded_class(JNIEnv *env, NekoManifestLdcSite *site, jclass candidate, const char *signature);
             __attribute__((visibility(\"default\"))) oop neko_rt_mirror_from_klass_nosafepoint(Klass *k);
+            static void* neko_rt_try_alloc_array_fast_nosafepoint(void* array_klass, int32_t length);
+            static inline void neko_store_heap_oop_at_unpublished(void* base, int32_t offset, void* raw_oop);
+            static inline void* neko_load_heap_oop_from_published(void* base, int32_t offset);
+            static inline int32_t neko_object_array_element_offset(void* array_klass, int32_t index);
             /* ---------------------------------------------------------------------- */
 
             """;

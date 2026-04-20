@@ -296,6 +296,98 @@ __attribute__((visibility("default"))) oop neko_rt_try_alloc_instance_fast_nosaf
     return (oop)allocated;
 }
 
+static inline uint32_t neko_lh_header_size(uint32_t lh) {
+    return (lh >> 16) & 0xFFu;
+}
+
+static inline uint32_t neko_lh_log2_element(uint32_t lh) {
+    return lh & 0x3Fu;   /* array element log2 size */
+}
+
+static inline size_t neko_lh_instance_size(uint32_t lh) {
+    return (size_t)(lh & ~(uint32_t)1u);  /* instance_size for non-array Klass */
+}
+
+static inline bool neko_lh_is_array(uint32_t lh) {
+    return ((int32_t)lh) < 0;   /* layout_helper encodes arrays with sign bit in HotSpot */
+}
+
+static void* neko_rt_try_alloc_array_fast_nosafepoint(void* array_klass, int32_t length) {
+    JavaThread *thread;
+    void **top_ptr;
+    void **end_ptr;
+    void *expected;
+    uint32_t lh;
+    uint32_t header_bytes;
+    uint32_t log2_elem;
+    size_t payload;
+    size_t total;
+    size_t align;
+    size_t aligned;
+    char *cur_top;
+    char *cur_end;
+    char *new_top;
+    char *allocated;
+    if (array_klass == NULL || length < 0 || !neko_wave4a_enabled()) return NULL;
+    if (g_neko_vm_layout.use_compact_object_headers) return NULL;
+    lh = *(uint32_t*)((uint8_t*)array_klass + g_neko_vm_layout.off_klass_layout_helper);
+    if (!neko_lh_is_array(lh)) return NULL;
+    header_bytes = neko_lh_header_size(lh);
+    log2_elem = neko_lh_log2_element(lh);
+    payload = ((size_t)(uint32_t)length) << log2_elem;
+    total = (size_t)header_bytes + payload;
+    align = sizeof(void*);
+    aligned = (total + (align - 1u)) & ~(align - 1u);
+    thread = (JavaThread*)neko_get_current_thread();
+    if (thread == NULL || g_neko_vm_layout.off_thread_tlab_top < 0 || g_neko_vm_layout.off_thread_tlab_end < 0) return NULL;
+    top_ptr = (void**)((uint8_t*)thread + g_neko_vm_layout.off_thread_tlab_top);
+    end_ptr = (void**)((uint8_t*)thread + g_neko_vm_layout.off_thread_tlab_end);
+    cur_end = (char*)__atomic_load_n(end_ptr, __ATOMIC_ACQUIRE);
+    expected = __atomic_load_n(top_ptr, __ATOMIC_RELAXED);
+    for (;;) {
+        cur_top = (char*)expected;
+        new_top = cur_top + aligned;
+        if (new_top > cur_end) return NULL;
+        if (__atomic_compare_exchange_n(top_ptr, &expected, (void*)new_top, JNI_FALSE, __ATOMIC_ACQ_REL, __ATOMIC_RELAXED)) {
+            allocated = cur_top;
+            break;
+        }
+    }
+    memset(allocated, 0, aligned);
+    *(uintptr_t*)allocated = (uintptr_t)1u;
+    if (neko_uses_compressed_klass_pointers()) {
+        *(u4*)(allocated + sizeof(uintptr_t)) = neko_encode_klass_pointer(array_klass);
+    } else {
+        *(void**)(allocated + sizeof(uintptr_t)) = array_klass;
+    }
+    *(int32_t*)(allocated + ((ptrdiff_t)header_bytes - 4)) = length;
+    return allocated;
+}
+
+static inline void neko_store_heap_oop_at_unpublished(void* base, int32_t offset, void* raw_oop) {
+    if (neko_uses_compressed_oops()) {
+        u4 narrow = neko_encode_heap_oop(raw_oop);
+        *(u4*)((uint8_t*)base + offset) = narrow;
+    } else {
+        *(void**)((uint8_t*)base + offset) = raw_oop;
+    }
+}
+
+static inline void* neko_load_heap_oop_from_published(void* base, int32_t offset) {
+    if (neko_uses_compressed_oops()) {
+        u4 narrow = *(u4*)((uint8_t*)base + offset);
+        return neko_decode_heap_oop(narrow);
+    }
+    return *(void**)((uint8_t*)base + offset);
+}
+
+static inline int32_t neko_object_array_element_offset(void* array_klass, int32_t index) {
+    uint32_t lh = *(uint32_t*)((uint8_t*)array_klass + g_neko_vm_layout.off_klass_layout_helper);
+    uint32_t header_bytes = neko_lh_header_size(lh);
+    uint32_t log2_elem = neko_lh_log2_element(lh);
+    return (int32_t)(header_bytes + ((uint32_t)index << log2_elem));
+}
+
 #undef NEKO_THREAD_LOCAL
 
 """);
