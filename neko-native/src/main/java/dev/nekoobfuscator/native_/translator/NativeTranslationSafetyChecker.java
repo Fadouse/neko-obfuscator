@@ -205,6 +205,9 @@ public final class NativeTranslationSafetyChecker {
         }
         if (insn instanceof LdcInsnNode ldcInsn) {
             Object constant = ldcInsn.cst;
+            if (constant instanceof String) {
+                return true;
+            }
             return constant instanceof Type type && (type.getSort() == Type.OBJECT || type.getSort() == Type.ARRAY);
         }
         if (insn instanceof VarInsnNode varInsn) {
