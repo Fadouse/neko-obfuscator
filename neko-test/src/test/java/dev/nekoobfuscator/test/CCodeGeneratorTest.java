@@ -500,15 +500,15 @@ class CCodeGeneratorTest {
                 uint32_t wave4a_disabled;
             } NekoVmLayout;
 
+            struct SampleKlass {
+                void *java_mirror_handle;
+            };
+
             static NekoVmLayout g_neko_vm_layout = { %d, (ptrdiff_t)offsetof(struct SampleKlass, java_mirror_handle), 0, JNI_FALSE };
 
             static inline jboolean neko_wave4a_enabled(void) {
                 return g_neko_vm_layout.wave4a_disabled ? JNI_FALSE : JNI_TRUE;
             }
-
-            struct SampleKlass {
-                void *java_mirror_handle;
-            };
 
             %s
 
@@ -540,7 +540,7 @@ class CCodeGeneratorTest {
                 NekoManifestLdcSite site = {0};
                 site.cached_klass = &klass;
                 if (neko_resolve_ldc_class_handle(&site) != mirror) {
-                    fputs("mirror-mismatch\n", stderr);
+                    fputs("mirror-mismatch\\n", stderr);
                     return 1;
                 }
                 puts("mirror-ok");
