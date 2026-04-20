@@ -102,6 +102,8 @@ public final class ManifestEmitter {
 
     public String renderManifestSupport(List<NativeMethodBinding> bindings, SignaturePlan signaturePlan) {
         StringBuilder sb = new StringBuilder();
+        int stringInternSlotCount = totalLdcKindCount(LdcKind.STRING);
+        int stringInternBucketCount = Math.max(1, stringInternSlotCount * 2);
         sb.append("#define NEKO_MANIFEST_FLAG_STATIC 0x01u\n");
         sb.append("#define NEKO_MANIFEST_FLAG_LEAF_ONLY 0x02u\n");
         sb.append("#define NEKO_PATCH_STATE_NONE 0u\n");
@@ -288,6 +290,19 @@ public final class ManifestEmitter {
             }
         }
         sb.append("};\n\n");
+        sb.append("#define NEKO_STRING_INTERN_SLOT_COUNT ").append(stringInternSlotCount).append("u\n");
+        sb.append("#define NEKO_STRING_INTERN_BUCKET_COUNT ").append(stringInternBucketCount).append("u\n\n");
+        sb.append("typedef struct NekoStringInternEntry {\n");
+        sb.append("    uint32_t coder;            /* 0 LATIN1 / 1 UTF16 (JDK 9+); 1 synthetic UTF16-BE for JDK 8 */\n");
+        sb.append("    uint32_t char_length;      /* logical Java char count */\n");
+        sb.append("    uint32_t payload_length;   /* bytes backing the key */\n");
+        sb.append("    uint32_t slot_index;       /* index into root Object[] */\n");
+        sb.append("    const uint8_t* payload;    /* pointer to MUTF-8-derived key bytes or String byte[] contents */\n");
+        sb.append("    struct NekoStringInternEntry* next;\n");
+        sb.append("} NekoStringInternEntry;\n\n");
+        sb.append("static NekoStringInternEntry* g_neko_string_intern_buckets[NEKO_STRING_INTERN_BUCKET_COUNT];\n");
+        sb.append("static NekoStringInternEntry g_neko_string_intern_entries[NEKO_STRING_INTERN_SLOT_COUNT];\n");
+        sb.append("static uint32_t g_neko_string_intern_filled = 0;\n\n");
         return sb.toString();
     }
 

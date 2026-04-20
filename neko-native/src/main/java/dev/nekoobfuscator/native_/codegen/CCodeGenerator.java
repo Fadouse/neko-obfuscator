@@ -266,6 +266,7 @@ public final class CCodeGenerator {
         sb.append("#include <jvmti.h>\n");
         sb.append("#include <stdint.h>\n");
         sb.append("#include <stddef.h>\n");
+        sb.append("#include <stdbool.h>\n");
         sb.append("#include <stdio.h>\n");
         sb.append("#include <stdlib.h>\n");
         sb.append("#include <string.h>\n");
@@ -418,6 +419,20 @@ public final class CCodeGenerator {
                 jboolean has_narrow_klass_shift;
                 jboolean wave4a_disabled;
                 jboolean use_compact_object_headers;
+                /* Wave 4b-4a strict-nojni STRING intern infrastructure */
+                size_t constant_pool_size;
+                int32_t off_constant_pool_tags;
+                int32_t off_constant_pool_length;
+                int32_t off_symbol_length;
+                int32_t off_symbol_body;
+                int32_t off_instance_klass_fieldinfo_stream;
+                int32_t off_string_hash;
+                int32_t off_loader_string_roots;
+                void* klass_java_lang_String;
+                void* klass_array_char;
+                void* klass_array_byte;
+                void* klass_array_object;
+                void* klass_neko_native_loader;
             } NekoVmLayout;
             extern NekoVmLayout g_neko_vm_layout;
             typedef struct Klass Klass;

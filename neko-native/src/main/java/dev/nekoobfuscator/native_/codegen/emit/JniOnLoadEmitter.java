@@ -45,6 +45,7 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *reserved) {
     if (!neko_discover_manifest_owners(env, jvmti)) {
         return JNI_VERSION_1_6;
     }
+    neko_resolve_string_intern_layout();
     neko_manifest_lock_enter();
     neko_patch_discovered_methods();
     neko_manifest_lock_exit();
