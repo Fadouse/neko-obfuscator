@@ -335,6 +335,8 @@ static void neko_log_offset_strategy(const char *label, ptrdiff_t offset, char s
 static void neko_derive_wave2_layout_offsets(JNIEnv *env);
 static void neko_resolve_prepared_class_field_sites(JNIEnv *env, jclass klass, const char *owner_internal, void *owner_klass);
 static jboolean neko_prewarm_ldc_sites(JNIEnv *env);
+static void neko_publish_prepared_ldc_class_site(JNIEnv *env, jclass klass, const char *signature, void *prepared_klass);
+static void* neko_class_klass_pointer(jclass klass_obj);
 static void neko_log_wave2_ready(void);
 
 static void neko_derive_thread_tlab_top_offset(void) {
@@ -1278,6 +1280,21 @@ static char* neko_internal_name_from_signature(const char *signature) {
     return value;
 }
 
+static void neko_publish_prepared_ldc_class_site(JNIEnv *env, jclass klass, const char *signature, void *prepared_klass) {
+    if (env == NULL || klass == NULL || signature == NULL || prepared_klass == NULL) return;
+    for (uint32_t i = 0; i < g_neko_manifest_method_count; i++) {
+        NekoManifestMethod *method = (NekoManifestMethod*)&g_neko_manifest_methods[i];
+        for (uint32_t site_index = 0; site_index < method->ldc_site_count; site_index++) {
+            NekoManifestLdcSite *site = &method->ldc_sites[site_index];
+            if (site->kind != NEKO_LDC_KIND_CLASS) continue;
+            if (__atomic_load_n(&site->cached_klass, __ATOMIC_ACQUIRE) != NULL) continue;
+            if (!neko_ldc_site_matches_loaded_class(env, site, klass, signature)) continue;
+            __atomic_store_n(&site->cached_klass, prepared_klass, __ATOMIC_RELEASE);
+            NEKO_TRACE(0, "[nk] ldc-cls bind %s %p", signature, prepared_klass);
+        }
+    }
+}
+
 static inline void* neko_method_holder_klass(void *method_star) {
     void *const_method;
     void *constant_pool;
@@ -1312,7 +1329,9 @@ static jboolean neko_discover_class(JNIEnv *env, jvmtiEnv *jvmti, jclass klass) 
         return JNI_TRUE;
     }
     owner_hash = neko_fnv1a32(owner_internal);
+    if (owner_klass == NULL) owner_klass = neko_class_klass_pointer(klass);
     if (!neko_manifest_has_owner(owner_internal, owner_hash)) {
+        neko_publish_prepared_ldc_class_site(env, klass, signature, owner_klass);
         free(owner_internal);
         neko_jvmti_deallocate(jvmti, signature);
         return JNI_TRUE;
@@ -1352,6 +1371,7 @@ static jboolean neko_discover_class(JNIEnv *env, jvmtiEnv *jvmti, jclass klass) 
     }
     neko_jvmti_deallocate(jvmti, methods);
     neko_resolve_prepared_class_field_sites(env, klass, owner_internal, owner_klass);
+    neko_publish_prepared_ldc_class_site(env, klass, signature, owner_klass);
     free(owner_internal);
     neko_jvmti_deallocate(jvmti, signature);
     (void)env;

@@ -20,6 +20,7 @@ import org.objectweb.asm.tree.LabelNode;
 import org.objectweb.asm.tree.MethodInsnNode;
 import org.objectweb.asm.tree.MethodNode;
 import org.objectweb.asm.tree.MultiANewArrayInsnNode;
+import org.objectweb.asm.tree.LdcInsnNode;
 import org.objectweb.asm.tree.TypeInsnNode;
 import org.objectweb.asm.tree.VarInsnNode;
 
@@ -266,6 +267,33 @@ class OpcodeTranslatorUnitTest {
             "PUSH_O(",
             "jobject obj = POP_O();",
             "fid, val);"
+        );
+    }
+
+    @Test
+    void opcodeTranslator_ldcClassUsesCachedKlassResolver() {
+        OpcodeTranslator translator = translator();
+        translator.beginMethod("nk/test/sample/SampleOwner", "sampleMethod", "()Ljava/lang/Class;", true);
+
+        String code = render(translator.translate(new LdcInsnNode(Type.getObjectType("nk/test/sample/SampleType"))));
+
+        assertContains(code,
+            "neko_ldc_class_site_oop(thread,",
+            "PUSH_O(__ldc);"
+        );
+        assertFalse(code.contains("resolved_cache_handle"), code);
+    }
+
+    @Test
+    void opcodeTranslator_ldcArrayClassUsesSiteResolver() {
+        OpcodeTranslator translator = translator();
+        translator.beginMethod("nk/test/sample/SampleOwner", "sampleArrayMethod", "()Ljava/lang/Class;", true);
+
+        String code = render(translator.translate(new LdcInsnNode(Type.getType("[Lnk/test/sample/SampleType;"))));
+
+        assertContains(code,
+            "neko_ldc_class_site_oop(thread,",
+            "PUSH_O(__ldc);"
         );
     }
 

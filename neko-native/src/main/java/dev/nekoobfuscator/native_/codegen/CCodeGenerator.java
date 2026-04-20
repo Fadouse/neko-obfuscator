@@ -284,9 +284,10 @@ public final class CCodeGenerator {
         sb.append("#include <mach-o/dyld.h>\n");
         sb.append("#endif\n\n");
         sb.append(wave3InvokeStaticEmitter.renderResolutionCaches());
+        sb.append(manifestEmitter.renderManifestSupport(bindings, signaturePlan));
+        sb.append(renderEarlyForwardDecls());
         sb.append(wave1RuntimeEmitter.renderRuntimeSupport());
         sb.append(wave1RuntimeEmitter.renderHotSpotSupport());
-        sb.append(manifestEmitter.renderManifestSupport(bindings, signaturePlan));
         sb.append(assemblyStubEmitter.renderSignatureDispatchSupport(signaturePlan));
         sb.append(bootstrapEmitter.renderBootstrapSupport());
         sb.append(wave3InvokeStaticEmitter.renderBindSupport());
@@ -301,6 +302,19 @@ public final class CCodeGenerator {
         sb.append(body);
         sb.append(jniOnLoadEmitter.renderJniOnLoad());
         return sb.toString();
+    }
+
+    private String renderEarlyForwardDecls() {
+        return """
+            /* ---------- Neko early forward declarations (auto-generated) ---------- */
+            typedef struct Klass Klass;
+            typedef void* oop;
+            static jclass neko_load_class_noinit_with_loader(JNIEnv *env, const char *internalName, jobject loader);
+            static jboolean neko_ldc_site_matches_loaded_class(JNIEnv *env, NekoManifestLdcSite *site, jclass candidate, const char *signature);
+            __attribute__((visibility(\"default\"))) oop neko_rt_mirror_from_klass_nosafepoint(Klass *k);
+            /* ---------------------------------------------------------------------- */
+
+            """;
     }
 
     public record GeneratedSource(String fileName, String content) {}
@@ -391,7 +405,15 @@ public final class CCodeGenerator {
         String signatureKey
     ) {}
 
-    public record ManifestLdcSiteRef(int methodId, int siteIndex, LdcKind kind, String rawConstant, Utf8BlobRef blob) {
+    public record ManifestLdcSiteRef(
+        int methodId,
+        int siteIndex,
+        int ownerClassIndex,
+        String ownerInternal,
+        LdcKind kind,
+        String rawConstant,
+        Utf8BlobRef blob
+    ) {
         public String arrayElementExpression() {
             return "&" + "g_neko_ldc_sites_" + methodId + '[' + siteIndex + ']';
         }

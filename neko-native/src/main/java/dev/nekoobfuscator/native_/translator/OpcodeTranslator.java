@@ -282,9 +282,11 @@ public final class OpcodeTranslator {
         } else if (ldc.cst instanceof Type type) {
             if (type.getSort() == Type.METHOD) {
                 throw new IllegalStateException("LDC MethodType deferred to M4a (Wave 3)");
+            } else if (type.getSort() != Type.OBJECT && type.getSort() != Type.ARRAY) {
+                throw new IllegalStateException("unsupported LDC Type sort: " + type.getSort());
             } else {
                 String siteExpr = codeGenerator.reserveManifestClassLdcSite(currentMethodKey, currentOwnerInternalName, type.getDescriptor());
-                stmts.add(raw("{ void *__ldc = neko_resolve_ldc_site_oop(thread, " + siteExpr + "); if (neko_pending_exception(thread) != NULL) goto __neko_exception_exit; PUSH_O(__ldc); }"));
+                stmts.add(raw("{ void *__ldc = neko_ldc_class_site_oop(thread, " + siteExpr + "); if (neko_pending_exception(thread) != NULL) goto __neko_exception_exit; PUSH_O(__ldc); }"));
             }
         } else if (ldc.cst instanceof Handle) {
             throw new IllegalStateException("LDC MethodHandle deferred to M4a (Wave 3)");

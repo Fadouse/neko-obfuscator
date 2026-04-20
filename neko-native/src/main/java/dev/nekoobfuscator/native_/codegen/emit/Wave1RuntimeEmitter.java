@@ -365,19 +365,34 @@ static char* neko_dotted_class_name(const char *internalName) {
 }
 
 static jclass neko_load_class_noinit(JNIEnv *env, const char *internalName) {
-    char *dotted = neko_dotted_class_name(internalName);
-    if (dotted == NULL) return NULL;
     jclass clClass = neko_find_class(env, "java/lang/ClassLoader");
     jmethodID getSystem = neko_get_static_method_id(env, clClass, "getSystemClassLoader", "()Ljava/lang/ClassLoader;");
     jobject loader = neko_call_static_object_method_a(env, clClass, getSystem, NULL);
-    jclass classClass = neko_find_class(env, "java/lang/Class");
-    jmethodID forName = neko_get_static_method_id(env, classClass, "forName", "(Ljava/lang/String;ZLjava/lang/ClassLoader;)Ljava/lang/Class;");
+    jclass klass = neko_load_class_noinit_with_loader(env, internalName, loader);
+    if (loader != NULL) neko_delete_local_ref(env, loader);
+    if (clClass != NULL) neko_delete_local_ref(env, clClass);
+    return klass;
+}
+
+static jclass neko_load_class_noinit_with_loader(JNIEnv *env, const char *internalName, jobject loader) {
+    char *dotted = neko_dotted_class_name(internalName);
+    jclass classClass;
+    jmethodID forName;
     jvalue args[3];
-    args[0].l = neko_new_string_utf(env, dotted);
+    jstring binaryName;
+    jclass klass;
+    if (dotted == NULL) return NULL;
+    classClass = neko_find_class(env, "java/lang/Class");
+    forName = neko_get_static_method_id(env, classClass, "forName", "(Ljava/lang/String;ZLjava/lang/ClassLoader;)Ljava/lang/Class;");
+    binaryName = neko_new_string_utf(env, dotted);
+    args[0].l = binaryName;
     args[1].z = JNI_FALSE;
     args[2].l = loader;
+    klass = (jclass)neko_call_static_object_method_a(env, classClass, forName, args);
+    if (binaryName != NULL) neko_delete_local_ref(env, binaryName);
+    if (classClass != NULL) neko_delete_local_ref(env, classClass);
     free(dotted);
-    return (jclass)neko_call_static_object_method_a(env, classClass, forName, args);
+    return klass;
 }
 
 static jobject neko_box_boolean(JNIEnv *env, jboolean v) {

@@ -66,11 +66,14 @@ public final class ManifestEmitter {
 
     public String reserveManifestStringLdcSite(String bindingKey, String bindingOwner, String literal) {
         int methodId = registerManifestMethod(bindingKey);
+        generator.registerBindingOwner(bindingOwner);
         List<ManifestLdcSiteRef> sites = ctx.manifestLdcSites().computeIfAbsent(bindingKey, ignored -> new ArrayList<>());
         int siteIndex = sites.size();
         ManifestLdcSiteRef site = new ManifestLdcSiteRef(
             methodId,
             siteIndex,
+            -1,
+            null,
             LdcKind.STRING,
             literal,
             new Utf8BlobRef(methodId, siteIndex, modifiedUtf8Bytes(literal))
@@ -81,11 +84,14 @@ public final class ManifestEmitter {
 
     public String reserveManifestClassLdcSite(String bindingKey, String bindingOwner, String descriptor) {
         int methodId = registerManifestMethod(bindingKey);
+        generator.registerBindingOwner(bindingOwner);
         List<ManifestLdcSiteRef> sites = ctx.manifestLdcSites().computeIfAbsent(bindingKey, ignored -> new ArrayList<>());
         int siteIndex = sites.size();
         ManifestLdcSiteRef site = new ManifestLdcSiteRef(
             methodId,
             siteIndex,
+            ctx.classSlotIndex().get(bindingOwner),
+            bindingOwner,
             LdcKind.CLASS,
             descriptor,
             new Utf8BlobRef(methodId, siteIndex, descriptor.getBytes(StandardCharsets.UTF_8))
@@ -142,11 +148,14 @@ public final class ManifestEmitter {
         sb.append("} NekoManifestInvokeSite;\n\n");
         sb.append("typedef struct NekoManifestLdcSite {\n");
         sb.append("    uint32_t site_id;\n");
+        sb.append("    uint32_t owner_class_index;\n");
         sb.append("    uint8_t kind;\n");
         sb.append("    uint8_t _pad0;\n");
         sb.append("    uint16_t _pad1;\n");
         sb.append("    const uint8_t* raw_constant_utf8;\n");
         sb.append("    size_t raw_constant_utf8_len;\n");
+        sb.append("    jclass *owner_class_slot;\n");
+        sb.append("    void* cached_klass;\n");
         sb.append("    void* resolved_cache_handle;\n");
         sb.append("} NekoManifestLdcSite;\n\n");
         sb.append("typedef struct {\n");
@@ -339,8 +348,14 @@ public final class ManifestEmitter {
         sb.append("static NekoManifestLdcSite ").append(manifestLdcSiteArrayName(methodId)).append('[').append(sites.size()).append("] = {\n");
         for (int i = 0; i < sites.size(); i++) {
             ManifestLdcSiteRef site = sites.get(i);
-            sb.append("    { ").append(site.siteIndex()).append("u, ").append(site.kind().constant()).append(", 0u, 0u, ")
-                .append(site.blob().symbol()).append(", ").append(site.blob().bytes().length).append("u, NULL }");
+            String ownerSlotExpr = site.kind() == LdcKind.CLASS
+                ? "&" + generator.classSlotName(site.ownerInternal())
+                : "NULL";
+            sb.append("    { ").append(site.siteIndex()).append("u, ")
+                .append(site.ownerClassIndex() >= 0 ? site.ownerClassIndex() + "u" : "0u")
+                .append(", ").append(site.kind().constant()).append(", 0u, 0u, ")
+                .append(site.blob().symbol()).append(", ").append(site.blob().bytes().length).append("u, ")
+                .append(ownerSlotExpr).append(", NULL, NULL }");
             sb.append(i + 1 == sites.size() ? '\n' : ',').append(i + 1 == sites.size() ? "" : "\n");
         }
         sb.append("};\n");

@@ -203,6 +203,10 @@ public final class NativeTranslationSafetyChecker {
         if (insn == null) {
             return false;
         }
+        if (insn instanceof LdcInsnNode ldcInsn) {
+            Object constant = ldcInsn.cst;
+            return constant instanceof Type type && (type.getSort() == Type.OBJECT || type.getSort() == Type.ARRAY);
+        }
         if (insn instanceof VarInsnNode varInsn) {
             return varInsn.getOpcode() == Opcodes.ALOAD;
         }
@@ -323,7 +327,7 @@ public final class NativeTranslationSafetyChecker {
         if (constant instanceof Type type) {
             return type.getSort() == Type.METHOD
                 ? "LDC MethodType deferred to M4a (Wave 3)"
-                : null;
+                : ((type.getSort() == Type.OBJECT || type.getSort() == Type.ARRAY) ? null : "unsupported LDC Type sort: " + type.getSort());
         }
         if (constant instanceof Handle) {
             return "LDC MethodHandle deferred to M4a (Wave 3)";
