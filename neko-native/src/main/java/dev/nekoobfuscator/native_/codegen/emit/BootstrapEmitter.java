@@ -837,51 +837,16 @@ static int neko_parse_java_spec_version_text(const char *value) {
 }
 
 static int neko_detect_java_spec_version(JNIEnv *env) {
-    jclass system_class = NULL;
-    jmethodID get_property = NULL;
-    jstring key = NULL;
-    jstring value = NULL;
-    const char *chars = NULL;
-    int version = 0;
-    if (env == NULL) return 0;
-    system_class = neko_find_class(env, "java/lang/System");
-    if (system_class == NULL) goto cleanup;
-    get_property = neko_get_static_method_id(env, system_class, "getProperty", "(Ljava/lang/String;)Ljava/lang/String;");
-    if (get_property == NULL) goto cleanup;
-    key = neko_new_string_utf(env, "java.specification.version");
-    if (key == NULL) goto cleanup;
-    {
-        jvalue args[1];
-        args[0].l = key;
-        value = (jstring)neko_call_static_object_method_a(env, system_class, get_property, args);
+    (void)env;
+    if (g_neko_vm_layout.java_spec_version > 0) {
+        return g_neko_vm_layout.java_spec_version;
     }
-    if (value == NULL || neko_exception_check(env)) goto cleanup;
-    chars = neko_get_string_utf_chars(env, value);
-    if (chars == NULL) goto cleanup;
-    version = neko_parse_java_spec_version_text(chars);
-cleanup:
-    if (chars != NULL) {
-        neko_release_string_utf_chars(env, value, chars);
-    }
-    if (value != NULL) {
-        neko_delete_local_ref(env, value);
-    }
-    if (key != NULL) {
-        neko_delete_local_ref(env, key);
-    }
-    if (system_class != NULL) {
-        neko_delete_local_ref(env, system_class);
-    }
-    if (neko_exception_check(env)) {
-        neko_exception_clear(env);
-    }
-    return version;
+    return 0;
 }
 
-static void neko_mark_loader_loaded(JNIEnv *env) {
+static void neko_mark_loader_loaded(void) {
     Klass *loader_klass = (Klass*)g_neko_vm_layout.klass_neko_native_loader;
     oop mirror_oop;
-    (void)env;
     if (loader_klass == NULL || g_neko_vm_layout.off_loader_loaded_field < 0) return;
     mirror_oop = neko_resolve_mirror_oop_from_klass(&g_neko_vm_layout, loader_klass);
     if (mirror_oop == NULL) {
@@ -1189,7 +1154,7 @@ static jboolean neko_parse_vm_layout(JNIEnv *env) {
     if (g_neko_vm_layout.off_klass_java_mirror < 0 && g_neko_vm_layout.off_instance_klass_java_mirror >= 0) {
         g_neko_vm_layout.off_klass_java_mirror = g_neko_vm_layout.off_instance_klass_java_mirror;
     }
-    neko_derive_wave2_layout_offsets(env);
+    (void)env;
     neko_log_instance_klass_static_field_offsets();
     neko_derive_method_flags_status_offset();
     neko_derive_thread_tlab_top_offset();
@@ -1565,6 +1530,10 @@ static bool neko_resolve_field_offset(void* klass, const char* target_name, uint
     if (g_neko_vm_layout.off_instance_klass_java_fields_count < 0) return false;
     java_fields_count = (uint32_t)*(const uint16_t*)((const uint8_t*)klass + g_neko_vm_layout.off_instance_klass_java_fields_count);
     return neko_field_walk_legacy(klass, java_fields_count, target_name, target_name_len, target_desc, target_desc_len, want_static, offset_out);
+}
+
+static void neko_bootstrap_owner_discovery(void) {
+    return;
 }
 
 static void neko_resolve_string_intern_layout(void) {

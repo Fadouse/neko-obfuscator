@@ -457,10 +457,12 @@ public final class CCodeGenerator {
             __attribute__((visibility(\"default\"))) oop neko_rt_try_alloc_instance_fast_nosafepoint(Klass *ik, size_t instance_size_bytes);
             static void* neko_rt_try_alloc_array_fast_nosafepoint(void* array_klass, int32_t length);
             static inline uint32_t neko_lh_header_size(uint32_t lh);
+            static inline uint32_t neko_lh_log2_element(uint32_t lh);
             static inline size_t neko_lh_instance_size(uint32_t lh);
             static inline void neko_store_heap_oop_at_unpublished(void* base, int32_t offset, void* raw_oop);
             static inline void* neko_load_heap_oop_from_published(void* base, int32_t offset);
             static inline int32_t neko_object_array_element_offset(void* array_klass, int32_t index);
+            static void neko_bootstrap_owner_discovery(void);
             /* ---------------------------------------------------------------------- */
 
             """;
