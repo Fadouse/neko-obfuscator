@@ -1629,12 +1629,18 @@ static void neko_assign_string_root_cells(NekoChunkedHandleListChunk *head) {
         for (uint32_t site_index = 0; site_index < method->ldc_site_count; site_index++) {
             NekoManifestLdcSite *site = &method->ldc_sites[site_index];
             NekoStringInternEntry *entry;
+            void *string_oop;
             if (site->kind != NEKO_LDC_KIND_STRING) continue;
             neko_resolve_ldc_string(site);
             entry = (NekoStringInternEntry*)site->resolved_cache_handle;
             if (entry == NULL) continue;
             if (entry->root_cell != NULL) continue;
             entry->root_cell = neko_nth_string_root_cell(head, slot++);
+            if (entry->root_cell == NULL) continue;
+            string_oop = neko_create_ldc_string_oop(site, NULL, NULL, NULL, NULL);
+            if (string_oop != NULL) {
+                neko_store_oop_to_cell(entry->root_cell, string_oop);
+            }
         }
     }
 }
@@ -1644,7 +1650,6 @@ static void neko_string_intern_prewarm_and_publish(JNIEnv *env) {
     NekoChunkedHandleListChunk *chunk_head;
     if (env == NULL) return;
     if (g_neko_vm_layout.klass_java_lang_String == NULL) return;
-    if (g_neko_vm_layout.off_string_hash < 0) return;
     if (NEKO_STRING_INTERN_SLOT_COUNT == 0u) {
         g_neko_string_root_backend = NEKO_STRING_ROOT_BACKEND_BOOT_CLD;
         return;
