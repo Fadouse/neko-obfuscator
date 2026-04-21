@@ -785,19 +785,23 @@ static void neko_resolve_strict_optional_symbols(void) {
         allocate_instance_names,
         sizeof(allocate_instance_names) / sizeof(allocate_instance_names[0])
     );
-    if (g_neko_vm_layout.allocate_instance_fn == NULL) {
-        neko_error_log("required libjvm symbol InstanceKlass::allocate_instance(Thread*) not found");
-        return JNI_FALSE;
+    if (g_neko_vm_layout.allocate_instance_fn != NULL) {
+#ifdef NEKO_DEBUG_ENABLED
+        if (neko_debug_enabled()) {
+            neko_native_debug_log("dlsym_allocate_instance=%p", g_neko_vm_layout.allocate_instance_fn);
+        }
+#endif
+    } else {
+#ifdef NEKO_DEBUG_ENABLED
+        if (neko_debug_enabled()) {
+            neko_native_debug_log("dlsym_allocate_instance=FAILED");
+        }
+#endif
     }
     g_neko_vm_layout.java_thread_current_fn = neko_resolve_first_symbol(
         java_thread_current_names,
         sizeof(java_thread_current_names) / sizeof(java_thread_current_names[0])
     );
-    if (g_neko_vm_layout.java_thread_current_fn == NULL) {
-        neko_error_log("required libjvm symbol JavaThread::current() not found");
-        return JNI_FALSE;
-    }
-    return JNI_TRUE;
 }
 
 static jboolean neko_resolve_vm_symbols(void) {
@@ -819,9 +823,7 @@ static jboolean neko_resolve_vm_symbols(void) {
     } while (0);
     NEKO_REQUIRED_VM_SYMBOLS(NEKO_RESOLVE_REQUIRED_SYMBOL);
 #undef NEKO_RESOLVE_REQUIRED_SYMBOL
-    if (!neko_resolve_strict_optional_symbols()) {
-        return JNI_FALSE;
-    }
+    neko_resolve_strict_optional_symbols();
     NEKO_TRACE(0, "[nk] lj %u/%u", resolved, NEKO_REQUIRED_VM_SYMBOL_COUNT);
     return JNI_TRUE;
 }
