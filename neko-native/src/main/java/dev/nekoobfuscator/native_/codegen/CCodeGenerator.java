@@ -437,7 +437,6 @@ public final class CCodeGenerator {
                 void* klass_java_lang_String;
                 void* klass_array_char;
                 void* klass_array_byte;
-                void* klass_array_object;
                 void* klass_neko_native_loader;
                 void* klass_exc_npe;
                 void* klass_exc_aioobe;
@@ -446,7 +445,7 @@ public final class CCodeGenerator {
                 void* klass_exc_le;
                 void* klass_exc_oom;
                 void* klass_exc_imse;
-                void* klass_exc_bme;
+                void* klass_exc_ase;
                 void* klass_exc_nase;
             } NekoVmLayout;
             extern NekoVmLayout g_neko_vm_layout;
