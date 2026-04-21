@@ -446,7 +446,6 @@ static void* neko_create_ldc_string_oop(NekoManifestLdcSite* site, uint32_t *cod
     if (site == NULL) return NULL;
     if (g_neko_vm_layout.klass_java_lang_String == NULL) return NULL;
     if (g_neko_vm_layout.off_string_value < 0) return NULL;
-    if (g_neko_vm_layout.off_string_hash < 0) return NULL;
     if (!neko_decode_mutf8_to_utf16(site->raw_constant_utf8, site->raw_constant_utf8_len, &utf16, &utf16_len, &heap_alloc)) {
         return NULL;
     }
@@ -505,7 +504,9 @@ static void* neko_create_ldc_string_oop(NekoManifestLdcSite* site, uint32_t *cod
     if (!is_jdk8) {
         *(uint8_t*)((uint8_t*)string_oop + g_neko_vm_layout.off_string_coder) = (uint8_t)coder;
     }
-    *(int32_t*)((uint8_t*)string_oop + g_neko_vm_layout.off_string_hash) = 0;
+    if (g_neko_vm_layout.off_string_hash >= 0) {
+        *(int32_t*)((uint8_t*)string_oop + g_neko_vm_layout.off_string_hash) = 0;
+    }
     key_payload_bytes = is_jdk8
         ? (uint32_t)(utf16_len * 2)
         : (coder == 0 ? (uint32_t)utf16_len : (uint32_t)utf16_len * 2u);
