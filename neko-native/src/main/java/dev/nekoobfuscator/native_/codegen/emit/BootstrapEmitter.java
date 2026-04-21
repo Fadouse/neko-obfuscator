@@ -55,6 +55,8 @@ NekoVmLayout g_neko_vm_layout = {0};
 static JavaVM *g_neko_java_vm = NULL;
 static jvmtiEnv *g_neko_jvmti = NULL;
 static jrawMonitorID g_neko_manifest_lock = NULL;
+static void* (*g_neko_allocate_instance_fn)(void*, void*) = NULL;
+static void* (*g_neko_java_thread_current_fn)(void) = NULL;
 static uint32_t g_neko_manifest_match_count = 0u;
 #ifdef NEKO_DEBUG_ENABLED
 static int neko_debug_level = 0;
@@ -241,7 +243,6 @@ static void neko_resolve_prepared_class_field_sites(JNIEnv *env, jclass klass, c
 static jboolean neko_prewarm_ldc_sites(JNIEnv *env);
 static void neko_publish_prepared_ldc_class_site(JNIEnv *env, jclass klass, const char *signature, void *prepared_klass);
 static void* neko_class_klass_pointer(jclass klass_obj);
-static void neko_capture_well_known_klass(jclass mirror);
 static bool neko_read_symbol_bytes(void* sym, const uint8_t** bytes_out, uint16_t* len_out);
 static bool neko_cp_utf8_symbol(void* cp, int idx, void** sym_out);
 static bool neko_field_walk_legacy(void* ik, uint32_t java_fields_count, const char* target_name, uint32_t target_name_len, const char* target_desc, uint32_t target_desc_len, bool want_static, int32_t* offset_out);
@@ -255,6 +256,8 @@ static void neko_string_intern_prewarm_and_publish(JNIEnv *env);
 static void* neko_load_oop_from_cell(const void *cell);
 static void neko_store_oop_to_cell(void *cell, void *raw_oop);
 static void neko_log_wave2_ready(void);
+static jboolean neko_parse_vm_layout_strict(JNIEnv *env);
+static jboolean neko_capture_wellknown_klasses(void);
 
 static void neko_derive_thread_tlab_top_offset(void) {
     ptrdiff_t start_source = -1;
@@ -465,6 +468,19 @@ static void neko_derive_cld_handles_offset(void) {
     g_neko_vm_layout.off_cld_handles = candidate;
 }
 
+static void neko_log_strict_vm_layout_ok(void) {
+#ifdef NEKO_DEBUG_ENABLED
+    if (!neko_debug_enabled()) return;
+    neko_native_debug_log(
+        "strict_vm_layout_ok=1 next_link=%td cld_klasses=%td cld_handles=%td klass_mirror=%td",
+        g_neko_vm_layout.off_klass_next_link,
+        g_neko_vm_layout.off_cld_klasses,
+        g_neko_vm_layout.off_cld_handles,
+        g_neko_vm_layout.off_klass_java_mirror
+    );
+#endif
+}
+
 static const char* neko_validate_wave4a_layout(void) {
     if (g_neko_vm_layout.off_thread_thread_state < 0) return "JavaThread::_thread_state";
     if (g_neko_vm_layout.off_java_thread_last_Java_sp < 0) return "JavaThread::_anchor._last_Java_sp";
@@ -541,6 +557,7 @@ static void neko_reset_vm_layout(void) {
     g_neko_vm_layout.off_constant_pool_length = -1;
     g_neko_vm_layout.off_klass_layout_helper = -1;
     g_neko_vm_layout.off_klass_name = -1;
+    g_neko_vm_layout.off_klass_next_link = -1;
     g_neko_vm_layout.off_klass_java_mirror = -1;
     g_neko_vm_layout.off_class_klass = -1;
     g_neko_vm_layout.off_instance_klass_constants = -1;
@@ -556,6 +573,7 @@ static void neko_reset_vm_layout(void) {
     g_neko_vm_layout.off_string_value = -1;
     g_neko_vm_layout.off_string_coder = -1;
     g_neko_vm_layout.off_string_hash = -1;
+    g_neko_vm_layout.off_loader_loaded_field = -1;
     g_neko_vm_layout.off_cldg_head = 0u;
     g_neko_vm_layout.off_cld_next = -1;
     g_neko_vm_layout.off_cld_class_loader = -1;
@@ -623,6 +641,8 @@ static void neko_reset_vm_layout(void) {
     g_neko_vm_layout.use_compact_object_headers = g_neko_use_compact_object_headers;
     g_neko_wave4a_unavailable_reason = "uninitialized";
     g_neko_flag_patch_path_logged = 0;
+    g_neko_allocate_instance_fn = NULL;
+    g_neko_java_thread_current_fn = NULL;
 }
 
 #if defined(_WIN32)
@@ -728,12 +748,60 @@ static void* neko_resolve_symbol_address(const char *name) {
 }
 #endif
 
+static void* neko_resolve_libjvm_symbol(const char *name) {
+    if (name == NULL || name[0] == '\0') return NULL;
+    if (g_neko_libjvm_handle == NULL) {
+        g_neko_libjvm_handle = neko_resolve_libjvm_handle();
+    }
+    return neko_resolve_symbol_address(name);
+}
+
 """);
         sb.append("""
 
 static void neko_resolve_optional_vm_flags(void) {
     void *symbol = neko_resolve_symbol_address("UseCompactObjectHeaders");
     g_neko_use_compact_object_headers = (symbol != NULL && *(const uint8_t*)symbol != 0u) ? JNI_TRUE : JNI_FALSE;
+}
+
+static void* neko_resolve_first_symbol(const char* const* names, size_t count) {
+    for (size_t i = 0; i < count; i++) {
+        void *symbol = neko_resolve_libjvm_symbol(names[i]);
+        if (symbol != NULL) {
+            return symbol;
+        }
+    }
+    return NULL;
+}
+
+static jboolean neko_resolve_strict_optional_symbols(void) {
+    static const char *const allocate_instance_names[] = {
+        "_ZN13InstanceKlass17allocate_instanceEP6Thread",
+        "_ZN13InstanceKlass17allocate_instanceEP10JavaThread",
+        "_ZN13InstanceKlass17allocate_instanceEP7Thread*",
+        "_ZN13InstanceKlass17allocate_instanceEP10JavaThread*"
+    };
+    static const char *const java_thread_current_names[] = {
+        "_ZN10JavaThread7currentEv",
+        "_ZN6Thread7currentEv"
+    };
+    g_neko_allocate_instance_fn = (void* (*)(void*, void*))neko_resolve_first_symbol(
+        allocate_instance_names,
+        sizeof(allocate_instance_names) / sizeof(allocate_instance_names[0])
+    );
+    if (g_neko_allocate_instance_fn == NULL) {
+        neko_error_log("required libjvm symbol InstanceKlass::allocate_instance(Thread*) not found");
+        return JNI_FALSE;
+    }
+    g_neko_java_thread_current_fn = (void* (*)(void))neko_resolve_first_symbol(
+        java_thread_current_names,
+        sizeof(java_thread_current_names) / sizeof(java_thread_current_names[0])
+    );
+    if (g_neko_java_thread_current_fn == NULL) {
+        neko_error_log("required libjvm symbol JavaThread::current() not found");
+        return JNI_FALSE;
+    }
+    return JNI_TRUE;
 }
 
 static jboolean neko_resolve_vm_symbols(void) {
@@ -755,6 +823,9 @@ static jboolean neko_resolve_vm_symbols(void) {
     } while (0);
     NEKO_REQUIRED_VM_SYMBOLS(NEKO_RESOLVE_REQUIRED_SYMBOL);
 #undef NEKO_RESOLVE_REQUIRED_SYMBOL
+    if (!neko_resolve_strict_optional_symbols()) {
+        return JNI_FALSE;
+    }
     NEKO_TRACE(0, "[nk] lj %u/%u", resolved, NEKO_REQUIRED_VM_SYMBOL_COUNT);
     return JNI_TRUE;
 }
@@ -810,24 +881,18 @@ cleanup:
 }
 
 static void neko_mark_loader_loaded(JNIEnv *env) {
-    jclass loader_class;
-    jfieldID loaded_field;
-    if (env == NULL) return;
-    loader_class = neko_find_class(env, "dev/nekoobfuscator/runtime/NekoNativeLoader");
-    if (loader_class == NULL) {
-        if (neko_exception_check(env)) {
-            neko_exception_clear(env);
-        }
+    Klass *loader_klass = (Klass*)g_neko_vm_layout.klass_neko_native_loader;
+    oop mirror_oop;
+    void *mirror_base;
+    (void)env;
+    if (loader_klass == NULL || g_neko_vm_layout.off_loader_loaded_field < 0) return;
+    mirror_oop = neko_resolve_mirror_oop_from_klass(&g_neko_vm_layout, loader_klass);
+    if (mirror_oop == NULL) {
+        neko_error_log("strict bootstrap failed to resolve NekoNativeLoader mirror");
         return;
     }
-    loaded_field = neko_get_static_field_id(env, loader_class, "loaded", "Z");
-    if (loaded_field != NULL) {
-        neko_set_static_boolean_field(env, loader_class, loaded_field, JNI_TRUE);
-    }
-    if (neko_exception_check(env)) {
-        neko_exception_clear(env);
-    }
-    neko_delete_local_ref(env, loader_class);
+    mirror_base = (void*)mirror_oop;
+    *(volatile uint8_t*)((uint8_t*)mirror_base + g_neko_vm_layout.off_loader_loaded_field) = 1u;
 }
 
 """);
@@ -902,6 +967,7 @@ static const char* neko_validate_vm_layout(void) {
     if (g_neko_vm_layout.off_constant_pool_length < 0) return "ConstantPool::_length";
     if (g_neko_vm_layout.off_klass_layout_helper < 0) return "Klass::_layout_helper";
     if (g_neko_vm_layout.off_klass_name < 0) return "Klass::_name";
+    if (g_neko_vm_layout.off_klass_next_link < 0) return "Klass::_next_link";
     if (g_neko_vm_layout.off_klass_java_mirror < 0) return "Klass::_java_mirror";
     if (g_neko_vm_layout.off_instance_klass_constants < 0) return "InstanceKlass::_constants";
     if (g_neko_vm_layout.off_instance_klass_fields < 0) return "InstanceKlass::_fields";
@@ -1032,6 +1098,7 @@ static jboolean neko_parse_vm_layout(JNIEnv *env) {
         } else if (neko_streq(type_name, "Klass")) {
             if (neko_streq(field_name, "_layout_helper")) g_neko_vm_layout.off_klass_layout_helper = (ptrdiff_t)offset;
             else if (neko_streq(field_name, "_name")) g_neko_vm_layout.off_klass_name = (ptrdiff_t)offset;
+            else if (neko_streq(field_name, "_next_link")) g_neko_vm_layout.off_klass_next_link = (ptrdiff_t)offset;
             else if (neko_streq(field_name, "_java_mirror")) g_neko_vm_layout.off_klass_java_mirror = (ptrdiff_t)offset;
         } else if (neko_streq(type_name, "java_lang_Class")) {
             if (neko_streq(field_name, "_klass")) g_neko_vm_layout.off_class_klass = (ptrdiff_t)offset;
@@ -1145,6 +1212,26 @@ static jboolean neko_parse_vm_layout(JNIEnv *env) {
     }
     neko_configure_wave4a_layout();
     NEKO_TRACE(0, "[nk] vm j=%d", g_neko_vm_layout.java_spec_version);
+    return JNI_TRUE;
+}
+
+static jboolean neko_parse_vm_layout_strict(JNIEnv *env) {
+    if (!neko_parse_vm_layout(env)) {
+        return JNI_FALSE;
+    }
+    if (g_neko_vm_layout.off_klass_next_link < 0) {
+        neko_error_log("strict bootstrap requires Klass::_next_link VMStructs exposure");
+        return JNI_FALSE;
+    }
+    if (g_neko_vm_layout.klass_neko_native_loader != NULL) {
+        int32_t loaded_offset = -1;
+        if (!neko_resolve_field_offset(g_neko_vm_layout.klass_neko_native_loader, "loaded", 6u, "Z", 1u, true, &loaded_offset)) {
+            neko_error_log("strict bootstrap failed to resolve NekoNativeLoader.loaded offset");
+            return JNI_FALSE;
+        }
+        g_neko_vm_layout.off_loader_loaded_field = (ptrdiff_t)loaded_offset;
+    }
+    neko_log_strict_vm_layout_ok();
     return JNI_TRUE;
 }
 
@@ -1267,32 +1354,109 @@ static char* neko_internal_name_from_signature(const char *signature) {
     return value;
 }
 
-static void neko_capture_well_known_klass(jclass mirror) {
-    void *klass_ptr;
-    char *signature = NULL;
-    char *owner_internal = NULL;
-    jvmtiError err;
-    if (mirror == NULL || g_neko_jvmti == NULL) return;
-    klass_ptr = neko_class_klass_pointer(mirror);
-    if (klass_ptr == NULL) return;
-    err = (*g_neko_jvmti)->GetClassSignature(g_neko_jvmti, mirror, &signature, NULL);
-    if (err != JVMTI_ERROR_NONE || signature == NULL) return;
-    owner_internal = neko_internal_name_from_signature(signature);
-    if (owner_internal != NULL) {
-        if (strcmp(owner_internal, "java/lang/String") == 0) {
-            g_neko_vm_layout.klass_java_lang_String = klass_ptr;
-        } else if (strcmp(owner_internal, "dev/nekoobfuscator/runtime/NekoNativeLoader") == 0) {
-            g_neko_vm_layout.klass_neko_native_loader = klass_ptr;
+static jboolean neko_symbol_equals_literal(void *sym, const char *literal, uint16_t literal_len) {
+    const uint8_t *body = NULL;
+    uint16_t sym_len = 0;
+    if (sym == NULL || literal == NULL) return JNI_FALSE;
+    if (!neko_read_symbol_bytes(sym, &body, &sym_len)) return JNI_FALSE;
+    if (sym_len != literal_len) return JNI_FALSE;
+    return literal_len == 0u || memcmp(body, literal, literal_len) == 0 ? JNI_TRUE : JNI_FALSE;
+}
+
+static inline Klass* neko_cld_first_klass(void *cld) {
+    if (cld == NULL || g_neko_vm_layout.off_cld_klasses < 0) return NULL;
+    return *(Klass**)((uint8_t*)cld + g_neko_vm_layout.off_cld_klasses);
+}
+
+static inline Klass* neko_klass_next_link(Klass *klass) {
+    if (klass == NULL || g_neko_vm_layout.off_klass_next_link < 0) return NULL;
+    return *(Klass**)((uint8_t*)klass + g_neko_vm_layout.off_klass_next_link);
+}
+
+static Klass* neko_find_klass_by_name_in_cld(void *cld, const char *internal_name, uint16_t internal_name_len) {
+    if (g_neko_vm_layout.off_klass_name < 0) return NULL;
+    for (Klass *klass = neko_cld_first_klass(cld); klass != NULL; klass = neko_klass_next_link(klass)) {
+        void *name_sym = *(void**)((uint8_t*)klass + g_neko_vm_layout.off_klass_name);
+        if (neko_symbol_equals_literal(name_sym, internal_name, internal_name_len)) {
+            return klass;
         }
-    } else if (strcmp(signature, "[C") == 0) {
-        g_neko_vm_layout.klass_array_char = klass_ptr;
-    } else if (strcmp(signature, "[B") == 0) {
-        g_neko_vm_layout.klass_array_byte = klass_ptr;
-    } else if (strcmp(signature, "[Ljava/lang/Object;") == 0) {
-        g_neko_vm_layout.klass_array_object = klass_ptr;
     }
-    free(owner_internal);
-    neko_jvmti_deallocate(g_neko_jvmti, signature);
+    return NULL;
+}
+
+static jboolean neko_capture_wellknown_klasses(void) {
+    void *boot_cld;
+    if (g_neko_vm_layout.off_klass_next_link < 0) {
+        neko_error_log("strict bootstrap requires Klass::_next_link VMStructs exposure");
+        return JNI_FALSE;
+    }
+    boot_cld = neko_find_boot_class_loader_data();
+    if (boot_cld == NULL) {
+        neko_error_log("strict bootstrap failed to locate boot ClassLoaderData");
+        return JNI_FALSE;
+    }
+    g_neko_vm_layout.klass_java_lang_String = neko_find_klass_by_name_in_cld(boot_cld, "java/lang/String", (uint16_t)(sizeof("java/lang/String") - 1u));
+    g_neko_vm_layout.klass_array_byte = neko_find_klass_by_name_in_cld(boot_cld, "[B", (uint16_t)(sizeof("[B") - 1u));
+    g_neko_vm_layout.klass_array_char = neko_find_klass_by_name_in_cld(boot_cld, "[C", (uint16_t)(sizeof("[C") - 1u));
+    g_neko_vm_layout.klass_array_object = neko_find_klass_by_name_in_cld(boot_cld, "[Ljava/lang/Object;", (uint16_t)(sizeof("[Ljava/lang/Object;") - 1u));
+    g_neko_vm_layout.klass_neko_native_loader = neko_find_klass_by_name_in_cld(boot_cld, "dev/nekoobfuscator/runtime/NekoNativeLoader", (uint16_t)(sizeof("dev/nekoobfuscator/runtime/NekoNativeLoader") - 1u));
+    g_neko_vm_layout.klass_exc_npe = neko_find_klass_by_name_in_cld(boot_cld, "java/lang/NullPointerException", (uint16_t)(sizeof("java/lang/NullPointerException") - 1u));
+    g_neko_vm_layout.klass_exc_aioobe = neko_find_klass_by_name_in_cld(boot_cld, "java/lang/ArrayIndexOutOfBoundsException", (uint16_t)(sizeof("java/lang/ArrayIndexOutOfBoundsException") - 1u));
+    g_neko_vm_layout.klass_exc_cce = neko_find_klass_by_name_in_cld(boot_cld, "java/lang/ClassCastException", (uint16_t)(sizeof("java/lang/ClassCastException") - 1u));
+    g_neko_vm_layout.klass_exc_ae = neko_find_klass_by_name_in_cld(boot_cld, "java/lang/ArithmeticException", (uint16_t)(sizeof("java/lang/ArithmeticException") - 1u));
+    g_neko_vm_layout.klass_exc_le = neko_find_klass_by_name_in_cld(boot_cld, "java/lang/LinkageError", (uint16_t)(sizeof("java/lang/LinkageError") - 1u));
+    g_neko_vm_layout.klass_exc_oom = neko_find_klass_by_name_in_cld(boot_cld, "java/lang/OutOfMemoryError", (uint16_t)(sizeof("java/lang/OutOfMemoryError") - 1u));
+    g_neko_vm_layout.klass_exc_imse = neko_find_klass_by_name_in_cld(boot_cld, "java/lang/IllegalMonitorStateException", (uint16_t)(sizeof("java/lang/IllegalMonitorStateException") - 1u));
+    g_neko_vm_layout.klass_exc_bme = neko_find_klass_by_name_in_cld(boot_cld, "java/lang/BootstrapMethodError", (uint16_t)(sizeof("java/lang/BootstrapMethodError") - 1u));
+    g_neko_vm_layout.klass_exc_nase = neko_find_klass_by_name_in_cld(boot_cld, "java/lang/NegativeArraySizeException", (uint16_t)(sizeof("java/lang/NegativeArraySizeException") - 1u));
+    if (g_neko_vm_layout.klass_neko_native_loader != NULL) {
+        int32_t loaded_offset = -1;
+        if (!neko_resolve_field_offset(g_neko_vm_layout.klass_neko_native_loader, "loaded", 6u, "Z", 1u, true, &loaded_offset)) {
+            neko_error_log("strict bootstrap failed to resolve NekoNativeLoader.loaded offset");
+            return JNI_FALSE;
+        }
+        g_neko_vm_layout.off_loader_loaded_field = (ptrdiff_t)loaded_offset;
+    }
+#ifdef NEKO_DEBUG_ENABLED
+    if (neko_debug_enabled()) {
+        neko_native_debug_log(
+            "boot_well_known_scan_ok=%d string=%p byte=%p char=%p",
+            (g_neko_vm_layout.klass_java_lang_String != NULL
+             && g_neko_vm_layout.klass_array_byte != NULL
+             && g_neko_vm_layout.klass_array_char != NULL
+             && g_neko_vm_layout.klass_neko_native_loader != NULL
+             && g_neko_vm_layout.klass_exc_npe != NULL
+             && g_neko_vm_layout.klass_exc_aioobe != NULL
+             && g_neko_vm_layout.klass_exc_cce != NULL
+             && g_neko_vm_layout.klass_exc_ae != NULL
+             && g_neko_vm_layout.klass_exc_le != NULL
+             && g_neko_vm_layout.klass_exc_oom != NULL
+             && g_neko_vm_layout.klass_exc_imse != NULL
+             && g_neko_vm_layout.klass_exc_bme != NULL
+             && g_neko_vm_layout.klass_exc_nase != NULL) ? 1 : 0,
+            g_neko_vm_layout.klass_java_lang_String,
+            g_neko_vm_layout.klass_array_byte,
+            g_neko_vm_layout.klass_array_char
+        );
+    }
+#endif
+    if (g_neko_vm_layout.klass_java_lang_String == NULL
+        || g_neko_vm_layout.klass_array_byte == NULL
+        || g_neko_vm_layout.klass_array_char == NULL
+        || g_neko_vm_layout.klass_neko_native_loader == NULL
+        || g_neko_vm_layout.klass_exc_npe == NULL
+        || g_neko_vm_layout.klass_exc_aioobe == NULL
+        || g_neko_vm_layout.klass_exc_cce == NULL
+        || g_neko_vm_layout.klass_exc_ae == NULL
+        || g_neko_vm_layout.klass_exc_le == NULL
+        || g_neko_vm_layout.klass_exc_oom == NULL
+        || g_neko_vm_layout.klass_exc_imse == NULL
+        || g_neko_vm_layout.klass_exc_bme == NULL
+        || g_neko_vm_layout.klass_exc_nase == NULL) {
+        neko_error_log("strict bootstrap failed to capture required well-known klasses");
+        return JNI_FALSE;
+    }
+    return JNI_TRUE;
 }
 
 static bool neko_read_symbol_bytes(void* sym, const uint8_t** bytes_out, uint16_t* len_out) {

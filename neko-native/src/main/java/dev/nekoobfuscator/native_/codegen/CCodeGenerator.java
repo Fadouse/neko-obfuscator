@@ -334,6 +334,7 @@ public final class CCodeGenerator {
                 ptrdiff_t off_constant_pool_holder;
                 ptrdiff_t off_klass_layout_helper;
                 ptrdiff_t off_klass_name;
+                ptrdiff_t off_klass_next_link;
                 ptrdiff_t off_klass_java_mirror;
                 ptrdiff_t off_class_klass;
                 ptrdiff_t off_instance_klass_constants;
@@ -427,6 +428,7 @@ public final class CCodeGenerator {
                 ptrdiff_t off_symbol_body;
                 ptrdiff_t off_instance_klass_fieldinfo_stream;
                 ptrdiff_t off_string_hash;
+                ptrdiff_t off_loader_loaded_field;
                 uintptr_t off_cldg_head;
                 ptrdiff_t off_cld_next;
                 ptrdiff_t off_cld_class_loader;
@@ -438,6 +440,15 @@ public final class CCodeGenerator {
                 void* klass_array_byte;
                 void* klass_array_object;
                 void* klass_neko_native_loader;
+                void* klass_exc_npe;
+                void* klass_exc_aioobe;
+                void* klass_exc_cce;
+                void* klass_exc_ae;
+                void* klass_exc_le;
+                void* klass_exc_oom;
+                void* klass_exc_imse;
+                void* klass_exc_bme;
+                void* klass_exc_nase;
             } NekoVmLayout;
             extern NekoVmLayout g_neko_vm_layout;
             typedef struct Klass Klass;
