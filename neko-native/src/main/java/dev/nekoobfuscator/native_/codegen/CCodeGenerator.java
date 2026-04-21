@@ -421,13 +421,18 @@ public final class CCodeGenerator {
                 jboolean use_compact_object_headers;
                 /* Wave 4b-4a strict-nojni STRING intern infrastructure */
                 size_t constant_pool_size;
-                int32_t off_constant_pool_tags;
-                int32_t off_constant_pool_length;
-                int32_t off_symbol_length;
-                int32_t off_symbol_body;
-                int32_t off_instance_klass_fieldinfo_stream;
-                int32_t off_string_hash;
-                int32_t off_loader_string_roots;
+                ptrdiff_t off_constant_pool_tags;
+                ptrdiff_t off_constant_pool_length;
+                ptrdiff_t off_symbol_length;
+                ptrdiff_t off_symbol_body;
+                ptrdiff_t off_instance_klass_fieldinfo_stream;
+                ptrdiff_t off_string_hash;
+                uintptr_t off_cldg_head;
+                ptrdiff_t off_cld_next;
+                ptrdiff_t off_cld_class_loader;
+                ptrdiff_t off_cld_klasses;
+                ptrdiff_t off_cld_handles;
+                jboolean cld_class_loader_is_oophandle;
                 void* klass_java_lang_String;
                 void* klass_array_char;
                 void* klass_array_byte;

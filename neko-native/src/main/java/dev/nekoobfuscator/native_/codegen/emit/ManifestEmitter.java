@@ -13,6 +13,7 @@ import org.objectweb.asm.Opcodes;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 
 public final class ManifestEmitter {
@@ -102,7 +103,7 @@ public final class ManifestEmitter {
 
     public String renderManifestSupport(List<NativeMethodBinding> bindings, SignaturePlan signaturePlan) {
         StringBuilder sb = new StringBuilder();
-        int stringInternSlotCount = totalLdcKindCount(LdcKind.STRING);
+        int stringInternSlotCount = uniqueStringLiteralCount();
         int stringInternBucketCount = Math.max(1, stringInternSlotCount * 2);
         sb.append("#define NEKO_MANIFEST_FLAG_STATIC 0x01u\n");
         sb.append("#define NEKO_MANIFEST_FLAG_LEAF_ONLY 0x02u\n");
@@ -296,8 +297,9 @@ public final class ManifestEmitter {
         sb.append("    uint32_t coder;            /* 0 LATIN1 / 1 UTF16 (JDK 9+); 1 synthetic UTF16-BE for JDK 8 */\n");
         sb.append("    uint32_t char_length;      /* logical Java char count */\n");
         sb.append("    uint32_t payload_length;   /* bytes backing the key */\n");
-        sb.append("    uint32_t slot_index;       /* index into root Object[] */\n");
+        sb.append("    uint32_t slot_index;       /* index into boot CLD handle cell pool */\n");
         sb.append("    const uint8_t* payload;    /* pointer to MUTF-8-derived key bytes or String byte[] contents */\n");
+        sb.append("    void* root_cell;           /* stable oop cell published via boot ClassLoaderData::_handles */\n");
         sb.append("    struct NekoStringInternEntry* next;\n");
         sb.append("} NekoStringInternEntry;\n\n");
         sb.append("static NekoStringInternEntry* g_neko_string_intern_buckets[NEKO_STRING_INTERN_BUCKET_COUNT];\n");
@@ -458,6 +460,16 @@ public final class ManifestEmitter {
             .flatMap(List::stream)
             .mapToInt(site -> site.kind() == kind ? 1 : 0)
             .sum();
+    }
+
+    private int uniqueStringLiteralCount() {
+        LinkedHashSet<String> literals = new LinkedHashSet<>();
+        ctx.manifestLdcSites().values().stream()
+            .flatMap(List::stream)
+            .filter(site -> site.kind() == LdcKind.STRING)
+            .map(ManifestLdcSiteRef::rawConstant)
+            .forEach(literals::add);
+        return literals.size();
     }
 
     private byte[] modifiedUtf8Bytes(String value) {

@@ -66,7 +66,20 @@ static int g_neko_flag_patch_path_logged = 0;
 static const char *g_neko_wave4a_unavailable_reason = "uninitialized";
 static int g_neko_wave4a_handle_caveat_logged = 0;
 static jboolean g_neko_use_compact_object_headers = JNI_FALSE;
-static void* g_neko_string_roots_array = NULL;
+enum {
+    NEKO_STRING_ROOT_BACKEND_BOOT_CLD = 1,
+    NEKO_STRING_ROOT_BACKEND_FALLBACK_REGENERATE = 2
+};
+
+typedef struct NekoChunkedHandleListChunk {
+    oop data[32];
+    uint32_t size;
+    struct NekoChunkedHandleListChunk* next;
+} NekoChunkedHandleListChunk;
+
+static uint8_t g_neko_string_root_backend = NEKO_STRING_ROOT_BACKEND_FALLBACK_REGENERATE;
+static uint8_t g_neko_boot_cld_root_chain_logged = 0u;
+static NekoChunkedHandleListChunk* g_neko_string_root_chunk_head = NULL;
 
 #if defined(_WIN32)
 static HMODULE g_neko_libjvm_handle = NULL;
@@ -236,8 +249,11 @@ static bool neko_read_u5(const uint8_t* buf, int limit, int* p, uint32_t* out);
 static bool neko_field_walk_fis21(void* ik, const char* target_name, uint32_t target_name_len, const char* target_desc, uint32_t target_desc_len, bool want_static, int32_t* offset_out);
 static bool neko_resolve_field_offset(void* klass, const char* target_name, uint32_t target_name_len, const char* target_desc, uint32_t target_desc_len, bool want_static, int32_t* offset_out);
 static void neko_resolve_string_intern_layout(void);
+static void* neko_create_ldc_string_oop(NekoManifestLdcSite *site, uint32_t *coder_out, uint32_t *char_length_out, uint8_t **key_bytes_out, uint32_t *key_payload_bytes_out);
 static void neko_resolve_ldc_string(NekoManifestLdcSite *site);
 static void neko_string_intern_prewarm_and_publish(JNIEnv *env);
+static void* neko_load_oop_from_cell(const void *cell);
+static void neko_store_oop_to_cell(void *cell, void *raw_oop);
 static void neko_log_wave2_ready(void);
 
 static void neko_derive_thread_tlab_top_offset(void) {
@@ -434,6 +450,21 @@ static void neko_log_instance_klass_static_field_offsets(void) {
     );
 }
 
+static void neko_derive_cld_handles_offset(void) {
+    ptrdiff_t candidate = -1;
+    g_neko_vm_layout.off_cld_handles = -1;
+    if (g_neko_vm_layout.off_cld_klasses < 0) {
+        return;
+    }
+    candidate = g_neko_vm_layout.java_spec_version <= 8
+        ? g_neko_vm_layout.off_cld_klasses + (ptrdiff_t)sizeof(uintptr_t)
+        : g_neko_vm_layout.off_cld_klasses - (ptrdiff_t)sizeof(uintptr_t);
+    if (candidate < 0) {
+        return;
+    }
+    g_neko_vm_layout.off_cld_handles = candidate;
+}
+
 static const char* neko_validate_wave4a_layout(void) {
     if (g_neko_vm_layout.off_thread_thread_state < 0) return "JavaThread::_thread_state";
     if (g_neko_vm_layout.off_java_thread_last_Java_sp < 0) return "JavaThread::_anchor._last_Java_sp";
@@ -525,7 +556,12 @@ static void neko_reset_vm_layout(void) {
     g_neko_vm_layout.off_string_value = -1;
     g_neko_vm_layout.off_string_coder = -1;
     g_neko_vm_layout.off_string_hash = -1;
-    g_neko_vm_layout.off_loader_string_roots = -1;
+    g_neko_vm_layout.off_cldg_head = 0u;
+    g_neko_vm_layout.off_cld_next = -1;
+    g_neko_vm_layout.off_cld_class_loader = -1;
+    g_neko_vm_layout.off_cld_klasses = -1;
+    g_neko_vm_layout.off_cld_handles = -1;
+    g_neko_vm_layout.cld_class_loader_is_oophandle = JNI_FALSE;
     g_neko_vm_layout.off_array_base_byte = -1;
     g_neko_vm_layout.off_array_scale_byte = -1;
     g_neko_vm_layout.off_array_base_char = -1;
@@ -875,6 +911,10 @@ static const char* neko_validate_vm_layout(void) {
     if (g_neko_vm_layout.off_instance_klass_init_state < 0) return "InstanceKlass::_init_state";
     if (g_neko_vm_layout.off_string_value < 0) return "java_lang_String::_value";
     if (g_neko_vm_layout.java_spec_version >= 9 && g_neko_vm_layout.off_string_coder < 0) return "java_lang_String::_coder";
+    if (g_neko_vm_layout.off_cldg_head == 0u) return "ClassLoaderDataGraph::_head";
+    if (g_neko_vm_layout.off_cld_next < 0) return "ClassLoaderData::_next";
+    if (g_neko_vm_layout.off_cld_class_loader < 0) return "ClassLoaderData::_class_loader";
+    if (g_neko_vm_layout.off_cld_klasses < 0) return "ClassLoaderData::_klasses";
     if (g_neko_vm_layout.off_array_base_byte < 0) return "byte[] base offset";
     if (g_neko_vm_layout.off_array_scale_byte < 0) return "byte[] index scale";
     if (g_neko_vm_layout.off_array_base_char < 0) return "char[] base offset";
@@ -975,6 +1015,19 @@ static jboolean neko_parse_vm_layout(JNIEnv *env) {
                 g_neko_vm_layout.off_constant_pool_tags = (ptrdiff_t)offset;
             } else if (neko_streq(field_name, "_length")) {
                 g_neko_vm_layout.off_constant_pool_length = (ptrdiff_t)offset;
+            }
+        } else if (neko_streq(type_name, "ClassLoaderDataGraph")) {
+            if (neko_streq(field_name, "_head") && is_static && address != NULL) {
+                g_neko_vm_layout.off_cldg_head = (uintptr_t)address;
+            }
+        } else if (neko_streq(type_name, "ClassLoaderData")) {
+            if (neko_streq(field_name, "_next")) {
+                g_neko_vm_layout.off_cld_next = (ptrdiff_t)offset;
+            } else if (neko_streq(field_name, "_class_loader")) {
+                g_neko_vm_layout.off_cld_class_loader = (ptrdiff_t)offset;
+                g_neko_vm_layout.cld_class_loader_is_oophandle = (type_string != NULL && strstr(type_string, "OopHandle") != NULL) ? JNI_TRUE : JNI_FALSE;
+            } else if (neko_streq(field_name, "_klasses")) {
+                g_neko_vm_layout.off_cld_klasses = (ptrdiff_t)offset;
             }
         } else if (neko_streq(type_name, "Klass")) {
             if (neko_streq(field_name, "_layout_helper")) g_neko_vm_layout.off_klass_layout_helper = (ptrdiff_t)offset;
@@ -1084,6 +1137,7 @@ static jboolean neko_parse_vm_layout(JNIEnv *env) {
     neko_derive_thread_exception_pc_offset();
     neko_derive_java_thread_anchor_offset();
     neko_derive_java_thread_jni_environment_offset();
+    neko_derive_cld_handles_offset();
     missing = neko_validate_vm_layout();
     if (missing != NULL) {
         neko_error_log("vm layout missing %s", missing);
@@ -1403,52 +1457,241 @@ static bool neko_resolve_field_offset(void* klass, const char* target_name, uint
 static void neko_resolve_string_intern_layout(void) {
     int32_t offset = -1;
     g_neko_vm_layout.off_string_hash = -1;
-    g_neko_vm_layout.off_loader_string_roots = -1;
     if (neko_resolve_field_offset(g_neko_vm_layout.klass_java_lang_String, "hash", 4u, "I", 1u, false, &offset)) {
         g_neko_vm_layout.off_string_hash = offset;
     } else {
         NEKO_TRACE(1, "[nk] si unresolved java/lang/String.hash");
     }
-    offset = -1;
-    if (neko_resolve_field_offset(g_neko_vm_layout.klass_neko_native_loader, "__nekoStringRoots", 17u, "[Ljava/lang/Object;", 19u, true, &offset)) {
-        g_neko_vm_layout.off_loader_string_roots = offset;
-    } else {
-        NEKO_TRACE(1, "[nk] si unresolved dev/nekoobfuscator/runtime/NekoNativeLoader.__nekoStringRoots");
-    }
 }
 
-static void neko_string_intern_prewarm_and_publish(JNIEnv *env) {
-    void *root_array;
-    void *loader_mirror;
-    if (env == NULL) return;
-    if (g_neko_vm_layout.klass_java_lang_String == NULL) return;
-    if (g_neko_vm_layout.klass_array_object == NULL) return;
-    if (g_neko_vm_layout.klass_neko_native_loader == NULL) return;
-    if (g_neko_vm_layout.off_loader_string_roots < 0) return;
-    if (g_neko_vm_layout.off_string_hash < 0) return;
-    if (NEKO_STRING_INTERN_SLOT_COUNT == 0u) return;
-    root_array = neko_rt_try_alloc_array_fast_nosafepoint(
-        g_neko_vm_layout.klass_array_object,
-        (int32_t)NEKO_STRING_INTERN_SLOT_COUNT
-    );
-    if (root_array == NULL) return;
+static void* neko_load_oop_from_cell(const void *cell) {
+    if (cell == NULL) return NULL;
+    if (neko_uses_compressed_oops()) {
+        u4 narrow = __atomic_load_n((const u4*)cell, __ATOMIC_ACQUIRE);
+        return neko_decode_heap_oop(narrow);
+    }
+    return __atomic_load_n((void* const*)cell, __ATOMIC_ACQUIRE);
+}
+
+static void neko_store_oop_to_cell(void *cell, void *raw_oop) {
+    if (cell == NULL) return;
+    if (neko_uses_compressed_oops()) {
+        u4 narrow = neko_encode_heap_oop(raw_oop);
+        __atomic_store_n((u4*)cell, narrow, __ATOMIC_RELEASE);
+        return;
+    }
+    __atomic_store_n((void**)cell, raw_oop, __ATOMIC_RELEASE);
+}
+
+static void neko_log_boot_cld_root_chain_result(int ok, const char *fallback) {
+#ifdef NEKO_DEBUG_ENABLED
+    if (!neko_debug_enabled()) return;
+    if (ok != 0) {
+        if (g_neko_boot_cld_root_chain_logged == 0u) {
+            g_neko_boot_cld_root_chain_logged = 1u;
+            neko_native_debug_log("boot_cld_root_chain_ok=1");
+        }
+        return;
+    }
+    neko_native_debug_log("boot_cld_root_chain_ok=0 fallback=%s", fallback == NULL ? "unknown" : fallback);
+#else
+    (void)ok;
+    (void)fallback;
+#endif
+}
+
+static void neko_reset_string_intern_entries(void) {
     memset(g_neko_string_intern_buckets, 0, sizeof(g_neko_string_intern_buckets));
     memset(g_neko_string_intern_entries, 0, sizeof(g_neko_string_intern_entries));
     g_neko_string_intern_filled = 0u;
-    g_neko_string_roots_array = root_array;
-    neko_manifest_lock_acquire();
+}
+
+static void* neko_boot_cld_head(void) {
+    if (g_neko_vm_layout.off_cldg_head == 0u) return NULL;
+    return *(void**)(uintptr_t)g_neko_vm_layout.off_cldg_head;
+}
+
+static jboolean neko_is_boot_cld_loader_null(void *loader_field) {
+    if (loader_field == NULL) return JNI_TRUE;
+    if (g_neko_vm_layout.cld_class_loader_is_oophandle) {
+        void *handle = *(void**)loader_field;
+        if (handle == NULL) return JNI_TRUE;
+        if (g_neko_vm_layout.off_oophandle_obj < 0) return JNI_FALSE;
+        return *(void**)((uint8_t*)handle + g_neko_vm_layout.off_oophandle_obj) == NULL ? JNI_TRUE : JNI_FALSE;
+    }
+    return *(void**)loader_field == NULL ? JNI_TRUE : JNI_FALSE;
+}
+
+static void* neko_find_boot_class_loader_data(void) {
+    void *current = neko_boot_cld_head();
+    void *first = current;
+    uint32_t null_loader_count = 0u;
+    if (current == NULL || g_neko_vm_layout.off_cld_next < 0 || g_neko_vm_layout.off_cld_class_loader < 0) return NULL;
+    while (current != NULL) {
+        void *loader_field = (uint8_t*)current + g_neko_vm_layout.off_cld_class_loader;
+        if (neko_is_boot_cld_loader_null(loader_field)) {
+            null_loader_count++;
+            if (null_loader_count == 1u) {
+                first = current;
+            } else {
+                return first;
+            }
+        }
+        current = *(void**)((uint8_t*)current + g_neko_vm_layout.off_cld_next);
+    }
+    return null_loader_count == 1u ? first : neko_boot_cld_head();
+}
+
+static NekoChunkedHandleListChunk* neko_alloc_string_root_chunks(uint32_t root_count) {
+    uint32_t chunk_count = root_count == 0u ? 0u : (root_count + 31u) / 32u;
+    NekoChunkedHandleListChunk *head = NULL;
+    NekoChunkedHandleListChunk *prev = NULL;
+    if (chunk_count == 0u) return NULL;
+    for (uint32_t i = 0; i < chunk_count; i++) {
+        NekoChunkedHandleListChunk *chunk = (NekoChunkedHandleListChunk*)malloc(sizeof(NekoChunkedHandleListChunk));
+        if (chunk == NULL) {
+            while (head != NULL) {
+                NekoChunkedHandleListChunk *next = head->next;
+                free(head);
+                head = next;
+            }
+            return NULL;
+        }
+        memset(chunk->data, 0, sizeof(chunk->data));
+        chunk->size = 32u;
+        chunk->next = NULL;
+        if (head == NULL) {
+            head = chunk;
+        } else {
+            prev->next = chunk;
+        }
+        prev = chunk;
+    }
+    return head;
+}
+
+static void* neko_nth_string_root_cell(NekoChunkedHandleListChunk *head, uint32_t index) {
+    uint32_t chunk_index = index / 32u;
+    uint32_t slot_index = index % 32u;
+    NekoChunkedHandleListChunk *chunk = head;
+    for (uint32_t i = 0; chunk != NULL && i < chunk_index; i++) {
+        chunk = chunk->next;
+    }
+    return chunk == NULL ? NULL : (void*)&chunk->data[slot_index];
+}
+
+static jboolean neko_self_check_string_root_chain(NekoChunkedHandleListChunk *head, uint32_t root_count) {
+    NekoHandleScope *scope = NULL;
+    jobject probe = NULL;
+    void *probe_oop = NULL;
+    void *round_trip = NULL;
+    uint32_t checks = root_count == 0u ? 0u : (root_count < 4u ? root_count : 4u);
+    JNIEnv *env = neko_current_env();
+    if (head == NULL || root_count == 0u || env == NULL) return JNI_FALSE;
+    scope = neko_rt_handles_open(NULL, 2u);
+    if (scope == NULL) return JNI_FALSE;
+    probe = neko_new_string_utf(env, "neko-w1-root-check");
+    if (probe == NULL || neko_exception_check(env)) {
+        if (neko_exception_check(env)) {
+            neko_exception_clear(env);
+        }
+        neko_rt_handles_close(scope);
+        return JNI_FALSE;
+    }
+    probe_oop = neko_handle_oop(probe);
+    for (uint32_t i = 0; i < checks; i++) {
+        void *cell = neko_nth_string_root_cell(head, i);
+        if (cell == NULL) {
+            neko_rt_handles_close(scope);
+            return JNI_FALSE;
+        }
+        neko_store_oop_to_cell(cell, probe_oop);
+        round_trip = neko_load_oop_from_cell(cell);
+        if (round_trip != probe_oop) {
+            neko_rt_handles_close(scope);
+            return JNI_FALSE;
+        }
+        neko_store_oop_to_cell(cell, NULL);
+    }
+    neko_rt_handles_close(scope);
+    return JNI_TRUE;
+}
+
+static jboolean neko_publish_string_root_chain(void *boot_cld, NekoChunkedHandleListChunk *head) {
+    void **handles_head;
+    void *expected = NULL;
+    if (boot_cld == NULL || head == NULL || g_neko_vm_layout.off_cld_handles < 0) return JNI_FALSE;
+    handles_head = (void**)((uint8_t*)boot_cld + g_neko_vm_layout.off_cld_handles);
+    expected = NULL;
+    return __atomic_compare_exchange_n(handles_head, &expected, head, JNI_FALSE, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE) ? JNI_TRUE : JNI_FALSE;
+}
+
+static void neko_assign_string_root_cells(NekoChunkedHandleListChunk *head) {
+    uint32_t slot = 0u;
     for (uint32_t method_index = 0; method_index < g_neko_manifest_method_count; method_index++) {
         NekoManifestMethod *method = (NekoManifestMethod*)&g_neko_manifest_methods[method_index];
         for (uint32_t site_index = 0; site_index < method->ldc_site_count; site_index++) {
             NekoManifestLdcSite *site = &method->ldc_sites[site_index];
+            NekoStringInternEntry *entry;
             if (site->kind != NEKO_LDC_KIND_STRING) continue;
             neko_resolve_ldc_string(site);
+            entry = (NekoStringInternEntry*)site->resolved_cache_handle;
+            if (entry == NULL) continue;
+            if (entry->root_cell != NULL) continue;
+            entry->root_cell = neko_nth_string_root_cell(head, slot++);
         }
     }
+}
+
+static void neko_string_intern_prewarm_and_publish(JNIEnv *env) {
+    void *boot_cld;
+    NekoChunkedHandleListChunk *chunk_head;
+    if (env == NULL) return;
+    if (g_neko_vm_layout.klass_java_lang_String == NULL) return;
+    if (g_neko_vm_layout.off_string_hash < 0) return;
+    if (NEKO_STRING_INTERN_SLOT_COUNT == 0u) {
+        g_neko_string_root_backend = NEKO_STRING_ROOT_BACKEND_BOOT_CLD;
+        return;
+    }
+    neko_reset_string_intern_entries();
+    neko_manifest_lock_acquire();
+    boot_cld = neko_find_boot_class_loader_data();
+    if (boot_cld == NULL || g_neko_vm_layout.off_cld_handles < 0) {
+        g_neko_string_root_backend = NEKO_STRING_ROOT_BACKEND_FALLBACK_REGENERATE;
+        neko_log_boot_cld_root_chain_result(0, "candidate_e");
+        neko_manifest_lock_release();
+        return;
+    }
+    if (__atomic_load_n((void**)((uint8_t*)boot_cld + g_neko_vm_layout.off_cld_handles), __ATOMIC_ACQUIRE) != NULL) {
+        g_neko_string_root_backend = NEKO_STRING_ROOT_BACKEND_FALLBACK_REGENERATE;
+        neko_log_boot_cld_root_chain_result(0, "candidate_e");
+        neko_manifest_lock_release();
+        return;
+    }
+    chunk_head = neko_alloc_string_root_chunks(NEKO_STRING_INTERN_SLOT_COUNT);
+    if (chunk_head == NULL) {
+        g_neko_string_root_backend = NEKO_STRING_ROOT_BACKEND_FALLBACK_REGENERATE;
+        neko_log_boot_cld_root_chain_result(0, "candidate_e");
+        neko_manifest_lock_release();
+        return;
+    }
+    if (!neko_self_check_string_root_chain(chunk_head, NEKO_STRING_INTERN_SLOT_COUNT)) {
+        g_neko_string_root_backend = NEKO_STRING_ROOT_BACKEND_FALLBACK_REGENERATE;
+        neko_log_boot_cld_root_chain_result(0, "candidate_e");
+        neko_manifest_lock_release();
+        return;
+    }
+    if (!neko_publish_string_root_chain(boot_cld, chunk_head)) {
+        g_neko_string_root_backend = NEKO_STRING_ROOT_BACKEND_FALLBACK_REGENERATE;
+        neko_log_boot_cld_root_chain_result(0, "candidate_e");
+        neko_manifest_lock_release();
+        return;
+    }
+    g_neko_string_root_chunk_head = chunk_head;
+    g_neko_string_root_backend = NEKO_STRING_ROOT_BACKEND_BOOT_CLD;
+    neko_assign_string_root_cells(chunk_head);
     neko_manifest_lock_release();
-    loader_mirror = neko_rt_mirror_from_klass_nosafepoint((Klass*)g_neko_vm_layout.klass_neko_native_loader);
-    if (loader_mirror == NULL) return;
-    neko_store_heap_oop_at_unpublished(loader_mirror, g_neko_vm_layout.off_loader_string_roots, root_array);
+    neko_log_boot_cld_root_chain_result(1, NULL);
 }
 
 static void neko_publish_prepared_ldc_class_site(JNIEnv *env, jclass klass, const char *signature, void *prepared_klass) {
