@@ -1466,7 +1466,7 @@ static void neko_resolve_string_intern_layout(void) {
 
 static void* neko_load_oop_from_cell(const void *cell) {
     if (cell == NULL) return NULL;
-    if (neko_uses_compressed_oops()) {
+    if (g_neko_vm_layout.narrow_oop_shift > 0 || g_neko_vm_layout.narrow_oop_base != 0u) {
         u4 narrow = __atomic_load_n((const u4*)cell, __ATOMIC_ACQUIRE);
         return neko_decode_heap_oop(narrow);
     }
@@ -1475,7 +1475,7 @@ static void* neko_load_oop_from_cell(const void *cell) {
 
 static void neko_store_oop_to_cell(void *cell, void *raw_oop) {
     if (cell == NULL) return;
-    if (neko_uses_compressed_oops()) {
+    if (g_neko_vm_layout.narrow_oop_shift > 0 || g_neko_vm_layout.narrow_oop_base != 0u) {
         u4 narrow = neko_encode_heap_oop(raw_oop);
         __atomic_store_n((u4*)cell, narrow, __ATOMIC_RELEASE);
         return;
@@ -1581,39 +1581,35 @@ static void* neko_nth_string_root_cell(NekoChunkedHandleListChunk *head, uint32_
 }
 
 static jboolean neko_self_check_string_root_chain(NekoChunkedHandleListChunk *head, uint32_t root_count) {
-    NekoHandleScope *scope = NULL;
     jobject probe = NULL;
     void *probe_oop = NULL;
     void *round_trip = NULL;
     uint32_t checks = root_count == 0u ? 0u : (root_count < 4u ? root_count : 4u);
     JNIEnv *env = neko_current_env();
     if (head == NULL || root_count == 0u || env == NULL) return JNI_FALSE;
-    scope = neko_rt_handles_open(NULL, 2u);
-    if (scope == NULL) return JNI_FALSE;
     probe = neko_new_string_utf(env, "neko-w1-root-check");
     if (probe == NULL || neko_exception_check(env)) {
         if (neko_exception_check(env)) {
             neko_exception_clear(env);
         }
-        neko_rt_handles_close(scope);
         return JNI_FALSE;
     }
     probe_oop = neko_handle_oop(probe);
     for (uint32_t i = 0; i < checks; i++) {
         void *cell = neko_nth_string_root_cell(head, i);
         if (cell == NULL) {
-            neko_rt_handles_close(scope);
+            neko_delete_local_ref(env, probe);
             return JNI_FALSE;
         }
         neko_store_oop_to_cell(cell, probe_oop);
         round_trip = neko_load_oop_from_cell(cell);
         if (round_trip != probe_oop) {
-            neko_rt_handles_close(scope);
+            neko_delete_local_ref(env, probe);
             return JNI_FALSE;
         }
         neko_store_oop_to_cell(cell, NULL);
     }
-    neko_rt_handles_close(scope);
+    neko_delete_local_ref(env, probe);
     return JNI_TRUE;
 }
 
