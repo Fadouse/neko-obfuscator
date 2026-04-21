@@ -447,6 +447,9 @@ public final class CCodeGenerator {
                 void* klass_exc_imse;
                 void* klass_exc_ase;
                 void* klass_exc_nase;
+                /* W0 DD-6: dlsym'd function pointers (optional symbols) */
+                void* allocate_instance_fn;
+                void* java_thread_current_fn;
             } NekoVmLayout;
             extern NekoVmLayout g_neko_vm_layout;
             typedef struct Klass Klass;
@@ -463,6 +466,12 @@ public final class CCodeGenerator {
             static inline void* neko_load_heap_oop_from_published(void* base, int32_t offset);
             static inline int32_t neko_object_array_element_offset(void* array_klass, int32_t index);
             static void neko_bootstrap_owner_discovery(void);
+            static inline oop neko_resolve_mirror_oop_from_klass(const NekoVmLayout *layout, Klass *klass);
+            static void* neko_find_boot_class_loader_data(void);
+            static ptrdiff_t neko_wave2_object_field_offset_by_name(JNIEnv *env, const char *owner_internal, const char *field_name);
+            static void neko_derive_wave2_layout_offsets(JNIEnv *env);
+            static inline void* neko_load_heap_oop_at(void *base, ptrdiff_t offset, jboolean is_volatile);
+            static void neko_derive_class_klass_offset_from_mirror(void *known_klass);
             /* ---------------------------------------------------------------------- */
 
             """;

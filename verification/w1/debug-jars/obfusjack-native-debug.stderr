@@ -1,0 +1,19 @@
+[nk] lj 24/24[nk] o instance_klass_fields_offset=448 s=A[nk] o string_value_offset=20 s=B[nk] o string_coder_offset=16 s=B[nk] o class_klass_offset u s=B[nk] o array_base_byte=16 s=B[nk] o array_scale_byte=1 s=B[nk] o array_base_char=16 s=B[nk] o array_scale_char=2 s=B[nk] o instance_klass_static_field_size_offset=284 s=A[nk] o instance_klass_static_oop_field_count_offset=300 s=A[nk] mf off=48 s=B[nk] o thread_tlab_top_offset=440 s=B[nk] o thread_tlab_start_offset=432 s=B[nk] o thread_tlab_pf_top_offset=448 s=B[nk] o thread_tlab_end_offset=456 s=B[nk] o thread_exception_oop_offset=1280 s=A[nk] o thread_exception_pc_offset=1288 s=A[nk] o java_thread_anchor_offset=928 s=A[nk] o java_thread_jni_environment_offset=960 s=B[nk] o instance_klass_java_mirror_offset=112 s=B[nk] o thread_thread_state_offset=1100 s=A[nk] o java_thread_last_Java_sp_offset=928 s=B[nk] o java_thread_last_Java_fp_offset=944 s=B[nk] o java_thread_last_Java_pc_offset=936 s=B[nk] o oophandle_obj_offset=0 s=A[nk] vm j=21[nk] n w1 os=3 ks=0 tl=yes ex=yes
+[nk] n w4r tso=1100 ao=928+0 mo=112 hoo=0 tf=yes
+[nk] mm org/example/Main.lambda$main$3(I)I 0x7fbeef402e08[nk] fp MethodFlags j=21[nk] pp org/example/Main.lambda$main$3(I)I s=5[nk] mm org/example/Main.hiddenAdd(II)I 0x7fbeef407dd8[nk] pp org/example/Main.hiddenAdd(II)I s=3[nk] mm org/example/Main.doTinyWork(II)J 0x7fbeef4018a8[nk] pp org/example/Main.doTinyWork(II)J s=4[nk] mm org/example/Main$2.get()Ljava/lang/String; 0x7fbeef40b4d8[nk] pp org/example/Main$2.get()Ljava/lang/String; s=0[nk] mm org/example/Main$Circle.r()D 0x7fbeef40be60[nk] pp org/example/Main$Circle.r()D s=1[nk] n ck org/example/Main$Circle -> 0x7fbef4007230
+[nk] n fsr org/example/Main$Circle.r:D off=16 v=0
+[nk] mm org/example/Main$CloneThing.hashCode()I 0x7fbeef4177a0[nk] pp org/example/Main$CloneThing.hashCode()I s=2[nk] n ck org/example/Main$CloneThing -> 0x7fbef4007438
+[nk] n fsr org/example/Main$CloneThing.x:I off=12 v=0
+[nk] mm org/example/Main$Point.x()I 0x7fbeef4169b0[nk] pp org/example/Main$Point.x()I s=2[nk] mm org/example/Main$Point.y()I 0x7fbeef416a50[nk] pp org/example/Main$Point.y()I s=2[nk] n ck org/example/Main$Point -> 0x7fbef4007640
+[nk] n fsr org/example/Main$Point.x:I off=12 v=0
+[nk] n fsr org/example/Main$Point.y:I off=16 v=0
+[nk] mm org/example/Main$Rectangle.h()D 0x7fbeef418358[nk] pp org/example/Main$Rectangle.h()D s=1[nk] mm org/example/Main$Rectangle.w()D 0x7fbeef4182b8[nk] pp org/example/Main$Rectangle.w()D s=1[nk] n ck org/example/Main$Rectangle -> 0x7fbef4007848
+[nk] n fsr org/example/Main$Rectangle.w:D off=16 v=0
+[nk] n fsr org/example/Main$Rectangle.h:D off=24 v=0
+[nk] mm org/example/Main$Triangle.b()D 0x7fbeef418e58[nk] pp org/example/Main$Triangle.b()D s=1[nk] mm org/example/Main$Triangle.c()D 0x7fbeef418ef8[nk] pp org/example/Main$Triangle.c()D s=1[nk] mm org/example/Main$Triangle.a()D 0x7fbeef418db8[nk] pp org/example/Main$Triangle.a()D s=1[nk] n ck org/example/Main$Triangle -> 0x7fbef4007a50
+[nk] n fsr org/example/Main$Triangle.a:D off=16 v=0
+[nk] n fsr org/example/Main$Triangle.b:D off=24 v=0
+[nk] n fsr org/example/Main$Triangle.c:D off=32 v=0
+[nk] si unresolved java/lang/String.hash[nk] dm 13/13[nk] dp 13/13[nk] n w2 fs=9 ls=1 lc=0
+[nk] n w3 is=0 sb=0
+[nk] n neko_ldc_string_site_oop=idx=0 ptr=(nil)

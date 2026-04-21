@@ -30,10 +30,13 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *reserved) {
         return JNI_VERSION_1_6;
     }
     neko_mark_loader_loaded();
+    NEKO_TRACE(0, "[nk] ol mark_loader_loaded ok str=%p", g_neko_vm_layout.klass_java_lang_String);
     neko_log_runtime_helpers_ready();
     neko_log_wave4a_status();
     neko_resolve_string_intern_layout();
+    NEKO_TRACE(0, "[nk] ol resolve_string_intern_layout ok hash_off=%td", g_neko_vm_layout.off_string_hash);
     neko_string_intern_prewarm_and_publish(env);
+    NEKO_TRACE(0, "[nk] ol prewarm ok backend=%d", (int)g_neko_string_root_backend);
     neko_bootstrap_owner_discovery();
     neko_patch_discovered_methods();
     NEKO_TRACE(0, "[nk] dm %u/%u", g_neko_manifest_match_count, g_neko_manifest_method_count);

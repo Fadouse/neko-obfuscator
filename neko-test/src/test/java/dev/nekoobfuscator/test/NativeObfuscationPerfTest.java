@@ -64,7 +64,7 @@ class NativeObfuscationPerfTest {
         String libEntry = NativeObfuscationHelper.platformLibraryEntryName();
         byte[] libraryBytes = NativeObfuscationHelper.extractEntry(NativeObfuscationHelper.artifact("TEST").outputJar(), libEntry);
 
-        assertTrue(libraryBytes.length >= 50 * 1024, () -> "Expected native library to be at least 50KB but was " + libraryBytes.length + " bytes");
+        assertTrue(libraryBytes.length >= 45 * 1024, () -> "Expected native library to be at least 45KB but was " + libraryBytes.length + " bytes");  /* W0 DD-6: lowered from 50KB after JVMTI code removal */
         assertTrue(libraryBytes.length <= 5 * 1024 * 1024, () -> "Expected native library to be at most 5MB but was " + libraryBytes.length + " bytes");
     }
 
