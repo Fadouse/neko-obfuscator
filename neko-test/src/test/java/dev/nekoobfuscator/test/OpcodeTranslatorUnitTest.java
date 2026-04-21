@@ -305,8 +305,8 @@ class OpcodeTranslatorUnitTest {
         String code = render(translator.translate(new LdcInsnNode("Neko猫𐐷")));
 
         assertContains(code,
-            "jobject __ldc = neko_ldc_string_site_oop(env,",
-            "PUSH_O(neko_handle_oop(__ldc));"
+            "void *__ldc = neko_ldc_string_site_oop(env,",
+            "PUSH_O(__ldc);"
         );
     }
 

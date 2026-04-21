@@ -71,9 +71,10 @@ class CCodeGeneratorTest {
 
         String source = new CCodeGenerator(12345L).generateSource(List.of(function), List.of(binding));
 
-        assertTrue(source.contains("neko_hotspot_init("), source);
         assertTrue(source.contains("g_hotspot"), source);
-        assertTrue(source.contains("JNI_OnLoad") && source.contains("neko_hotspot_init(env);"), source);
+        assertTrue(source.contains("JNI_OnLoad"), source);
+        assertTrue(source.contains("neko_resolve_vm_symbols()"), source);
+        assertTrue(source.contains("neko_parse_vm_layout(env)"), source);
     }
 
     @Test
@@ -306,20 +307,22 @@ class CCodeGeneratorTest {
             "neko_decode_mutf8_to_utf16(site->raw_constant_utf8, site->raw_constant_utf8_len, &utf16, &utf16_len, &heap_alloc)",
             "string_oop = neko_rt_try_alloc_instance_fast_nosafepoint((Klass*)g_neko_vm_layout.klass_java_lang_String, string_size);",
             "neko_store_heap_oop_at_unpublished(string_oop, g_neko_vm_layout.off_string_value, inner_array);",
-            "h = neko_string_intern_hash((uint32_t)coder, (uint32_t)utf16_len, key_bytes, key_payload_bytes);",
+            "string_oop = neko_create_ldc_string_oop(site, &coder, &char_length, &key_bytes, &key_payload_bytes);",
+            "h = neko_string_intern_hash((uint32_t)coder, char_length, key_bytes, key_payload_bytes);",
             "site->resolved_cache_handle = entry;"
         );
     }
 
     @Test
-    void ldcStringSiteLoadsPublishedRootArraySlot() {
+    void ldcStringSiteLoadsRootCellFromChunkedHandleList() {
         String source = minimalGeneratedSource(ldcStringProbeBinding());
 
         assertContains(source,
             "entry = (NekoStringInternEntry*)site->resolved_cache_handle;",
-            "loader_mirror = neko_rt_mirror_from_klass_nosafepoint((Klass*)g_neko_vm_layout.klass_neko_native_loader);",
-            "root_array = neko_load_heap_oop_from_published(loader_mirror, g_neko_vm_layout.off_loader_string_roots);",
-            "return neko_load_heap_oop_from_published(root_array, elem_off);"
+            "if (g_neko_string_root_backend != NEKO_STRING_ROOT_BACKEND_BOOT_CLD)",
+            "if (entry->root_cell == NULL) return NULL;",
+            "value = neko_load_oop_from_cell(entry->root_cell);",
+            "return value;"
         );
     }
 
