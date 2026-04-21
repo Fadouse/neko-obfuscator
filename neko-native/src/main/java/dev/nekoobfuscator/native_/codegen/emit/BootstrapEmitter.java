@@ -53,8 +53,6 @@ NekoVmSymbols g_neko_vm_symbols = {0};
 NekoVmLayout g_neko_vm_layout = {0};
 
 static JavaVM *g_neko_java_vm = NULL;
-static jvmtiEnv *g_neko_jvmti = NULL;
-static jrawMonitorID g_neko_manifest_lock = NULL;
 static void* (*g_neko_allocate_instance_fn)(void*, void*) = NULL;
 static void* (*g_neko_java_thread_current_fn)(void) = NULL;
 static uint32_t g_neko_manifest_match_count = 0u;
@@ -1235,32 +1233,12 @@ static jboolean neko_parse_vm_layout_strict(JNIEnv *env) {
     return JNI_TRUE;
 }
 
-static void neko_jvmti_deallocate(jvmtiEnv *jvmti, void *ptr) {
-    if (jvmti != NULL && ptr != NULL) {
-        (*jvmti)->Deallocate(jvmti, (unsigned char*)ptr);
-    }
-}
-
-static void neko_log_jvmti_error(jvmtiEnv *jvmti, const char *stage, jvmtiError error) {
-    char *name = NULL;
-    if (jvmti != NULL && (*jvmti)->GetErrorName(jvmti, error, &name) == JVMTI_ERROR_NONE && name != NULL) {
-        neko_error_log("%s failed: %s (%d), falling back to throw body", stage, name, error);
-        neko_jvmti_deallocate(jvmti, name);
-        return;
-    }
-    neko_error_log("%s failed: %d, falling back to throw body", stage, error);
-}
-
 static void neko_manifest_lock_enter(void) {
-    if (g_neko_jvmti != NULL && g_neko_manifest_lock != NULL) {
-        (*g_neko_jvmti)->RawMonitorEnter(g_neko_jvmti, g_neko_manifest_lock);
-    }
+    return;
 }
 
 static void neko_manifest_lock_exit(void) {
-    if (g_neko_jvmti != NULL && g_neko_manifest_lock != NULL) {
-        (*g_neko_jvmti)->RawMonitorExit(g_neko_jvmti, g_neko_manifest_lock);
-    }
+    return;
 }
 
 static void neko_manifest_lock_acquire(void) {
@@ -1292,24 +1270,6 @@ static void neko_record_manifest_match(uint32_t index, void *method_star) {
 """);
         sb.append(renderBootstrapDiscoverySupport());
         sb.append("""
-
-static jboolean neko_install_class_prepare_callback(jvmtiEnv *jvmti) {
-    jvmtiEventCallbacks callbacks;
-    jvmtiError err;
-    memset(&callbacks, 0, sizeof(callbacks));
-    callbacks.ClassPrepare = &neko_class_prepare_cb;
-    err = (*jvmti)->SetEventCallbacks(jvmti, &callbacks, (jint)sizeof(callbacks));
-    if (err != JVMTI_ERROR_NONE) {
-        neko_log_jvmti_error(jvmti, "JVMTI SetEventCallbacks", err);
-        return JNI_FALSE;
-    }
-    err = (*jvmti)->SetEventNotificationMode(jvmti, JVMTI_ENABLE, JVMTI_EVENT_CLASS_PREPARE, NULL);
-    if (err != JVMTI_ERROR_NONE) {
-        neko_log_jvmti_error(jvmti, "JVMTI SetEventNotificationMode(ClassPrepare)", err);
-        return JNI_FALSE;
-    }
-    return JNI_TRUE;
-}
 
 """);
         return sb.toString();
@@ -1886,216 +1846,6 @@ static inline void* neko_method_holder_klass(void *method_star) {
         return neko_decode_klass_pointer(*(u4*)((uint8_t*)constant_pool + g_neko_vm_layout.off_constant_pool_holder));
     }
     return *(void**)((uint8_t*)constant_pool + g_neko_vm_layout.off_constant_pool_holder);
-}
-
-static jboolean neko_discover_class(JNIEnv *env, jvmtiEnv *jvmti, jclass klass) {
-    char *signature = NULL;
-    char *owner_internal = NULL;
-    jmethodID *methods = NULL;
-    jint method_count = 0;
-    jvmtiError err;
-    uint32_t owner_hash;
-    void *owner_klass = NULL;
-    if (g_neko_manifest_method_count == 0u) return JNI_TRUE;
-    err = (*jvmti)->GetClassSignature(jvmti, klass, &signature, NULL);
-    if (err != JVMTI_ERROR_NONE) {
-        neko_log_jvmti_error(jvmti, "JVMTI GetClassSignature", err);
-        return JNI_FALSE;
-    }
-    owner_internal = neko_internal_name_from_signature(signature);
-    if (owner_internal == NULL) {
-        neko_jvmti_deallocate(jvmti, signature);
-        return JNI_TRUE;
-    }
-    owner_hash = neko_fnv1a32(owner_internal);
-    if (owner_klass == NULL) owner_klass = neko_class_klass_pointer(klass);
-    if (!neko_manifest_has_owner(owner_internal, owner_hash)) {
-        neko_publish_prepared_ldc_class_site(env, klass, signature, owner_klass);
-        free(owner_internal);
-        neko_jvmti_deallocate(jvmti, signature);
-        return JNI_TRUE;
-    }
-    err = (*jvmti)->GetClassMethods(jvmti, klass, &method_count, &methods);
-    if (err != JVMTI_ERROR_NONE) {
-        free(owner_internal);
-        neko_jvmti_deallocate(jvmti, signature);
-        neko_log_jvmti_error(jvmti, "JVMTI GetClassMethods", err);
-        return JNI_FALSE;
-    }
-    for (jint i = 0; i < method_count; i++) {
-        char *name = NULL;
-        char *desc = NULL;
-        uint32_t name_desc_hash;
-        err = (*jvmti)->GetMethodName(jvmti, methods[i], &name, &desc, NULL);
-        if (err != JVMTI_ERROR_NONE) {
-            neko_jvmti_deallocate(jvmti, methods);
-            free(owner_internal);
-            neko_jvmti_deallocate(jvmti, signature);
-            neko_log_jvmti_error(jvmti, "JVMTI GetMethodName", err);
-            return JNI_FALSE;
-        }
-        if (owner_klass == NULL && methods[i] != NULL) owner_klass = neko_method_holder_klass(*(void**)methods[i]);
-        name_desc_hash = neko_fnv1a32_pair(name, desc);
-        for (uint32_t manifest_index = 0; manifest_index < g_neko_manifest_method_count; manifest_index++) {
-            const NekoManifestMethod *entry = &g_neko_manifest_methods[manifest_index];
-            if (entry->owner_internal == NULL) continue;
-            if (entry->owner_hash != owner_hash || entry->name_desc_hash != name_desc_hash) continue;
-            if (strcmp(entry->owner_internal, owner_internal) != 0) continue;
-            if (strcmp(entry->method_name, name) != 0 || strcmp(entry->method_desc, desc) != 0) continue;
-            neko_record_manifest_match(manifest_index, methods[i] == NULL ? NULL : *(void**)methods[i]);
-        }
-        neko_resolve_discovered_invoke_sites(owner_internal, name, desc, methods[i] == NULL ? NULL : *(void**)methods[i]);
-        neko_jvmti_deallocate(jvmti, desc);
-        neko_jvmti_deallocate(jvmti, name);
-    }
-    neko_jvmti_deallocate(jvmti, methods);
-    neko_resolve_prepared_class_field_sites(env, klass, owner_internal, owner_klass);
-    neko_publish_prepared_ldc_class_site(env, klass, signature, owner_klass);
-    neko_capture_well_known_klass(klass);
-    free(owner_internal);
-    neko_jvmti_deallocate(jvmti, signature);
-    (void)env;
-    return JNI_TRUE;
-}
-
-static jboolean neko_discover_class_via_reflection(JNIEnv *env, jvmtiEnv *jvmti, jclass klass, const char *owner_internal, void **owner_klass_out) {
-    static jclass g_neko_class_cls = NULL;
-    static jmethodID g_neko_get_declared_methods = NULL;
-    jobjectArray reflected_methods = NULL;
-    uint32_t owner_hash;
-    jsize method_count;
-    if (env == NULL || jvmti == NULL || klass == NULL || owner_internal == NULL) return JNI_FALSE;
-    if (owner_klass_out != NULL) *owner_klass_out = NULL;
-    reflected_methods = (jobjectArray)neko_call_object_method_a(
-        env,
-        klass,
-        NEKO_ENSURE_METHOD_ID(
-            g_neko_get_declared_methods,
-            env,
-            NEKO_ENSURE_CLASS(g_neko_class_cls, env, "java/lang/Class"),
-            "getDeclaredMethods",
-            "()[Ljava/lang/reflect/Method;"
-        ),
-        NULL
-    );
-    if (reflected_methods == NULL || neko_exception_check(env)) {
-        if (neko_exception_check(env)) {
-            neko_exception_clear(env);
-        }
-        neko_error_log("reflection discovery failed for %s, falling back to throw body", owner_internal);
-        return JNI_FALSE;
-    }
-    owner_hash = neko_fnv1a32(owner_internal);
-    method_count = neko_get_array_length(env, (jarray)reflected_methods);
-    for (jsize i = 0; i < method_count; i++) {
-        jobject reflected = neko_get_object_array_element(env, reflected_methods, i);
-        jmethodID reflected_mid;
-        char *name = NULL;
-        char *desc = NULL;
-        uint32_t name_desc_hash;
-        jvmtiError err;
-        if (reflected == NULL) continue;
-        reflected_mid = (*env)->FromReflectedMethod(env, reflected);
-        if (reflected_mid == NULL) {
-            neko_delete_local_ref(env, reflected);
-            continue;
-        }
-        if (owner_klass_out != NULL && *owner_klass_out == NULL) *owner_klass_out = neko_method_holder_klass(*(void**)reflected_mid);
-        err = (*jvmti)->GetMethodName(jvmti, reflected_mid, &name, &desc, NULL);
-        if (err != JVMTI_ERROR_NONE) {
-            neko_delete_local_ref(env, reflected);
-            neko_delete_local_ref(env, reflected_methods);
-            neko_log_jvmti_error(jvmti, "JVMTI GetMethodName(reflection)", err);
-            return JNI_FALSE;
-        }
-        name_desc_hash = neko_fnv1a32_pair(name, desc);
-        for (uint32_t manifest_index = 0; manifest_index < g_neko_manifest_method_count; manifest_index++) {
-            const NekoManifestMethod *entry = &g_neko_manifest_methods[manifest_index];
-            if (entry->owner_internal == NULL) continue;
-            if (entry->owner_hash != owner_hash || entry->name_desc_hash != name_desc_hash) continue;
-            if (strcmp(entry->owner_internal, owner_internal) != 0) continue;
-            if (strcmp(entry->method_name, name) != 0 || strcmp(entry->method_desc, desc) != 0) continue;
-            neko_record_manifest_match(manifest_index, reflected_mid == NULL ? NULL : *(void**)reflected_mid);
-        }
-        neko_resolve_discovered_invoke_sites(owner_internal, name, desc, reflected_mid == NULL ? NULL : *(void**)reflected_mid);
-        neko_jvmti_deallocate(jvmti, desc);
-        neko_jvmti_deallocate(jvmti, name);
-        neko_delete_local_ref(env, reflected);
-    }
-    neko_delete_local_ref(env, reflected_methods);
-    return JNI_TRUE;
-}
-
-static void JNICALL neko_class_prepare_cb(jvmtiEnv *jvmti, JNIEnv *env, jthread thread, jclass klass) {
-    (void)thread;
-    if (!neko_discover_class(env, jvmti, klass)) {
-        neko_error_log("ClassPrepare discovery failed");
-    }
-}
-
-static jboolean neko_init_jvmti(JavaVM *vm, jvmtiEnv *jvmti) {
-    jvmtiCapabilities capabilities;
-    jvmtiError err;
-    (void)vm;
-    memset(&capabilities, 0, sizeof(capabilities));
-    capabilities.can_get_bytecodes = 0;
-    capabilities.can_generate_all_class_hook_events = 1;
-    capabilities.can_generate_compiled_method_load_events = 0;
-    capabilities.can_redefine_classes = 0;
-    err = (*jvmti)->AddCapabilities(jvmti, &capabilities);
-    if (err != JVMTI_ERROR_NONE) {
-        neko_log_jvmti_error(jvmti, "JVMTI AddCapabilities", err);
-        return JNI_FALSE;
-    }
-    err = (*jvmti)->CreateRawMonitor(jvmti, "neko_manifest_lock", &g_neko_manifest_lock);
-    if (err != JVMTI_ERROR_NONE) {
-        neko_log_jvmti_error(jvmti, "JVMTI CreateRawMonitor", err);
-        return JNI_FALSE;
-    }
-    return JNI_TRUE;
-}
-
-static jboolean neko_discover_loaded_classes(JNIEnv *env, jvmtiEnv *jvmti) {
-    jclass *classes = NULL;
-    jint class_count = 0;
-    jvmtiError err = (*jvmti)->GetLoadedClasses(jvmti, &class_count, &classes);
-    if (err != JVMTI_ERROR_NONE) {
-        neko_log_jvmti_error(jvmti, "JVMTI GetLoadedClasses", err);
-        return JNI_FALSE;
-    }
-    for (jint i = 0; i < class_count; i++) {
-        if (!neko_discover_class(env, jvmti, classes[i])) {
-            neko_jvmti_deallocate(jvmti, classes);
-            return JNI_FALSE;
-        }
-    }
-    neko_jvmti_deallocate(jvmti, classes);
-    return JNI_TRUE;
-}
-
-static jboolean neko_discover_manifest_owners(JNIEnv *env, jvmtiEnv *jvmti) {
-    for (uint32_t i = 0; i < g_neko_manifest_owner_count; i++) {
-        const char *owner = g_neko_manifest_owners[i];
-        jclass klass;
-        void *owner_klass = NULL;
-        if (owner == NULL) continue;
-        klass = neko_load_class_noinit(env, owner);
-        if (klass == NULL || neko_exception_check(env)) {
-            if (neko_exception_check(env)) {
-                neko_exception_clear(env);
-            }
-            neko_error_log("failed to load manifest owner %s for discovery, falling back to throw body", owner);
-            return JNI_FALSE;
-        }
-        if (!neko_discover_class_via_reflection(env, jvmti, klass, owner, &owner_klass)) {
-            neko_delete_local_ref(env, klass);
-            return JNI_FALSE;
-        }
-        neko_resolve_prepared_class_field_sites(env, klass, owner, owner_klass);
-        neko_capture_well_known_klass(klass);
-        neko_delete_local_ref(env, klass);
-    }
-    return JNI_TRUE;
 }
 
 """;

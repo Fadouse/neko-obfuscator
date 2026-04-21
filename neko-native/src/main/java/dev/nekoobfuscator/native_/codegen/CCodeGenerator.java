@@ -263,7 +263,6 @@ public final class CCodeGenerator {
         sb.append("#define _GNU_SOURCE\n");
         sb.append("#endif\n");
         sb.append("#include \"neko_native.h\"\n");
-        sb.append("#include <jvmti.h>\n");
         sb.append("#include <stdint.h>\n");
         sb.append("#include <stddef.h>\n");
         sb.append("#include <stdbool.h>\n");
