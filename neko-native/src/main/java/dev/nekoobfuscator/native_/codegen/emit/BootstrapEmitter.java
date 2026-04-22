@@ -1444,13 +1444,22 @@ static void neko_derive_bootstrap_wellknown_layout(void) {
 
 static jboolean neko_capture_wellknown_klasses(void) {
     void *boot_cld;
+#ifdef NEKO_DEBUG_ENABLED
+    NEKO_TRACE(0, "[nk] cap enter");
+#endif
     if (g_neko_vm_layout.off_klass_next_link < 0) {
         neko_error_log("strict bootstrap requires Klass::_next_link VMStructs exposure");
+#ifdef NEKO_DEBUG_ENABLED
+        NEKO_TRACE(0, "[nk] cap fail reason=missing_next_link");
+#endif
         return JNI_FALSE;
     }
     boot_cld = neko_find_boot_class_loader_data();
     if (boot_cld == NULL) {
         neko_error_log("strict bootstrap failed to locate boot ClassLoaderData");
+#ifdef NEKO_DEBUG_ENABLED
+        NEKO_TRACE(0, "[nk] cap fail reason=missing_boot_cld");
+#endif
         return JNI_FALSE;
     }
 #ifdef NEKO_DEBUG_ENABLED
@@ -1480,6 +1489,9 @@ static jboolean neko_capture_wellknown_klasses(void) {
         int32_t loaded_offset = -1;
         if (!neko_resolve_field_offset(g_neko_vm_layout.klass_neko_native_loader, "loaded", 6u, "Z", 1u, true, &loaded_offset)) {
             neko_error_log("strict bootstrap failed to resolve NekoNativeLoader.loaded offset");
+#ifdef NEKO_DEBUG_ENABLED
+            NEKO_TRACE(0, "[nk] cap fail reason=loader_loaded_offset");
+#endif
             return JNI_FALSE;
         }
         g_neko_vm_layout.off_loader_loaded_field = (ptrdiff_t)loaded_offset;
@@ -1504,8 +1516,14 @@ static jboolean neko_capture_wellknown_klasses(void) {
         || g_neko_vm_layout.klass_array_char == NULL
         || g_neko_vm_layout.klass_neko_native_loader == NULL) {
         neko_error_log("strict bootstrap failed to capture required well-known klasses");
+#ifdef NEKO_DEBUG_ENABLED
+        NEKO_TRACE(0, "[nk] cap fail reason=missing_required_klasses");
+#endif
         return JNI_FALSE;
     }
+#ifdef NEKO_DEBUG_ENABLED
+    NEKO_TRACE(0, "[nk] cap ok str=%p arr_b=%p arr_c=%p", g_neko_vm_layout.klass_java_lang_String, g_neko_vm_layout.klass_array_byte, g_neko_vm_layout.klass_array_char);
+#endif
     return JNI_TRUE;
 }
 
@@ -1884,7 +1902,7 @@ static void neko_string_intern_prewarm_and_publish(JNIEnv *env) {
     if (g_neko_vm_layout.klass_java_lang_String == NULL
         || g_neko_vm_layout.klass_array_byte == NULL
         || g_neko_vm_layout.klass_array_char == NULL) {
-        neko_log_boot_cld_root_chain_result(0, "candidate_e");
+        neko_log_boot_cld_root_chain_result(0, "missing_klasses");
         return;
     }
     if (NEKO_STRING_INTERN_SLOT_COUNT == 0u) {
@@ -1896,26 +1914,26 @@ static void neko_string_intern_prewarm_and_publish(JNIEnv *env) {
     boot_cld = neko_find_boot_class_loader_data();
     if (boot_cld == NULL || g_neko_vm_layout.off_cld_handles < 0) {
         g_neko_string_root_backend = NEKO_STRING_ROOT_BACKEND_FALLBACK_REGENERATE;
-        neko_log_boot_cld_root_chain_result(0, "candidate_e");
+        neko_log_boot_cld_root_chain_result(0, "boot_cld_or_handles");
         neko_manifest_lock_release();
         return;
     }
     chunk_head = neko_alloc_string_root_chunks(NEKO_STRING_INTERN_SLOT_COUNT);
     if (chunk_head == NULL) {
         g_neko_string_root_backend = NEKO_STRING_ROOT_BACKEND_FALLBACK_REGENERATE;
-        neko_log_boot_cld_root_chain_result(0, "candidate_e");
+        neko_log_boot_cld_root_chain_result(0, "alloc_chunks");
         neko_manifest_lock_release();
         return;
     }
     if (!neko_self_check_string_root_chain(chunk_head, NEKO_STRING_INTERN_SLOT_COUNT)) {
         g_neko_string_root_backend = NEKO_STRING_ROOT_BACKEND_FALLBACK_REGENERATE;
-        neko_log_boot_cld_root_chain_result(0, "candidate_e");
+        neko_log_boot_cld_root_chain_result(0, "self_check");
         neko_manifest_lock_release();
         return;
     }
     if (!neko_publish_string_root_chain(boot_cld, chunk_head)) {
         g_neko_string_root_backend = NEKO_STRING_ROOT_BACKEND_FALLBACK_REGENERATE;
-        neko_log_boot_cld_root_chain_result(0, "candidate_e");
+        neko_log_boot_cld_root_chain_result(0, "publish_chain");
         neko_manifest_lock_release();
         return;
     }

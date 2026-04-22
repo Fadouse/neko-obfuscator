@@ -727,6 +727,16 @@ static void neko_resolve_ldc_string(NekoManifestLdcSite* site) {
         sb.append("    if (entry == NULL) return NULL;\n");
         sb.append("    if (entry->root_cell == NULL) return NULL;\n");
         sb.append("    value = neko_load_oop_from_cell(entry->root_cell);\n");
+        sb.append("    if (value == NULL && entry->root_cell != NULL) {\n");
+        sb.append("        void *new_str = neko_create_ldc_string_oop(site, entry, NULL, NULL, NULL);\n");
+        sb.append("        if (new_str != NULL) {\n");
+        sb.append("            if (__sync_bool_compare_and_swap((void**)entry->root_cell, NULL, new_str)) {\n");
+        sb.append("                value = new_str;\n");
+        sb.append("            } else {\n");
+        sb.append("                value = neko_load_oop_from_cell(entry->root_cell);\n");
+        sb.append("            }\n");
+        sb.append("        }\n");
+        sb.append("    }\n");
         sb.append("#ifdef NEKO_DEBUG_ENABLED\n");
         sb.append("    if (neko_debug_enabled()) neko_native_debug_log(\"neko_ldc_string_site_oop=idx=%u ptr=%p\", site->site_id, value);\n");
         sb.append("#endif\n");
