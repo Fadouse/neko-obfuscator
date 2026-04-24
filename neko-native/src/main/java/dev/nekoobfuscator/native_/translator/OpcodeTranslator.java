@@ -200,7 +200,7 @@ public final class OpcodeTranslator {
             case Opcodes.RETURN -> stmts.add(raw("return;"));
 
             case Opcodes.ARRAYLENGTH -> stmts.add(raw("{ jarray arr = (jarray)POP_O(); PUSH_I(neko_get_array_length(env, arr)); }"));
-            case Opcodes.ATHROW -> stmts.add(raw("{ neko_throw(env, (jthrowable)POP_O()); }"));
+            case Opcodes.ATHROW -> stmts.add(raw("{ jobject __thrown = POP_O(); if (__thrown == NULL) { (void)neko_throw_cached(env, g_neko_throw_npe); goto __neko_exception_exit; } neko_set_pending_exception(thread, (void*)__thrown); goto __neko_exception_exit; }"));
             case Opcodes.MONITORENTER -> stmts.add(raw("neko_monitor_enter(env, POP_O());"));
             case Opcodes.MONITOREXIT -> stmts.add(raw("neko_monitor_exit(env, POP_O());"));
             case Opcodes.NOP -> stmts.add(raw("/* nop */"));
