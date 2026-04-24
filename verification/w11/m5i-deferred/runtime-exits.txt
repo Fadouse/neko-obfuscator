@@ -1,0 +1,3 @@
+TEST exit=1
+obfusjack exit=1
+SnakeGame timeout_exit_recorded
