@@ -213,7 +213,7 @@ public final class OpcodeTranslator {
                 TypeInsnNode ti = (TypeInsnNode) insn;
                 stmts.add(raw("{ jclass __cls = " + cachedClassExpression(ti.desc) + "; if (__cls == NULL) goto __neko_exception_exit; Klass *__klass = (Klass*)neko_class_klass_pointer(__cls); oop __fast = NULL; if (__klass != NULL) { uint32_t __lh = *(uint32_t*)((uint8_t*)__klass + g_neko_vm_layout.off_klass_layout_helper); __fast = neko_rt_try_alloc_instance_fast_nosafepoint(__klass, neko_lh_instance_size(__lh)); } jobject __obj = __fast != NULL ? (jobject)__fast : neko_alloc_object(env, __cls); if (__obj == NULL) { (void)neko_throw_cached(env, g_neko_throw_oom); goto __neko_exception_exit; } PUSH_O(__obj); }"));
             }
-            case Opcodes.NEWARRAY -> stmts.add(raw("{ jint len = POP_I(); PUSH_O(" + newArrayCall(((IntInsnNode) insn).operand) + "); }"));
+            case Opcodes.NEWARRAY -> stmts.add(raw("{ jint __len = POP_I(); if (__len < 0) { (void)neko_throw_cached(env, g_neko_throw_nase); goto __neko_exception_exit; } jarray __arr = (jarray)" + newArrayCall(((IntInsnNode) insn).operand, "__len") + "; if (__arr == NULL) { (void)neko_throw_cached(env, g_neko_throw_oom); goto __neko_exception_exit; } PUSH_O(__arr); }"));
             case Opcodes.ANEWARRAY -> {
                 TypeInsnNode ti = (TypeInsnNode) insn;
                 stmts.add(raw("{ jint len = POP_I(); jclass cls = " + cachedClassExpression(ti.desc) + "; if (cls != NULL) { PUSH_O(neko_new_object_array(env, len, cls, NULL)); } }"));
@@ -846,16 +846,20 @@ public final class OpcodeTranslator {
     }
 
     private String newArrayCall(int operand) {
+        return newArrayCall(operand, "len");
+    }
+
+    private String newArrayCall(int operand, String lengthExpr) {
         return switch (operand) {
-            case 4 -> "neko_new_boolean_array(env, len)";
-            case 5 -> "neko_new_char_array(env, len)";
-            case 6 -> "neko_new_float_array(env, len)";
-            case 7 -> "neko_new_double_array(env, len)";
-            case 8 -> "neko_new_byte_array(env, len)";
-            case 9 -> "neko_new_short_array(env, len)";
-            case 10 -> "neko_new_int_array(env, len)";
-            case 11 -> "neko_new_long_array(env, len)";
-            default -> "neko_new_int_array(env, len)";
+            case 4 -> "neko_new_boolean_array(env, " + lengthExpr + ")";
+            case 5 -> "neko_new_char_array(env, " + lengthExpr + ")";
+            case 6 -> "neko_new_float_array(env, " + lengthExpr + ")";
+            case 7 -> "neko_new_double_array(env, " + lengthExpr + ")";
+            case 8 -> "neko_new_byte_array(env, " + lengthExpr + ")";
+            case 9 -> "neko_new_short_array(env, " + lengthExpr + ")";
+            case 10 -> "neko_new_int_array(env, " + lengthExpr + ")";
+            case 11 -> "neko_new_long_array(env, " + lengthExpr + ")";
+            default -> "neko_new_int_array(env, " + lengthExpr + ")";
         };
     }
 
