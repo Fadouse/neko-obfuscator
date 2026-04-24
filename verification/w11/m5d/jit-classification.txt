@@ -1,0 +1,39 @@
+# W11-M5d JIT/C1/C2 Interop Smoke
+# Per-jar metrics
+
+TEST.jar:
+  PrintCompilation lines mentioning neko_impl: 0   (expected: 0)
+  Deopt markers near neko_impl:                0   (expected: 0)
+  Compilation failures:                        0   (expected: 0)
+  hs_err generated:                            no
+  JVM exit:                                    1 (expected fail-closed LinkageError fallback)
+  Patch count:                                 dp 1/14 (matches baseline)
+
+obfusjack-test21.jar:
+  PrintCompilation lines mentioning neko_impl: 0   (expected: 0)
+  Deopt markers near neko_impl:                0   (expected: 0)
+  Compilation failures:                        0   (expected: 0)
+  hs_err generated:                            no
+  JVM exit:                                    1 (expected fail-closed LinkageError fallback)
+  Patch count:                                 dp 6/17 (matches baseline)
+
+SnakeGame.jar:
+  PrintCompilation lines mentioning neko_impl: 0   (expected: 0)
+  Deopt markers near neko_impl:                0   (expected: 0)
+  Compilation failures:                        0   (expected: 0)
+  hs_err generated:                            no
+  JVM exit:                                    1 (expected fail-closed LinkageError fallback)
+  Patch count:                                 dp 2/12 (matches baseline)
+
+Sustained loop (10 iterations, G1 + -XX:-TieredCompilation + PrintCompilation):
+  TEST iterations passed:       10/10 (all expected LinkageError fallback, dp 1/14)
+  obfusjack iterations passed:  10/10 (all expected LinkageError fallback, dp 6/17)
+  neko_impl JIT compile markers: 0
+  deopt / compile-failure markers: 0
+  hs_err generated:             no
+
+Regression checks:
+  M5a/M5b focused tests:         PASS (`NativeObfClassUnloadTest`, `NativeObfRedefineClassesTest`)
+  M5c G1/ZGC subset:             PASS (6/6 expected fallback rows, baseline patch counts)
+
+Classification: CLEAN — patched entries remained out of PrintCompilation/PrintInlining output, and sustained C1/C2 interop smoke did not crash.

@@ -1,0 +1,73 @@
+# W11-M5d JIT/C1/C2 Interop Smoke
+
+Date: 2026-04-25
+Branch: dev-impl-nojni
+Host JDK: default java on this host (JDK 21 target path, JDK 22 also available)
+
+## Setup
+
+- Built debug CLI distribution with:
+  `./gradlew :neko-cli:installDist -PnekoNativeDebug=true --no-daemon --console=plain`
+- Generated debug native artifacts:
+  - `verification/w11/m5d/TEST-native-debug.jar`
+  - `verification/w11/m5d/obfusjack-native-debug.jar`
+  - `verification/w11/m5d/SnakeGame-native-debug.jar`
+- Smoke command shape:
+  `NEKO_DEBUG=1 java -XX:+PrintCompilation -XX:+UnlockDiagnosticVMOptions -XX:+PrintInlining -jar <jar>`
+- SnakeGame was bounded by `timeout 5`.
+
+## JIT smoke outputs
+
+- TEST:
+  - stdout: `verification/w11/m5d/runs/TEST.jit.stdout`
+  - stderr: `verification/w11/m5d/runs/TEST.jit.stderr`
+  - exit: `verification/w11/m5d/runs/TEST.jit.exit` = 1
+  - expected fallback: `java.lang.LinkageError: please check your native library load correctly`
+  - patch count: `dp 1/14`
+- obfusjack:
+  - stdout: `verification/w11/m5d/runs/obfusjack.jit.stdout`
+  - stderr: `verification/w11/m5d/runs/obfusjack.jit.stderr`
+  - exit: `verification/w11/m5d/runs/obfusjack.jit.exit` = 1
+  - expected fallback: `java.lang.LinkageError: please check your native library load correctly`
+  - patch count: `dp 6/17`
+- SnakeGame:
+  - stdout: `verification/w11/m5d/runs/SnakeGame.jit.stdout`
+  - stderr: `verification/w11/m5d/runs/SnakeGame.jit.stderr`
+  - exit: `verification/w11/m5d/runs/SnakeGame.jit.exit` = 1
+  - expected fallback: `java.lang.LinkageError: please check your native library load correctly`
+  - patch count: `dp 2/12`
+
+## Marker scan
+
+- `neko_impl` in JIT smoke stdout/stderr: 0
+- `DEOPT` / `deopt` in JIT smoke stdout/stderr: 0
+- `Compilation failed` / `bad C1 compile` / `bad C2 compile`: 0
+- Crash markers (`SIGSEGV`, `Internal Error`, fatal JVM text, `hs_err`) in M5d smoke logs: 0
+- M5d-local `hs_err_pid*` files under `verification/w11/m5d/`: 0
+
+Generic `made not entrant` lines were present in `PrintCompilation` output for ordinary JDK/runtime methods only. No such line referenced `neko_impl` or a patched translated entry.
+
+## Sustained warm-up loop
+
+Command shape for each of TEST and obfusjack:
+
+`NEKO_DEBUG=1 java -XX:+UseG1GC -XX:-TieredCompilation -XX:+PrintCompilation -jar <jar>`
+
+- TEST loop artifacts: `verification/w11/m5d/loop/TEST_loop_{1..10}.{stdout,stderr,exit}`
+- obfusjack loop artifacts: `verification/w11/m5d/loop/obfusjack_loop_{1..10}.{stdout,stderr,exit}`
+- TEST iterations: 10/10 reached expected LinkageError fallback with `dp 1/14`
+- obfusjack iterations: 10/10 reached expected LinkageError fallback with `dp 6/17`
+- Loop marker scan for `neko_impl`, deopt, compile failure, and crash markers: 0
+- M5d-local hs_err generated: no
+
+## Regression checks
+
+- M5a/M5b focused regression: `./gradlew :neko-test:test --tests '*NativeObfClassUnloadTest*' --tests '*NativeObfRedefineClassesTest*' --no-daemon --console=plain` exited 0.
+- M5c-style GC subset: G1 and ZGC were rerun for TEST, obfusjack, and SnakeGame using the M5d debug jars.
+  - Artifacts: `verification/w11/m5d/runs/m5c_subset_{G1,ZGC}_{TEST,obfusjack,SnakeGame}.{stdout,stderr,exit}`
+  - All six runs reached expected fail-closed exit 1 with baseline patch counts (`dp 1/14`, `dp 6/17`, `dp 2/12`).
+  - No `neko_impl`, compile-failure, crash, or M5d-local hs_err markers were found.
+
+## Result
+
+W11-M5d JIT/C1/C2 interop smoke is CLEAN. The JIT did not attempt to compile patched `neko_impl` entries, no deopt markers were tied to patched entries, and sustained warm-up loops did not crash or emit hs_err files.
