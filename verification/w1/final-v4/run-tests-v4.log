@@ -1,0 +1,121 @@
+PTY: pty_f90cb56f (run-tests-v4)
+Command: env NEKO_DEBUG=1 ./gradlew :neko-test:test --tests dev.nekoobfuscator.test.* --no-daemon --console=plain
+Exit Code: 1
+Timed Out: no
+
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/8.10/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build
+> Task :neko-transforms:processResources NO-SOURCE
+> Task :neko-core:processResources NO-SOURCE
+> Task :neko-cli:processResources NO-SOURCE
+> Task :neko-config:processResources NO-SOURCE
+> Task :neko-native:processResources NO-SOURCE
+> Task :neko-test:compileJava NO-SOURCE
+> Task :neko-test:processResources NO-SOURCE
+> Task :neko-test:classes UP-TO-DATE
+> Task :neko-test:processTestResources UP-TO-DATE
+> Task :neko-runtime:compileJava UP-TO-DATE
+> Task :neko-api:compileJava UP-TO-DATE
+> Task :neko-runtime:processResources NO-SOURCE
+> Task :neko-api:processResources NO-SOURCE
+> Task :neko-runtime:classes UP-TO-DATE
+> Task :neko-api:classes UP-TO-DATE
+> Task :neko-runtime:jar UP-TO-DATE
+> Task :neko-api:jar UP-TO-DATE
+> Task :neko-config:compileJava UP-TO-DATE
+> Task :neko-config:classes UP-TO-DATE
+> Task :neko-core:compileJava UP-TO-DATE
+> Task :neko-core:classes UP-TO-DATE
+> Task :neko-config:jar UP-TO-DATE
+> Task :neko-core:jar UP-TO-DATE
+> Task :neko-transforms:compileJava UP-TO-DATE
+> Task :neko-native:compileJava UP-TO-DATE
+> Task :neko-native:classes UP-TO-DATE
+> Task :neko-transforms:classes UP-TO-DATE
+> Task :neko-transforms:jar UP-TO-DATE
+> Task :neko-native:jar UP-TO-DATE
+> Task :neko-cli:compileJava UP-TO-DATE
+> Task :neko-cli:classes UP-TO-DATE
+> Task :neko-cli:jar UP-TO-DATE
+> Task :neko-test:compileTestJava UP-TO-DATE
+> Task :neko-test:testClasses UP-TO-DATE
+> Task :neko-cli:startScripts
+> Task :neko-cli:installDist
+
+> Task :neko-test:test
+
+CCodeGeneratorTest > icacheScaffoldEmitted() FAILED
+    java.lang.IllegalStateException at CCodeGeneratorTest.java:365
+
+CCodeGeneratorTest > ldcClassMirrorResolverUsesJdk9DoubleDerefPath() FAILED
+    org.opentest4j.AssertionFailedError at CCodeGeneratorTest.java:647
+
+CCodeGeneratorTest > bindTimeResolved() FAILED
+    java.lang.IllegalStateException at CCodeGeneratorTest.java:221
+
+LdcStringInternIntegrationTest > translatedLdcStringReturnsStableTranslatedSiteIdentity() FAILED
+    org.opentest4j.AssertionFailedError at LdcStringInternIntegrationTest.java:109
+
+NativeObfuscationIntegrationTest > nativeObfuscation_isIdempotent() FAILED
+    org.opentest4j.AssertionFailedError at NativeObfuscationIntegrationTest.java:246
+
+NativeObfuscationIntegrationTest > nativeObfuscation_TEST_translatedMethodsThrowLinkageErrorBodies() FAILED
+    org.opentest4j.AssertionFailedError at NativeObfuscationIntegrationTest.java:246
+
+NativeObfuscationIntegrationTest > nativeObfuscation_translatedMethodsKeepOriginalSignatures() FAILED
+    org.opentest4j.AssertionFailedError at NativeObfuscationIntegrationTest.java:246
+
+NativeObfuscationPerfTest > nativeObfuscation_TEST_calcBenchmarkMedianUnder150ms() FAILED
+    org.opentest4j.AssertionFailedError at NativeObfuscationPerfTest.java:81
+
+OpcodeTranslatorUnitTest > opcodeTranslator_invokeOpsBuildJniCallSequences() FAILED
+    java.lang.IllegalStateException at OpcodeTranslatorUnitTest.java:373
+
+OpcodeTranslatorUnitTest > primitiveFieldFastPath() FAILED
+    org.opentest4j.AssertionFailedError at OpcodeTranslatorUnitTest.java:321
+
+OpcodeTranslatorUnitTest > methodHandleExactBridgeNoArrayAlloc() FAILED
+    java.lang.IllegalStateException at OpcodeTranslatorUnitTest.java:522
+
+OpcodeTranslatorUnitTest > primitiveArrayScalarFastPath() FAILED
+    org.opentest4j.AssertionFailedError at OpcodeTranslatorUnitTest.java:350
+
+OpcodeTranslatorUnitTest > invokeStaticSpecialFinalUnchanged() FAILED
+    java.lang.IllegalStateException at OpcodeTranslatorUnitTest.java:541
+
+OpcodeTranslatorUnitTest > methodHandleUnknownDescriptorFallsBack() FAILED
+    java.lang.IllegalStateException at OpcodeTranslatorUnitTest.java:432
+
+OpcodeTranslatorUnitTest > opcodeTranslator_fieldOpsResolveFieldIdsAndAccessors() FAILED
+    java.lang.IllegalStateException at OpcodeTranslatorUnitTest.java:262
+
+OpcodeTranslatorUnitTest > objectArrayOpcodesUnchanged() FAILED
+    org.opentest4j.AssertionFailedError at OpcodeTranslatorUnitTest.java:904
+
+OpcodeTranslatorUnitTest > invokeVirtualUsesReceiverKeyCache() FAILED
+    java.lang.IllegalStateException at OpcodeTranslatorUnitTest.java:522
+
+OpcodeTranslatorUnitTest > invokeInterfaceUsesReceiverKeyCache() FAILED
+    java.lang.IllegalStateException at OpcodeTranslatorUnitTest.java:522
+
+83 tests completed, 18 failed, 4 skipped
+
+> Task :neko-test:test FAILED
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':neko-test:test'.
+> There were failing tests. See the report at: file:///mnt/d/Code/Security/NekoObfuscator/worktree/dev-impl/neko-test/build/reports/tests/test/index.html
+
+* Try:
+> Run with --scan to get full insights.
+
+Deprecated Gradle features were used in this build, making it incompatible with Gradle 9.0.
+
+You can use '--warning-mode all' to show the individual deprecation warnings and determine if they come from your own scripts or plugins.
+
+For more on this, please refer to https://docs.gradle.org/8.10/userguide/command_line_interface.html#sec:command_line_warnings in the Gradle documentation.
+
+BUILD FAILED in 10s
+19 actionable tasks: 3 executed, 16 up-to-date

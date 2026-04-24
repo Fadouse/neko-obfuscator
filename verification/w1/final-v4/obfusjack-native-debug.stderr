@@ -1,0 +1,52 @@
+[nk] n onload enter
+[nk] n dlsym_allocate_instance=FAILED
+[nk] lj 24/24[nk] o instance_klass_static_field_size_offset=284 s=A[nk] o instance_klass_static_oop_field_count_offset=300 s=A[nk] mf off=48 s=B[nk] o thread_tlab_top_offset=440 s=B[nk] o thread_tlab_start_offset=432 s=B[nk] o thread_tlab_pf_top_offset=448 s=B[nk] o thread_tlab_end_offset=456 s=B[nk] o thread_exception_oop_offset=1280 s=A[nk] o thread_exception_pc_offset=1288 s=A[nk] o java_thread_anchor_offset=928 s=A[nk] o java_thread_jni_environment_offset=960 s=B[nk] n class_klass_offset_scan=16
+[nk] o instance_klass_java_mirror_offset=112 s=B[nk] o thread_thread_state_offset=1100 s=A[nk] o java_thread_last_Java_sp_offset=928 s=B[nk] o java_thread_last_Java_fp_offset=944 s=B[nk] o java_thread_last_Java_pc_offset=936 s=B[nk] o oophandle_obj_offset=0 s=A[nk] vm j=21[nk] n strict_vm_layout_ok=1 next_link=144 cld_klasses=56 cld_handles=48 klass_mirror=112
+[nk] cap enter[nk] n boot_cld=0x7ff624143ff0 first_klass=0x7ff5a00597c0 klass_count=1005 klass_name_off=24 sym_len_off=4 sym_body_off=6
+[nk] n boot_well_known_scan_ok=1 string=0x7ff59f00e878 byte=0x7ff59f002318 char=0x7ff59f001d30 loader=0x7ff5a0000400
+[nk] cap ok str=0x7ff59f00e878 arr_b=0x7ff59f002318 arr_c=0x7ff59f001d30[nk] n loader_mark ready=1 klass=0x7ff5a0000400 mirror=0x54b03a550 off=116
+[nk] ol mark_loader_loaded ok str=0x7ff59f00e878[nk] n w1 os=3 ks=0 tl=yes ex=yes
+[nk] n w4r tso=1100 ao=928+0 mo=112 hoo=0 tf=yes
+[nk] ol resolve_string_intern_layout ok hash_off=12[nk] n boot_cld_root_chain_ok=1
+[nk] ol prewarm ok backend=1[nk] dm 0/13[nk] dp 0/13[nk] n w2 fs=9 ls=1 lc=0
+[nk] n w3 is=0 sb=0
+=== JDK 21 Feature & Obfuscation Compatibility Test ===
+Sum=15 Product=50 Mix=21474836490 d=492.59841819737056
+Bits=701
+--------
+JDK21 demo
+--------
+char=中
+0 2 4 
+###
+1 2 3 4 5 
+grid[0][1]=X
+Lambda Hello World!
+a
+b
+c
+Hi, Alice
+HI, BOB
+Anonymous run()
+GREEN
+42
+sparse ok
+Optional=246
+Exception in thread "main" java.lang.LinkageError: please check your native library load correctly
+	at org.example.Main.lambda$main$3(Main.java)
+	at java.base/java.util.stream.IntPipeline$4$1.accept(IntPipeline.java:246)
+	at java.base/java.util.stream.Streams$RangeIntSpliterator.forEachRemaining(Streams.java:104)
+	at java.base/java.util.Spliterator$OfInt.forEachRemaining(Spliterator.java:712)
+	at java.base/java.util.stream.AbstractPipeline.copyInto(AbstractPipeline.java:509)
+	at java.base/java.util.stream.AbstractPipeline.wrapAndCopyInto(AbstractPipeline.java:499)
+	at java.base/java.util.stream.ReduceOps$ReduceTask.doLeaf(ReduceOps.java:960)
+	at java.base/java.util.stream.ReduceOps$ReduceTask.doLeaf(ReduceOps.java:934)
+	at java.base/java.util.stream.AbstractTask.compute(AbstractTask.java:327)
+	at java.base/java.util.concurrent.CountedCompleter.exec(CountedCompleter.java:754)
+	at java.base/java.util.concurrent.ForkJoinTask.doExec(ForkJoinTask.java:387)
+	at java.base/java.util.concurrent.ForkJoinTask.invoke(ForkJoinTask.java:667)
+	at java.base/java.util.stream.ReduceOps$ReduceOp.evaluateParallel(ReduceOps.java:927)
+	at java.base/java.util.stream.AbstractPipeline.evaluate(AbstractPipeline.java:233)
+	at java.base/java.util.stream.IntPipeline.reduce(IntPipeline.java:515)
+	at java.base/java.util.stream.IntPipeline.sum(IntPipeline.java:473)
+	at org.example.Main.main(Main.java:193)

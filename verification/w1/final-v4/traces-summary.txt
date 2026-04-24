@@ -1,0 +1,68 @@
+W1 verification pass v4 trace summary
+Generated: 2026-04-24T10:46:02+08:00
+
+PTY exit codes:
+build-debug-v4 pty_ce64baf6 exit=0
+cli-install-v4 pty_4a30787d exit=0
+obf-test-v4 pty_513cb67f exit=0
+obf-obfusjack-v4 pty_c6973142 exit=0
+obf-snake-v4 pty_3ce29b1a exit=0
+run-test-v4 pty_35abf2a5 exit=0
+run-obfusjack-v4 pty_c874b33d exit=0
+run-snake-v4 pty_857572a8 exit=0
+
+== verification/w1/final-v4/obfusjack-native-debug.stderr ==
+onload enter: 1
+mark_loader_loaded: 1
+LinkageError native-load message: 1
+LinkageError locations:
+35:Exception in thread "main" java.lang.LinkageError: please check your native library load correctly
+36-	at org.example.Main.lambda$main$3(Main.java)
+37-	at java.base/java.util.stream.IntPipeline$4$1.accept(IntPipeline.java:246)
+38-	at java.base/java.util.stream.Streams$RangeIntSpliterator.forEachRemaining(Streams.java:104)
+39-	at java.base/java.util.Spliterator$OfInt.forEachRemaining(Spliterator.java:712)
+
+== verification/w1/final-v4/SnakeGame-native-debug.stderr ==
+onload enter: 1
+mark_loader_loaded: 1
+LinkageError native-load message: 1
+LinkageError locations:
+12:Exception in thread "main" java.lang.LinkageError: please check your native library load correctly
+13-	at Tuple.getX(Tuple.java)
+14-	at ThreadsController.<init>(ThreadsController.java:24)
+15-	at Window.<init>(Window.java:43)
+16-	at Main.main(Main.java:8)
+
+== verification/w1/final-v4/TEST-native-debug.stderr ==
+onload enter: 1
+mark_loader_loaded: 1
+LinkageError native-load message: 1
+LinkageError locations:
+35:Exception in thread "main" java.lang.LinkageError: please check your native library load correctly
+36-	at pack.tests.bench.Calc.call(Calc.java)
+37-	at pack.tests.bench.Calc.runAll(Calc.java:9)
+38-	at pack.Main.main(Main.java:126)
+
+hs_err files under worktree:
+hs_err_pid1253781.log
+hs_err_pid1254874.log
+hs_err_pid1281719.log
+hs_err_pid1281741.log
+hs_err_pid1281760.log
+hs_err_pid1401364.log
+hs_err_pid1408977.log
+hs_err_pid1628554.log
+hs_err_pid1632911.log
+hs_err_pid1637186.log
+hs_err_pid1662532.log
+hs_err_pid1663612.log
+hs_err_pid1716027.log
+hs_err_pid1727962.log
+hs_err_pid1784603.log
+hs_err_pid199044.log
+hs_err_pid199330.log
+hs_err_pid2090318.log
+hs_err_pid2196279.log
+hs_err_pid2197300.log
+hs_err_pid2432107.log
+hs_err_pid2433115.log
