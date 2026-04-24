@@ -911,7 +911,7 @@ Each sub-wave is its own Deep A / Deep B task. All sub-waves apply §6.0 **GATE-
 | Sub | Topic | Deliverable | Sub-wave verification |
 |---|---|---|---|
 | M5a | ClassUnload handling | DONE — `cached_klass` invalidation via CLDG scan for dead CLDs on periodic rescan. | DONE — `*ClassUnloadTest*` passes; debug trace `neko_class_unload_observed` ≥ 1. |
-| M5b | RedefineClasses compat | Detect redefine / replacement methods and re-patch safely. | `*RedefineClassesTest*` passes; trace `neko_redefine_detected=` present. |
+| M5b | RedefineClasses compat | DONE — detect replacement `Method*` via VMStructs Method flags, invalidate translated entries, and fail closed to Java/LinkageError fallback instead of executing stale native bodies. | DONE — `*RedefineClassesTest*` passes; trace `neko_redefine_detected=` present; v19 debug counts unchanged (`TEST dp 1/14`, obfusjack `dp 6/17`, SnakeGame `dp 2/12`). |
 | M5c | JDK-applicable GC matrix | Full §6.0 GATE-11 matrix executed as deliverable. | `gc-matrix.txt` has JDK-applicable number of passing rows per GATE-11 (JDK 8: 9, JDK 11: 15, JDK 17/21: 18). |
 | M5d | C1/C2 interop | JIT does not panic on patched entry. | `PrintCompilation` / `PrintInlining` smoke shows no deopt markers tied to `neko_impl`. |
 | M5e | perf regression gate | Post-W11 perf delta ≤ 5%. | `verification/w11/m5e/perf.txt` records baseline vs current. |
