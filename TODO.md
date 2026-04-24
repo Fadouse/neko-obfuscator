@@ -179,8 +179,8 @@ Also:
 6. **Wave 4d** — INVOKE-ref via `JavaCalls`. Reference arguments / return adapter for Calc methods.
 7. **Wave 4e** — VTABLE-INLINE devirtualize INVOKEVIRTUAL / INVOKEINTERFACE (m0511).
 8. **Wave 5 / W9** — DONE for valid W9 scope after reverting `3aa69c6` and `54cbe23`; v17 restored v14-style native patching (`TEST dp 1/14`, obfusjack `dp 6/17`, SnakeGame `dp 2/12` on this host). Use `.sisyphus/plans/w9-harness-clarification.md` for the canonical W9 debug harness.
-9. **M4o gate / W10** — NEXT: 100% admission on all 3 jars except `<clinit>`/`<init>` (m0511).
-10. **M5a-k / W11** — 10 hardening items: ClassUnload, RedefineClasses, 5-GC gating, CI matrix, perf, MONITOR*, INVOKEDYNAMIC, GC barriers, stack trace, compact headers.
+9. **M4o gate / W10** — DONE: `NativeObfAdmissionGateTest` hard-gates exact W10 admission counts (`TEST.jar` 14/75, obfusjack 17/84, SnakeGame 12/14) and writes `verification/w10/admission-counts.txt`. W11 must intentionally update the hardcoded gate if admission grows.
+10. **M5a-k / W11** — NEXT: 10 hardening items: ClassUnload, RedefineClasses, 5-GC gating, CI matrix, perf, MONITOR*, INVOKEDYNAMIC, GC barriers, stack trace, compact headers.
 11. **M5k v1-complete / W12** — final smoke gate.
 
 ---

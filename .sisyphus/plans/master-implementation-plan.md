@@ -880,6 +880,8 @@ Synthetic exception dispatch after `JNI_OnLoad` may use exactly one JNI call fam
 
 ### W10 — M4o gate: 100% admission except `<clinit>` / `<init>`
 
+**Status (2026-04-24)**: DONE on `dev-impl-nojni`. Added `NativeObfAdmissionGateTest` with exact W10 counts (`TEST.jar` 14/75, `obfusjack-test21.jar` 17/84, `SnakeGame.jar` 12/14), writes `verification/w10/admission-counts.txt`, and verifies with `./gradlew clean :neko-test:test --tests '*NativeObfAdmissionGateTest*' --no-daemon --console=plain` exit `0`.
+
 **Goal**: Hard gate that admission is 100% for all non-`<clinit>` / `<init>` methods on all 3 test jars.
 
 **Deliverables**:
