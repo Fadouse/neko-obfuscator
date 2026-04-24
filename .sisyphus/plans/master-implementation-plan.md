@@ -1,18 +1,21 @@
-# NekoObfuscator Master Implementation Plan v6
+# NekoObfuscator Master Implementation Plan v6.4
 
 Revision history:
 - v1-v4: initial drafts (Momus rejected 3×)
 - v5: Momus [OKAY] approved, 794 lines
 - v6: this document — Option A strict-no-JNI + DD-5 Option 1 revision (m0107, m0117)
+- v6.4: Oracle 9 amendment — `InstanceKlass::allocate_instance` is not portable/exported, so DD-5 now permits a bootstrap-only JNI throwable cache and keeps post-bootstrap synthetic dispatch to cached `jthrowable` + `Throw` only.
+
+> **v6.4 amendment reason:** Oracle 9 confirmed that `InstanceKlass::allocate_instance(Thread*)` is absent from the `.dynsym` of supported OpenJDK builds and cannot be a portable synthetic-exception allocation backend. User explicitly approved the Opt-6/5 bootstrap-only JNI relaxation: construct global throwable handles during `JNI_OnLoad`; after bootstrap, generated code may only dispatch those cached handles via `(*env)->Throw(env, jthrowable)`.
 
 ## v6 change summary
 - ADDED: W0 Strict-no-JNI bootstrap refactor (prereq to W1+)
-- ADDED: GATE-13 Strict JNI surface verification
+- ADDED: GATE-13 Strict JNI surface verification, split by v6.4 into bootstrap-cache allowance (13A) and post-bootstrap strict surface (13B)
 - ADDED: §6.0.2 Synthetic exception construction sequence
 - REVISED: W1 consumes W0-captured `klass_java_lang_String` (Oracle 3 C → W0 DD-1)
 - REVISED: W2 owner resolution via DD-2 holder-CLD walk (Oracle 2 A superseded)
 - REVISED: W3 drops `owner_class_slot` per DD-3 (reversing v5 W3)
-- REVISED: W4-W9 audited for hidden JNI; exception sites converted to Option 1 construction
+- REVISED: W4-W9 audited for hidden JNI; exception sites converted to Oracle 9 cached throwable dispatch
 - PRESERVED: §1-§5, §6.0, §6.0.1, §7-§10 from v5
 - NOTE: Legacy gate labels GATE-1..GATE-12 are preserved; new GATE-13 executes operationally between GATE-5 and GATE-6 while retaining an integer label.
 
@@ -41,15 +44,16 @@ Revision history:
 | m0145 | English only. |
 | m0212 | Per-Deep-worker worktree. Commit before each task. |
 | m0107 | **Option A strict-no-JNI**. Only permitted JNI touchpoints in generated `.so`: `JNI_OnLoad(JavaVM*, void*)`, one `(*vm)->GetEnv(vm, &env, JNI_VERSION_1_6)` at the start of `JNI_OnLoad`, and nothing else except the m0117 allowance. Zero other JNI function-table calls anywhere in bootstrap, steady-state, or translated method bodies. |
-| m0117 | **DD-5 Option 1 exception policy**. Synthetic exception construction may use exactly one additional JNI call family: `(*env)->Throw(env, jthrowable)`. Exception oop allocation must use `dlsym`’d `InstanceKlass::allocate_instance(Thread*)`. Exception `Klass*` values must be pre-cached via CLD `_klasses` walk at bootstrap. |
+| m0117 | **DD-5 Oracle 9 exception policy**. Synthetic exception objects are preconstructed during `JNI_OnLoad` only via the approved bootstrap throwable-cache JNI calls; after `JNI_OnLoad`, synthetic exception dispatch may use only `(*env)->Throw(env, cached_global_jthrowable)`. |
 | m0208+ | `NekoNativeLoader` remains the sole Java runtime class. Shape test `NekoLoaderShapeTest.java:64-75` enforces `{loaded, LOCK}` only. |
 
-**Final allowed JNI surface for v6-generated `.so`**:
+**Final allowed JNI surface for v6.4-generated `.so`**:
 
 1. `JNI_OnLoad(JavaVM*, void*)` entry symbol
 2. `(*vm)->GetEnv(vm, &env, JNI_VERSION_1_6)` — exactly 1 call in `JNI_OnLoad`
-3. `(*env)->Throw(env, jthrowable)` — only for synthetic exception dispatch after W5 opens it
-4. Nothing else
+3. Bootstrap-cache-only `(*env)->FindClass`, `GetMethodID`, `NewStringUTF`, `NewObjectA`, `NewGlobalRef`, and `DeleteLocalRef` — only inside `JNI_OnLoad` throwable-cache helpers before `JNI_OnLoad` returns
+4. `(*env)->Throw(env, jthrowable)` — only for synthetic exception dispatch using cached global throwable handles
+5. Nothing else
 
 ---
 
@@ -102,7 +106,7 @@ Revision history:
   ├─ DD-1 boot CLD _klasses walk + Klass::_next_link
   ├─ DD-3 remove owner/static global refs
   ├─ DD-4 mirror/static-base via Klass::_java_mirror
-  ├─ DD-5 Option 1 bootstrap exception klass pre-cache + allocate_instance symbol
+  ├─ DD-5 Oracle 9 bootstrap throwable cache + post-bootstrap cached Throw
   └─ DD-6 bootstrap/bind/runtime JNI family deletion
       │
       ├──> [W1] Wave 4b-4a: LDC String GC root (Oracle 1 A2 survives, now consumes W0 DD-1 capture)
@@ -115,13 +119,13 @@ Revision history:
       │
       ├──> [W4] Wave 4b-4b: naming cleanup + `_nosafepoint` fast path + teardown
       │
-      ├──> [W5] Wave 4b-5: ATHROW + try-catch + first Option 1 synthetic exception path
+  ├──> [W5] Wave 4b-5: ATHROW + try-catch + first cached synthetic exception path
       │
       ├──> [W6] Wave 4c: arrays / CHECKCAST / INSTANCEOF / NPE / divzero / NEW
       │        heavy synthetic exception surface (NPE / AIOOBE / CCE / AE / NASE / OOME)
       │
       ├──> [W7] Wave 4d: INVOKE-ref via JavaCalls or strict replacement
-      │        null-receiver synthetic NPE reopened under Option 1
+      │        null-receiver synthetic NPE reopened through cached throwable dispatch
       │
       ├──> [W8] Wave 4e: VTABLE-INLINE devirtualization for INVOKEVIRTUAL / INVOKEINTERFACE
       │
@@ -141,7 +145,7 @@ Revision history:
 - Oracle 1 survives unchanged in principle, but its bootstrap dependency is now W0 boot-CLD metadata capture instead of Oracle 3 JNI well-known class capture.
 - Oracle 2 and Oracle 3 are context only. Oracle 4 is authoritative wherever they conflict.
 - W2 and W3 are separated intentionally: W2 changes owner resolution semantics; W3 changes manifest/site layout and cache representation while preserving `MANIFEST_ENTRY_SIZE = 88`.
-- W5-W9 explicitly track synthetic exception reopenings under m0117. No synthetic throw path may use anything beyond `allocate_instance(Thread*)` + raw field init + `(*env)->Throw(...)`.
+- W5-W9 explicitly track synthetic exception reopenings under m0117 as amended by Oracle 9. No post-bootstrap synthetic throw path may use anything beyond cached global `jthrowable` handles + `(*env)->Throw(...)`.
 
 ---
 
@@ -218,7 +222,7 @@ For gates that specify `-Dneko.native.debug=true`: this is a belt-and-suspenders
 - obfusjack-test21.jar: `grep -qF -- '=== All tests completed ===' .post.stdout` → exit `0`.
 - SnakeGame.jar: `.post.exit` ∈ {`0`, `124`} (124 = timeout SIGKILL, acceptable for GUI app).
 
-**GATE-13 — Strict JNI surface verification**
+**GATE-13A — Bootstrap-cache allowed JNI inventory**
 - **Execution order**: run this gate after GATE-5 and before GATE-6 on every wave beginning at W0, while preserving legacy numbering of GATE-1..GATE-12.
 - Symbol-surface command:
   - Platform-aware extraction (`bash` / `zsh`):
@@ -244,17 +248,24 @@ For gates that specify `-Dneko.native.debug=true`: this is a belt-and-suspenders
   - Pass: exactly **1** entry returned.
 - Full JNI-reference inventory command:
   - `grep -oE '\(\*(vm|env)\)->[A-Za-z_][A-Za-z0-9_]*' <generated C source> | sort | uniq -c`
-  - Pass values by wave:
-    - W0-W4: exactly `1 (*vm)->GetEnv`; zero `(*env)->Throw`
-    - W5: exactly `1 (*vm)->GetEnv` + `N (*env)->Throw`, where `N ≥ 1`
-    - W6-W8: exactly `1 (*vm)->GetEnv` + `N (*env)->Throw`, where `N ≥ 5`
-    - W9-W12: exactly `1 (*vm)->GetEnv` + `N (*env)->Throw`, where `N ≥ 10`
-- Raw count command:
-  - `grep -cE '\(\*vm\)->|\(\*env\)->' <generated C source>`
-  - Pass: count equals `1 + N`, where `N` is the `(*env)->Throw` count above.
-- Forbidden-reference command:
-  - `grep -oE '\(\*(vm|env)\)->[A-Za-z_][A-Za-z0-9_]*' <generated C source> | grep -vE '^\(\*vm\)->GetEnv$|^\(\*env\)->Throw$'`
-  - Pass: empty.
+  - Pass values: exactly one `(*vm)->GetEnv`; bootstrap-cache helper calls may include only `(*env)->FindClass`, `GetMethodID`, `NewStringUTF`, `NewObjectA`, `NewGlobalRef`, and `DeleteLocalRef`; `(*env)->Throw` count follows wave-specific synthetic exception expectations below.
+- Bootstrap location policy:
+  - `(*vm)->GetEnv` appears exactly once, inside `JNI_OnLoad`.
+  - `(*env)->FindClass`, `GetMethodID`, `NewStringUTF`, `NewObjectA`, `NewGlobalRef`, and `DeleteLocalRef` appear only in `neko_make_global_throwable`, `neko_init_throwable_cache`, or immediately adjacent `JNI_OnLoad` bootstrap-cache code.
+  - `ThrowNew`, `ExceptionOccurred`, `ExceptionCheck`, `ExceptionClear`, `AllocObject`, `Call*Method`, `GetStatic*`, `SetStatic*`, `NewWeakGlobalRef`, and `DeleteGlobalRef` remain forbidden unless separately approved.
+- Build-time automation requirement:
+  - Add a dedicated verification script invoked during build and by every wave gate report.
+  - Script output must be archived at `verification/<wave>/jni-surface.txt`.
+
+**GATE-13B — Post-bootstrap strict JNI surface verification**
+- Forbidden post-bootstrap reference command:
+  - `grep -oE '\(\*(vm|env)\)->[A-Za-z_][A-Za-z0-9_]*' <generated C source> | grep -vE '^\(\*vm\)->GetEnv$|^\(\*env\)->(FindClass|GetMethodID|NewStringUTF|NewObjectA|NewGlobalRef|DeleteLocalRef|Throw)$'`
+  - Pass: empty, then manually verify the bootstrap-cache-only methods listed in GATE-13A do not occur outside the cache helpers / `JNI_OnLoad`.
+- Wave-specific `Throw` expectations:
+  - W0-W4: `Throw=0` unless the bootstrap loader guard or Oracle 9 cache dispatch has already landed; no post-bootstrap construction helpers allowed.
+  - W5: `Throw>=1` using cached `g_neko_throw_npe`.
+  - W6-W8: `Throw>=5` using cached NPE/AIOOBE/CCE/AE/OOM/NASE handles.
+  - W9-W12: `Throw>=10` using cached IMSE/ASE/BME/LinkageError handles as needed.
 - Build-time automation requirement:
   - Add a dedicated verification script invoked during build and by every wave gate report.
   - Script output must be archived at `verification/<wave>/jni-surface.txt`.
@@ -321,32 +332,33 @@ verification/<wave-id>/
 
 Deep B’s verification report MUST include paths to all artifacts above.
 
-### 6.0.2 — Synthetic exception construction sequence (DD-5 Option 1)
+### 6.0.2 — Synthetic exception construction sequence (DD-5 Oracle 9)
 
-**Preconditions (all set at bootstrap via W0)**:
+**Premise (m0117 / DD-5 amended by Oracle 9)**:
 
-- `g_neko_vm_layout.klass_exc_npe` — `NullPointerException`
-- `g_neko_vm_layout.klass_exc_aioobe` — `ArrayIndexOutOfBoundsException`
-- `g_neko_vm_layout.klass_exc_cce` — `ClassCastException`
-- `g_neko_vm_layout.klass_exc_ae` — `ArithmeticException`
-- `g_neko_vm_layout.klass_exc_le` — `LinkageError`
-- `g_neko_vm_layout.klass_exc_oom` — `OutOfMemoryError`
-- `g_neko_vm_layout.klass_exc_imse` — `IllegalMonitorStateException`
-- `g_neko_vm_layout.klass_exc_bme` — `BootstrapMethodError`
-- `g_neko_vm_layout.klass_exc_nase` — `NegativeArraySizeException`
-- extensible list for any later explicitly approved synthetic exception class
-- `g_neko_allocate_instance_fn` — `dlsym`’d `InstanceKlass::allocate_instance(Thread*)`
-- `g_neko_java_thread_current_fn` or equivalent strict thread resolver — provides `Thread*`
+Synthetic exception dispatch after `JNI_OnLoad` may use exactly one JNI call family: `(*env)->Throw(env, jthrowable)`. Synthetic exception objects are preconstructed during `JNI_OnLoad` only, using a narrowly allowed bootstrap JNI cache builder (`FindClass`, `GetMethodID`, `NewStringUTF`, `NewObjectA`, `NewGlobalRef`, `DeleteLocalRef`). After `JNI_OnLoad` returns, no JNI construction, lookup, global-ref creation, exception query/clear, or `ThrowNew` calls are permitted. All post-bootstrap synthetic throws must pass cached global `jthrowable` handles to `Throw`.
+
+**Preconditions (all set during `JNI_OnLoad` bootstrap cache init)**:
+
+- `g_neko_throw_npe` — global `NullPointerException` handle
+- `g_neko_throw_aioobe` — global `ArrayIndexOutOfBoundsException` handle
+- `g_neko_throw_cce` — global `ClassCastException` handle
+- `g_neko_throw_ae` — global `ArithmeticException` handle
+- `g_neko_throw_le` — global `LinkageError` handle
+- `g_neko_throw_oom` — global `OutOfMemoryError` handle
+- `g_neko_throw_imse` — global `IllegalMonitorStateException` handle
+- `g_neko_throw_ase` — global `ArrayStoreException` handle
+- `g_neko_throw_nase` — global `NegativeArraySizeException` handle
+- `g_neko_throw_bme` — global `BootstrapMethodError` handle
+- `g_neko_throw_loader_linkage` — global loader-specific `LinkageError` handle
+- `klass_exc_*` metadata may remain for type logic/diagnostics, but is no longer the synthetic allocation authority.
 
 **Sequence for each synthetic-exception site**:
 
-1. Locate current thread via `neko_rt_thread_or_null()`.
-2. Call `g_neko_allocate_instance_fn(klass_exc_*, thread)` → `oop exc_oop`.
-3. Initialize `exc_oop` fields at raw offsets.
-   - If a message is required, write `Throwable::detailMessage` at the resolved raw offset.
-   - If no message is required, skip message initialization rather than inventing constructor JNI helpers.
-4. Call `(*env)->Throw(env, (jthrowable)exc_oop)`.
-5. Native function returns control to JVM dispatch. `exc_oop` becomes the pending exception through JVM dispatch semantics.
+1. Bootstrap: `JNI_OnLoad` creates the global `jthrowable` cache with normal JNI construction.
+2. Runtime: choose the cached throwable for the synthetic exception kind.
+3. Runtime: call `(*env)->Throw(env, cached_global_jthrowable)`.
+4. Runtime: return the default value for the translated function's return type.
 
 **Native return convention immediately after `Throw`**:
 
@@ -355,12 +367,13 @@ Deep B’s verification report MUST include paths to all artifacts above.
 - reference-return translated function: `return NULL;`
 - dispatcher/stub side must treat this as exceptional exit and must not consume the return register as a successful value.
 
-**Non-goals of Option 1**:
+**Non-goals after bootstrap**:
 
 - No constructor invocation through JNI.
 - No `ThrowNew`.
 - No `ExceptionOccurred`, `ExceptionClear`, `ExceptionCheck`.
-- No synthetic exception path that bypasses `allocate_instance(Thread*)`.
+- No `FindClass`, `GetMethodID`, `NewObject*`, `AllocObject`, `NewGlobalRef`, or exception query/clear outside the bootstrap cache window.
+- No `InstanceKlass::allocate_instance(Thread*)` / raw `Throwable` field initialization dependency.
 
 ---
 
@@ -410,10 +423,10 @@ Deep B’s verification report MUST include paths to all artifacts above.
    - replace `GetStaticObjectField`, `GetStaticLongField`, `SetStaticObjectField`, and siblings with raw offset reads/writes via `Klass::_java_mirror`
    - honor JDK 9+ OopHandle double-deref
 9. Replace `neko_mark_loader_loaded` JNI field access with raw mirror read + raw offset write while preserving `NekoNativeLoader` shape.
-10. Resolve `InstanceKlass::allocate_instance(Thread*)` via `dlsym` at bootstrap.
-    - include per-platform mangled-name table
-    - cache into `g_neko_allocate_instance_fn`
-11. Resolve `JavaThread::current()` via `dlsym` or equivalent strict TLS-backed mechanism and cache into `g_neko_java_thread_current_fn`.
+10. Initialize the Oracle 9 bootstrap throwable cache in `JNI_OnLoad`.
+    - create global `jthrowable` handles for NPE/AIOOBE/CCE/AE/LE/OOM/IMSE/ASE/NASE/BME and loader-linkage errors
+    - do not resolve `InstanceKlass::allocate_instance(Thread*)`; it is intentionally not required
+11. Keep any optional `JavaThread::current()` resolver decoupled from synthetic exception allocation and require separate approval before use.
 12. Remove all other `env->*` function-table calls across emitters, wrappers, and translator output. `explore-jni-audit-option-a.md` is the authoritative audit list.
 
 **MUST DO**:
@@ -429,7 +442,7 @@ Deep B’s verification report MUST include paths to all artifacts above.
 
 - Add new Java classes.
 - Add new JVMTI usage.
-- Use `FindClass`, `NewGlobalRef`, `DeleteGlobalRef`, `GetStatic*Field`, `SetStatic*Field`, `CallStatic*Method`, `ThrowNew`, `ExceptionOccurred`, `ExceptionCheck`, `ExceptionClear`, `NewStringUTF`, or any other JNI function-table call.
+- Use `GetStatic*Field`, `SetStatic*Field`, `CallStatic*Method`, `ThrowNew`, `ExceptionOccurred`, `ExceptionCheck`, `ExceptionClear`, or any other post-bootstrap JNI function-table call outside the Oracle 9 bootstrap throwable-cache allowance.
 - Reintroduce `__nekoStringRoots` or any Java-side GC-root field.
 
 **Verification (delegated to Deep B)**:
@@ -445,7 +458,7 @@ Deep B’s verification report MUST include paths to all artifacts above.
   - W0-G: `grep -rnE 'NewGlobalRef|DeleteGlobalRef' neko-native/build/native-src/generated/` → empty.
   - W0-H: `grep -rnE 'GetStatic[A-Za-z]+Field|SetStatic[A-Za-z]+Field' neko-native/build/native-src/generated/` → empty.
   - W0-I: `grep -rn 'neko_mark_loader_loaded' neko-native/build/native-src/generated/` → ≥ 1 hit and no adjacent JNI field-access helpers remain.
-  - W0-J: `grep -rnE 'allocate_instance|g_neko_allocate_instance_fn|JavaThread::current|g_neko_java_thread_current_fn' neko-native/src/main/java/dev/nekoobfuscator/native_/codegen/` → ≥ 4 hits total.
+  - W0-J: `grep -rnE 'neko_init_throwable_cache|g_neko_throw_npe|g_neko_throw_loader_linkage' neko-native/src/main/java/dev/nekoobfuscator/native_/codegen/` → ≥ 3 hits total; `grep -rnE 'InstanceKlass17allocate_instance|dlsym_allocate_instance|g_neko_allocate_instance_fn' neko-native/src/main/java/dev/nekoobfuscator/native_/codegen/` → empty.
   - W0-K: `grep -rnE '\(\*env\)->|\(\*vm\)->' neko-native/build/native-src/generated/ | grep -v '\(\*vm\)->GetEnv'` → empty.
   - W0-L: debug-built `.so` per §6.0.1 + `java -Dneko.native.debug=true -jar neko-test/build/test-native/TEST-native.jar 2>&1 | grep 'strict_vm_layout_ok=1'` → exit `0`; any `next_link=-1` trace is a fail.
 
@@ -641,20 +654,20 @@ Deep B’s verification report MUST include paths to all artifacts above.
 
 ---
 
-### W5 — Wave 4b-5: ATHROW + try-catch via raw pending-exception + Option 1 synthetic reopen
+### W5 — Wave 4b-5: ATHROW + try-catch via raw pending-exception + cached synthetic throw reopen
 
-**Goal**: Admit ATHROW in SafetyChecker, keep existing-oop `ATHROW` on raw pending-exception path, and open the first synthetic exception path under m0117 for null-ATHROW and any equivalent mandatory synthetic bridge case.
+**Goal**: Admit ATHROW in SafetyChecker, keep existing-oop `ATHROW` on raw pending-exception path, and open the first cached synthetic exception path under amended m0117 for null-ATHROW and any equivalent mandatory synthetic bridge case.
 
 **Exception class cache slots used in W5**:
 
-- `klass_exc_npe` — null `ATHROW`
+- `g_neko_throw_npe` — null `ATHROW`
 - existing-oop path uses raw pending-exception write and does **not** allocate
 
 **Deliverables**:
 
 1. `NativeTranslationSafetyChecker.java`: remove ATHROW rejection.
 2. `OpcodeTranslator.java`: use strict raw pending-exception path for non-null exception oop.
-3. Add Option 1 synthetic path for null `ATHROW` → `NullPointerException`.
+3. Add cached synthetic path for null `ATHROW` → `g_neko_throw_npe`.
 4. Wire try-catch unwinding via existing `neko_rt_ctx_init` + scope close.
 5. Preserve stack-trace/behavior equivalence; no fake constructor JNI path.
 6. Ensure first post-W0 `(*env)->Throw` sites land here and are archived by GATE-13.
@@ -662,14 +675,14 @@ Deep B’s verification report MUST include paths to all artifacts above.
 **MUST DO**:
 
 - Distinguish clearly between existing-oop throw and synthetic throw.
-- Use `allocate_instance(Thread*)` for synthetic `NullPointerException`.
+- Use cached `g_neko_throw_npe` for synthetic `NullPointerException`.
 - Return immediately after `Throw` according to §6.0.2.
 
 **MUST NOT DO**:
 
 - Use `ThrowNew`.
 - Use `ExceptionOccurred` / `ExceptionClear` / `ExceptionCheck`.
-- Invent a manual raw `Throwable` constructor protocol beyond raw field init + `Throw`.
+- Invent a manual raw `Throwable` constructor protocol or any post-bootstrap construction path.
 
 **Verification (delegated to Deep B)**:
 
@@ -685,20 +698,20 @@ Deep B’s verification report MUST include paths to all artifacts above.
 
 ---
 
-### W6 — Wave 4c: arrays / CHECKCAST / INSTANCEOF / NPE / divzero / NEW under Option 1
+### W6 — Wave 4c: arrays / CHECKCAST / INSTANCEOF / NPE / divzero / NEW under cached throws
 
-**Goal**: Flip SafetyChecker admission for arrays, type checks, `NEW*`, `ARRAYLENGTH`, and divide-by-zero ops. Emit paths already exist broadly; this wave opens them under strict no-JNI with Option 1 synthetic exceptions.
+**Goal**: Flip SafetyChecker admission for arrays, type checks, `NEW*`, `ARRAYLENGTH`, and divide-by-zero ops. Emit paths already exist broadly; this wave opens them under strict no-JNI with cached synthetic exceptions.
 
 **Synthetic exception matrix for W6**:
 
 | Opcode family | Synthetic exception | Cache slot |
 |---|---|---|
-| null receiver / null array (`GETFIELD`, `PUTFIELD`, `ARRAYLENGTH`, `AALOAD`, `AASTORE`, primitive `*ALOAD`, primitive `*ASTORE`) | `NullPointerException` | `klass_exc_npe` |
-| out-of-bounds array load/store | `ArrayIndexOutOfBoundsException` | `klass_exc_aioobe` |
-| `CHECKCAST` miss | `ClassCastException` | `klass_exc_cce` |
-| `IDIV`, `IREM`, `LDIV`, `LREM` by zero | `ArithmeticException` | `klass_exc_ae` |
-| `NEW`, `ANEWARRAY`, `NEWARRAY`, `MULTIANEWARRAY` allocation failure | `OutOfMemoryError` | `klass_exc_oom` |
-| negative `NEWARRAY` / `ANEWARRAY` / `MULTIANEWARRAY` dimension | `NegativeArraySizeException` | `klass_exc_nase` |
+| null receiver / null array (`GETFIELD`, `PUTFIELD`, `ARRAYLENGTH`, `AALOAD`, `AASTORE`, primitive `*ALOAD`, primitive `*ASTORE`) | `NullPointerException` | `g_neko_throw_npe` |
+| out-of-bounds array load/store | `ArrayIndexOutOfBoundsException` | `g_neko_throw_aioobe` |
+| `CHECKCAST` miss | `ClassCastException` | `g_neko_throw_cce` |
+| `IDIV`, `IREM`, `LDIV`, `LREM` by zero | `ArithmeticException` | `g_neko_throw_ae` |
+| `NEW`, `ANEWARRAY`, `NEWARRAY`, `MULTIANEWARRAY` allocation failure | `OutOfMemoryError` | `g_neko_throw_oom` |
+| negative `NEWARRAY` / `ANEWARRAY` / `MULTIANEWARRAY` dimension | `NegativeArraySizeException` | `g_neko_throw_nase` |
 
 **Deliverables**:
 
@@ -715,7 +728,7 @@ Deep B’s verification report MUST include paths to all artifacts above.
 **MUST DO**:
 
 - Keep `INSTANCEOF` non-throwing and return `0/1` per JVM semantics.
-- Use `_nosafepoint` alloc paths from W4 first, then Option 1 OOME when allocation fails.
+- Use `_nosafepoint` alloc paths from W4 first, then cached `g_neko_throw_oom` when allocation fails.
 - Keep array/type operations GC-safe and barrier-aware.
 
 **MUST NOT DO**:
@@ -741,20 +754,20 @@ Deep B’s verification report MUST include paths to all artifacts above.
 
 ---
 
-### W7 — Wave 4d: INVOKE-ref via JavaCalls or strict replacement + null-receiver Option 1
+### W7 — Wave 4d: INVOKE-ref via JavaCalls or strict replacement + cached null-receiver throw
 
-**Goal**: Admit `INVOKESTATIC` / `INVOKESPECIAL` / `INVOKEVIRTUAL` / `INVOKEINTERFACE` with reference args + reference return via the strict runtime path. Null receiver cases reopen through Option 1 synthetic NPE.
+**Goal**: Admit `INVOKESTATIC` / `INVOKESPECIAL` / `INVOKEVIRTUAL` / `INVOKEINTERFACE` with reference args + reference return via the strict runtime path. Null receiver cases reopen through cached synthetic NPE.
 
 **Exception class cache slots used in W7**:
 
-- `klass_exc_npe` — null receiver before virtual/interface/special instance dispatch
-- `klass_exc_le` — linkage failure if required call target metadata cannot be resolved under strict rules
+- `g_neko_throw_npe` — null receiver before virtual/interface/special instance dispatch
+- `g_neko_throw_le` — linkage failure if required call target metadata cannot be resolved under strict rules
 
 **Deliverables**:
 
 1. Remove SafetyChecker deferrals for reference args / reference return invocation where runtime support is ready.
 2. Preserve handle-scope discipline for reference args/return.
-3. Add null-receiver NPE via Option 1.
+3. Add null-receiver NPE via cached `g_neko_throw_npe`.
 4. Resolve JavaCalls or strict equivalent symbols without reopening forbidden JNI.
 5. Ensure reference-return path continues to use raw oop return ABI.
 
@@ -790,7 +803,7 @@ Deep B’s verification report MUST include paths to all artifacts above.
 **Strict-no-JNI audit note**:
 
 - No new synthetic exception classes are introduced here.
-- Any null receiver continues to use W7 `klass_exc_npe` path.
+- Any null receiver continues to use W7 `g_neko_throw_npe` path.
 
 **Deliverables**:
 
@@ -816,16 +829,16 @@ Deep B’s verification report MUST include paths to all artifacts above.
 
 ### W9 — Wave 5: Full SafetyChecker relaxation under strict no-JNI
 
-**Goal**: Sweep remaining SafetyChecker rejects, admit all reachable opcodes except those intentionally excluded (`JSR/RET`, `ACC_NATIVE`, `ACC_ABSTRACT`, no-body, `<clinit>`, `<init>`), and reopen remaining synthetic exception paths under Option 1 where required.
+**Goal**: Sweep remaining SafetyChecker rejects, admit all reachable opcodes except those intentionally excluded (`JSR/RET`, `ACC_NATIVE`, `ACC_ABSTRACT`, no-body, `<clinit>`, `<init>`), and reopen remaining synthetic exception paths through cached throwable dispatch where required.
 
 **Synthetic exception matrix added in W9**:
 
 | Opcode / subsystem | Synthetic exception | Cache slot |
 |---|---|---|
-| `MONITOREXIT` invalid owner / unmatched exit | `IllegalMonitorStateException` | `klass_exc_imse` |
-| `MONITORENTER` / `MONITOREXIT` strict runtime linkage failure | `LinkageError` | `klass_exc_le` |
-| `INVOKEDYNAMIC` bootstrap/link failure | `BootstrapMethodError` | `klass_exc_bme` |
-| remaining strict metadata/link failures where a more precise type is not yet approved | `LinkageError` | `klass_exc_le` |
+| `MONITOREXIT` invalid owner / unmatched exit | `IllegalMonitorStateException` | `g_neko_throw_imse` |
+| `MONITORENTER` / `MONITOREXIT` strict runtime linkage failure | `LinkageError` | `g_neko_throw_le` |
+| `INVOKEDYNAMIC` bootstrap/link failure | `BootstrapMethodError` | `g_neko_throw_bme` |
+| remaining strict metadata/link failures where a more precise type is not yet approved | `LinkageError` | `g_neko_throw_le` |
 
 **Deliverables**:
 
@@ -838,7 +851,7 @@ Deep B’s verification report MUST include paths to all artifacts above.
 **MUST DO**:
 
 - Every newly admitted opcode must pass the JDK-applicable GC matrix per GATE-11 (JDK 8: 9 runs, JDK 11: 15 runs, JDK 17/21: 18 runs).
-- Every new synthetic exception site must use a pre-cached `Klass*` slot from W0 and the Option 1 sequence from §6.0.2.
+- Every new synthetic exception site must use a cached global `jthrowable` from the Oracle 9 cache and the §6.0.2 sequence.
 
 **MUST NOT DO**:
 
@@ -1025,7 +1038,7 @@ tmp/
 - `verification/w0/jni-surface.txt`
 - `verification/w0/well-known-klass-capture.txt`
 - `verification/w0/global-ref-removal.txt`
-- `verification/w0/allocate-instance-symbols.txt`
+- `verification/w0/throwable-cache-symbols.txt`
 
 ---
 
@@ -1034,7 +1047,7 @@ tmp/
 - [ ] W0–W12 all landed with Deep A + Deep B sign-off.
 - [ ] Release `.so` contains zero `jvmti*` symbols.
 - [ ] Release `.so` contains zero trace strings.
-- [ ] Release `.so` passes GATE-13: exactly one `JNI_OnLoad` symbol, exactly one `(*vm)->GetEnv`, only `(*env)->Throw` beyond that, no other JNI references.
+- [ ] Release `.so` passes GATE-13A/13B: exactly one `JNI_OnLoad` symbol, exactly one `(*vm)->GetEnv`, bootstrap-cache-only construction helpers, and post-bootstrap cached `(*env)->Throw` only.
 - [ ] All 3 test jars: admission = 100% except `<clinit>` + `<init>`.
 - [ ] All 3 test jars: pre-obf vs post-obf GATE-6/7/8 empty-diff except permitted fixture exceptions.
 - [ ] All 3 test jars: GC matrix per GATE-11 × 2 build configs (release + NEKO_DEBUG); JDK 17/21 = 36 runs, JDK 11 = 30 runs, JDK 8 = 18 runs, all exit per GATE-5/8.
@@ -1058,7 +1071,8 @@ grep -rnE 'klass_exc_npe|klass_exc_aioobe|klass_exc_cce|klass_exc_ae|klass_exc_l
 grep -rnE 'NewGlobalRef|DeleteGlobalRef' neko-native/build/native-src/generated/
 grep -rnE 'GetStatic[A-Za-z]+Field|SetStatic[A-Za-z]+Field' neko-native/build/native-src/generated/
 grep -rn 'neko_mark_loader_loaded' neko-native/build/native-src/generated/
-grep -rnE 'allocate_instance|g_neko_allocate_instance_fn|JavaThread::current|g_neko_java_thread_current_fn' neko-native/src/main/java/dev/nekoobfuscator/native_/codegen/
+grep -rnE 'neko_init_throwable_cache|g_neko_throw_npe|g_neko_throw_loader_linkage' neko-native/src/main/java/dev/nekoobfuscator/native_/codegen/
+grep -rnE 'InstanceKlass17allocate_instance|dlsym_allocate_instance|g_neko_allocate_instance_fn' neko-native/src/main/java/dev/nekoobfuscator/native_/codegen/
 grep -rnE '\(\*env\)->|\(\*vm\)->' neko-native/build/native-src/generated/ | grep -v '\(\*vm\)->GetEnv'
 java -Dneko.native.debug=true -jar neko-test/build/test-native/TEST-native.jar 2>&1 | grep 'strict_vm_layout_ok=1'
 ```
@@ -1087,12 +1101,12 @@ unzip -p neko-test/build/test-native/TEST-native.jar "$LIBNAME" > /tmp/neko-gate
 nm --defined-only /tmp/neko-gate13.bin | grep -E '^.* [TtDdBb] .*JNI_OnLoad$'
 grep -oE '\(\*(vm|env)\)->[A-Za-z_][A-Za-z0-9_]*' <generated C source> | sort | uniq -c
 grep -cE '\(\*vm\)->|\(\*env\)->' <generated C source>
-grep -oE '\(\*(vm|env)\)->[A-Za-z_][A-Za-z0-9_]*' <generated C source> | grep -vE '^\(\*vm\)->GetEnv$|^\(\*env\)->Throw$'
+grep -oE '\(\*(vm|env)\)->[A-Za-z_][A-Za-z0-9_]*' <generated C source> | grep -vE '^\(\*vm\)->GetEnv$|^\(\*env\)->(FindClass|GetMethodID|NewStringUTF|NewObjectA|NewGlobalRef|DeleteLocalRef|Throw)$'
 ```
 
-Expected pass values by wave:
+Expected post-bootstrap `Throw` values by wave, with bootstrap-cache helper location checked separately by GATE-13A:
 
-- W0-W4: `GetEnv=1`, `Throw=0`
+- W0-W4: `GetEnv=1`, `Throw=0` unless Oracle 9 cache dispatch has already landed
 - W5: `GetEnv=1`, `Throw>=1`
 - W6-W8: `GetEnv=1`, `Throw>=5`
 - W9-W12: `GetEnv=1`, `Throw>=10`
@@ -1101,37 +1115,40 @@ Expected pass values by wave:
 
 ## Appendix C — Synthetic exception slot inventory by reopening wave
 
-**Bootstrap pre-cache in W0**:
+**Bootstrap throwable cache in W0**:
 
-- `klass_exc_npe` — `NullPointerException`
-- `klass_exc_aioobe` — `ArrayIndexOutOfBoundsException`
-- `klass_exc_cce` — `ClassCastException`
-- `klass_exc_ae` — `ArithmeticException`
-- `klass_exc_le` — `LinkageError`
-- `klass_exc_oom` — `OutOfMemoryError`
-- `klass_exc_imse` — `IllegalMonitorStateException`
-- `klass_exc_bme` — `BootstrapMethodError`
-- `klass_exc_nase` — `NegativeArraySizeException`
+- `g_neko_throw_npe` — `NullPointerException`
+- `g_neko_throw_aioobe` — `ArrayIndexOutOfBoundsException`
+- `g_neko_throw_cce` — `ClassCastException`
+- `g_neko_throw_ae` — `ArithmeticException`
+- `g_neko_throw_le` — `LinkageError`
+- `g_neko_throw_oom` — `OutOfMemoryError`
+- `g_neko_throw_imse` — `IllegalMonitorStateException`
+- `g_neko_throw_ase` — `ArrayStoreException`
+- `g_neko_throw_nase` — `NegativeArraySizeException`
+- `g_neko_throw_bme` — `BootstrapMethodError`
+- `g_neko_throw_loader_linkage` — loader-specific `LinkageError`
 
 **Wave reopen mapping**:
 
-- W5: `ATHROW(null)` → `klass_exc_npe`
+- W5: `ATHROW(null)` → `g_neko_throw_npe`
 - W6:
-  - null array / receiver → `klass_exc_npe`
-  - array bounds → `klass_exc_aioobe`
-  - cast miss → `klass_exc_cce`
-  - divide by zero → `klass_exc_ae`
-  - allocation failure → `klass_exc_oom`
-  - negative array size → `klass_exc_nase`
+  - null array / receiver → `g_neko_throw_npe`
+  - array bounds → `g_neko_throw_aioobe`
+  - cast miss → `g_neko_throw_cce`
+  - divide by zero → `g_neko_throw_ae`
+  - allocation failure → `g_neko_throw_oom`
+  - negative array size → `g_neko_throw_nase`
 - W7:
-  - null receiver → `klass_exc_npe`
-  - unresolved strict call target where fallback is impossible → `klass_exc_le`
+  - null receiver → `g_neko_throw_npe`
+  - unresolved strict call target where fallback is impossible → `g_neko_throw_le`
 - W8:
   - no new synthetic class; continue W7 null-receiver path
 - W9:
-  - illegal monitor state → `klass_exc_imse`
-  - bootstrap/link failure → `klass_exc_bme`
-  - remaining strict linkage failure → `klass_exc_le`
+  - illegal monitor state → `g_neko_throw_imse`
+  - array store mismatch → `g_neko_throw_ase`
+  - bootstrap/link failure → `g_neko_throw_bme`
+  - remaining strict linkage failure → `g_neko_throw_le`
 
 ---
 
