@@ -67,19 +67,20 @@ public final class NativeTranslationSafetyChecker {
                         }
                     }
                 }
-                case Opcodes.INVOKEDYNAMIC -> addReason(reasons, "INVOKEDYNAMIC deferred to M5f");
+                case Opcodes.INVOKEDYNAMIC -> addReason(reasons, "W9 deferred to W11-M5f: BootstrapMethod CallSite resolution under strict no-JNI requires JavaCalls dlsym chain; cached g_neko_throw_bme slot is reserved");
                 case Opcodes.NEW -> {
                 }
                 case Opcodes.NEWARRAY -> {
                 }
                 case Opcodes.ANEWARRAY,
-                     Opcodes.MULTIANEWARRAY -> addReason(reasons, opcodeName(opcode) + " deferred beyond Wave 2");
+                     Opcodes.MULTIANEWARRAY -> {
+                }
                 case Opcodes.GETFIELD -> {
                 }
                 case Opcodes.GETSTATIC -> {
                     if (insn instanceof FieldInsnNode fieldInsn) {
                         if (!isPrimitiveDescriptor(fieldInsn.desc)) {
-                            addReason(reasons, "reference GETSTATIC deferred pending oop static field support");
+                            addReason(reasons, "W9 deferred to W11-M5h: reference GETSTATIC requires GC load barrier coverage for ZGC/Shenandoah; G1/Serial/Parallel paths pending");
                         }
                     }
                 }
@@ -88,15 +89,13 @@ public final class NativeTranslationSafetyChecker {
                     if (opcode == Opcodes.PUTSTATIC) {
                         if (insn instanceof FieldInsnNode fieldInsn) {
                             if (!isPrimitiveDescriptor(fieldInsn.desc)) {
-                                addReason(reasons, "reference PUTSTATIC deferred to M5h (GC write barriers)");
+                                addReason(reasons, "W9 deferred to W11-M5h: reference PUTFIELD/PUTSTATIC requires SATB/incremental update write barriers; pending W11 hardening");
                             }
                         }
                         break;
                     }
                     if (insn instanceof FieldInsnNode fieldInsn && !isPrimitiveDescriptor(fieldInsn.desc)) {
-                        addReason(reasons, opcode == Opcodes.PUTFIELD
-                            ? "reference PUTFIELD deferred to M5h (GC write barriers)"
-                            : "reference PUTSTATIC deferred to M5h (GC write barriers)");
+                        addReason(reasons, "W9 deferred to W11-M5h: reference PUTFIELD/PUTSTATIC requires SATB/incremental update write barriers; pending W11 hardening");
                     }
                 }
                 case Opcodes.AALOAD,
@@ -118,7 +117,7 @@ public final class NativeTranslationSafetyChecker {
                      Opcodes.ARRAYLENGTH -> {
                 }
                 case Opcodes.MONITORENTER,
-                     Opcodes.MONITOREXIT -> addReason(reasons, opcodeName(opcode) + " deferred beyond Wave 2");
+                     Opcodes.MONITOREXIT -> addReason(reasons, opcodeName(opcode) + " W9 deferred to W11-M5f: ObjectMonitor raw access via VMStructs not yet implemented; cached g_neko_throw_imse + g_neko_throw_le slots are reserved for the eventual implementation");
                 case Opcodes.INSTANCEOF -> {
                 }
                 case Opcodes.CHECKCAST -> {
@@ -336,12 +335,12 @@ public final class NativeTranslationSafetyChecker {
             return null;
         }
         if (constant instanceof Type type) {
-            return type.getSort() == Type.METHOD
-                ? "LDC MethodType deferred to M4a (Wave 3)"
-                : ((type.getSort() == Type.OBJECT || type.getSort() == Type.ARRAY) ? null : "unsupported LDC Type sort: " + type.getSort());
+            return (type.getSort() == Type.METHOD || type.getSort() == Type.OBJECT || type.getSort() == Type.ARRAY)
+                ? null
+                : "unsupported LDC Type sort: " + type.getSort();
         }
         if (constant instanceof Handle) {
-            return "LDC MethodHandle deferred to M4a (Wave 3)";
+            return null;
         }
         return "unsupported LDC constant kind: " + constant.getClass().getSimpleName();
     }

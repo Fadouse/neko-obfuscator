@@ -101,6 +101,51 @@ public final class ManifestEmitter {
         return site.arrayElementExpression();
     }
 
+    public String reserveManifestMethodTypeLdcSite(String bindingKey, String bindingOwner, String descriptor) {
+        int methodId = registerManifestMethod(bindingKey);
+        generator.registerBindingOwner(bindingOwner);
+        List<ManifestLdcSiteRef> sites = ctx.manifestLdcSites().computeIfAbsent(bindingKey, ignored -> new ArrayList<>());
+        int siteIndex = sites.size();
+        ManifestLdcSiteRef site = new ManifestLdcSiteRef(
+            methodId,
+            siteIndex,
+            -1,
+            null,
+            LdcKind.METHOD_TYPE,
+            descriptor,
+            new Utf8BlobRef(methodId, siteIndex, descriptor.getBytes(StandardCharsets.UTF_8))
+        );
+        sites.add(site);
+        return site.arrayElementExpression();
+    }
+
+    public String reserveManifestMethodHandleLdcSite(
+        String bindingKey,
+        String bindingOwner,
+        int tag,
+        String owner,
+        String name,
+        String desc,
+        boolean isInterface
+    ) {
+        int methodId = registerManifestMethod(bindingKey);
+        generator.registerBindingOwner(bindingOwner);
+        List<ManifestLdcSiteRef> sites = ctx.manifestLdcSites().computeIfAbsent(bindingKey, ignored -> new ArrayList<>());
+        int siteIndex = sites.size();
+        String rawConstant = tag + "\n" + owner + "\n" + name + "\n" + desc + "\n" + (isInterface ? "1" : "0");
+        ManifestLdcSiteRef site = new ManifestLdcSiteRef(
+            methodId,
+            siteIndex,
+            -1,
+            null,
+            LdcKind.METHOD_HANDLE,
+            rawConstant,
+            new Utf8BlobRef(methodId, siteIndex, rawConstant.getBytes(StandardCharsets.UTF_8))
+        );
+        sites.add(site);
+        return site.arrayElementExpression();
+    }
+
     public String renderManifestSupport(List<NativeMethodBinding> bindings, SignaturePlan signaturePlan) {
         StringBuilder sb = new StringBuilder();
         int stringInternSlotCount = uniqueStringLiteralCount();
