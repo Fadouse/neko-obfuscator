@@ -1,0 +1,8 @@
+Exception in thread "main" java.awt.HeadlessException
+	at java.desktop/java.awt.GraphicsEnvironment.checkHeadless(GraphicsEnvironment.java:164)
+	at java.desktop/java.awt.Window.<init>(Window.java:553)
+	at java.desktop/java.awt.Frame.<init>(Frame.java:428)
+	at java.desktop/java.awt.Frame.<init>(Frame.java:393)
+	at java.desktop/javax.swing.JFrame.<init>(JFrame.java:180)
+	at Window.<init>(Window.java:13)
+	at Main.main(Main.java:8)
