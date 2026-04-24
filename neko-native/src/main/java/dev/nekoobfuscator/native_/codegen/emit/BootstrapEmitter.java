@@ -575,6 +575,7 @@ static void neko_configure_wave4a_layout(void) {
         sb.append("""
 
 static void neko_derive_method_flags_status_offset(void) {
+    g_neko_vm_layout.off_method_flags = -1;
     g_neko_vm_layout.off_method_flags_status = -1;
     g_neko_vm_layout.method_flags_status_strategy = 'D';
     if (g_neko_vm_layout.off_method_flags_direct > 0) {
@@ -590,6 +591,7 @@ static void neko_derive_method_flags_status_offset(void) {
     if (g_neko_vm_layout.java_spec_version >= 21 && g_neko_vm_layout.off_method_flags_status < 0) {
         neko_error_log("failed to derive MethodFlags::_status offset for jdk%d, refusing native patch path", g_neko_vm_layout.java_spec_version);
     }
+    g_neko_vm_layout.off_method_flags = g_neko_vm_layout.off_method_flags_status;
     NEKO_TRACE(1, "[nk] mf off=%u s=%c", g_neko_vm_layout.off_method_flags_status >= 0 ? (uint32_t)g_neko_vm_layout.off_method_flags_status : 0u, g_neko_vm_layout.method_flags_status_strategy);
 }
 
@@ -603,6 +605,7 @@ static void neko_reset_vm_layout(void) {
     g_neko_vm_layout.off_method_from_compiled_entry = -1;
     g_neko_vm_layout.off_method_vtable_index = -1;
     g_neko_vm_layout.off_method_intrinsic_id = -1;
+    g_neko_vm_layout.off_method_flags = -1;
     g_neko_vm_layout.off_method_flags_direct = -1;
     g_neko_vm_layout.off_method_flags_status = -1;
     g_neko_vm_layout.off_const_method_constants = -1;
@@ -954,6 +957,18 @@ static void neko_capture_vm_constant(const char *name, int64_t value) {
     }
     if (neko_streq(name, "MethodFlags::_misc_dont_inline") || neko_contains(name, "dont_inline")) {
         g_neko_vm_layout.method_flag_dont_inline = (uint32_t)value;
+        return;
+    }
+    if (neko_streq(name, "MethodFlags::_misc_is_old") || neko_contains(name, "is_old")) {
+        g_neko_vm_layout.method_flag_is_old = (uint32_t)value;
+        return;
+    }
+    if (neko_streq(name, "MethodFlags::_misc_is_obsolete") || neko_contains(name, "is_obsolete")) {
+        g_neko_vm_layout.method_flag_is_obsolete = (uint32_t)value;
+        return;
+    }
+    if (neko_streq(name, "MethodFlags::_misc_is_deleted") || neko_contains(name, "is_deleted")) {
+        g_neko_vm_layout.method_flag_is_deleted = (uint32_t)value;
         return;
     }
     if (neko_streq(name, "_thread_in_Java") || neko_ends_with(name, "::_thread_in_Java")) {
@@ -1399,9 +1414,88 @@ static jboolean neko_cldg_contains_klass(Klass *target_klass) {
 }
 
 static uint32_t g_neko_class_unload_observed_count = 0u;
+static uint32_t g_neko_redefine_detected_count = 0u;
 static uint32_t g_neko_cld_liveness_rescan_counter = 0u;
 static void* g_neko_seen_clds[4096];
 static uint32_t g_neko_seen_cld_count = 0u;
+
+static jboolean neko_method_is_redefined_stale(void *method_star) {
+    uint32_t flags;
+    uint32_t stale_mask;
+    if (method_star == NULL) return JNI_FALSE;
+    if (g_neko_vm_layout.java_spec_version >= 21) {
+        if (g_neko_vm_layout.off_method_flags < 0) return JNI_FALSE;
+        /* JDK 21+ MethodFlags::_status bits from hotspot/share/oops/methodFlags.hpp:
+         * is_old=1<<2, is_obsolete=1<<3, is_deleted=1<<4. VMStructs constants are used when exposed. */
+        stale_mask = (g_neko_vm_layout.method_flag_is_old != 0u ? g_neko_vm_layout.method_flag_is_old : (1u << 2))
+            | (g_neko_vm_layout.method_flag_is_obsolete != 0u ? g_neko_vm_layout.method_flag_is_obsolete : (1u << 3))
+            | (g_neko_vm_layout.method_flag_is_deleted != 0u ? g_neko_vm_layout.method_flag_is_deleted : (1u << 4));
+        flags = __atomic_load_n((uint32_t*)((uint8_t*)method_star + g_neko_vm_layout.off_method_flags), __ATOMIC_ACQUIRE);
+        return (flags & stale_mask) != 0u ? JNI_TRUE : JNI_FALSE;
+    }
+    if (g_neko_vm_layout.off_method_access_flags < 0) return JNI_FALSE;
+    /* JDK 8-20 AccessFlags bits from hotspot/share/utilities/accessFlags.hpp:
+     * JVM_ACC_IS_OLD=0x00010000, JVM_ACC_IS_OBSOLETE=0x00020000, JVM_ACC_IS_DELETED=0x00008000. */
+    stale_mask = 0x00010000u | 0x00020000u | 0x00008000u;
+    flags = __atomic_load_n((uint32_t*)((uint8_t*)method_star + g_neko_vm_layout.off_method_access_flags), __ATOMIC_ACQUIRE);
+    return (flags & stale_mask) != 0u ? JNI_TRUE : JNI_FALSE;
+}
+
+static void neko_clear_invoke_sites_for_redefined_method(const NekoManifestMethod *entry) {
+    if (entry == NULL) return;
+    for (uint32_t invoke_index = 0; invoke_index < g_neko_manifest_invoke_site_count; invoke_index++) {
+        NekoManifestInvokeSite *site = g_neko_manifest_invoke_sites[invoke_index];
+        if (site == NULL || site->owner_internal == NULL || site->method_name == NULL || site->method_desc == NULL) continue;
+        if (entry->owner_internal == NULL || entry->method_name == NULL || entry->method_desc == NULL) continue;
+        if (strcmp(site->owner_internal, entry->owner_internal) != 0) continue;
+        if (strcmp(site->method_name, entry->method_name) != 0) continue;
+        if (strcmp(site->method_desc, entry->method_desc) != 0) continue;
+        __atomic_store_n(&site->resolved_method, NULL, __ATOMIC_RELEASE);
+    }
+}
+
+static void neko_note_redefine_detected(const NekoManifestMethod *entry) {
+    uint32_t count = __atomic_add_fetch(&g_neko_redefine_detected_count, 1u, __ATOMIC_ACQ_REL);
+    NEKO_TRACE(0, "[nk] neko_redefine_detected=%u %s.%s%s", count,
+        entry != NULL && entry->owner_internal != NULL ? entry->owner_internal : "<null>",
+        entry != NULL && entry->method_name != NULL ? entry->method_name : "<null>",
+        entry != NULL && entry->method_desc != NULL ? entry->method_desc : "<null>");
+}
+
+static void neko_invalidate_manifest_method_index(uint32_t index, jboolean redefine) {
+    NekoManifestMethod *entry;
+    uint8_t previous_state;
+    if (index >= g_neko_manifest_method_count) return;
+    entry = (NekoManifestMethod*)&g_neko_manifest_methods[index];
+    previous_state = __atomic_exchange_n(&g_neko_manifest_patch_states[index], NEKO_PATCH_STATE_FAILED, __ATOMIC_ACQ_REL);
+    __atomic_store_n(&g_neko_manifest_method_stars[index], NULL, __ATOMIC_RELEASE);
+    neko_clear_invoke_sites_for_redefined_method(entry);
+    if (redefine && previous_state == NEKO_PATCH_STATE_APPLIED) {
+        neko_note_redefine_detected(entry);
+    }
+}
+
+static jboolean neko_manifest_method_active(uint32_t index) {
+    void *method_star;
+    if (index >= g_neko_manifest_method_count) return JNI_FALSE;
+    if (__atomic_load_n(&g_neko_manifest_patch_states[index], __ATOMIC_ACQUIRE) != NEKO_PATCH_STATE_APPLIED) return JNI_FALSE;
+    method_star = __atomic_load_n(&g_neko_manifest_method_stars[index], __ATOMIC_ACQUIRE);
+    if (method_star == NULL) return JNI_FALSE;
+    if (neko_method_is_redefined_stale(method_star)) {
+        neko_invalidate_manifest_method_index(index, JNI_TRUE);
+        return JNI_FALSE;
+    }
+    return JNI_TRUE;
+}
+
+static void neko_invalidate_redefined_manifest_methods(void) {
+    for (uint32_t i = 0; i < g_neko_manifest_method_count; i++) {
+        void *method_star = __atomic_load_n(&g_neko_manifest_method_stars[i], __ATOMIC_ACQUIRE);
+        if (method_star == NULL) continue;
+        if (!neko_method_is_redefined_stale(method_star)) continue;
+        neko_invalidate_manifest_method_index(i, JNI_TRUE);
+    }
+}
 
 static void neko_note_class_unload_observed(const NekoManifestMethod *entry) {
     uint32_t count = __atomic_add_fetch(&g_neko_class_unload_observed_count, 1u, __ATOMIC_ACQ_REL);
@@ -1509,6 +1603,7 @@ static void neko_maybe_rescan_cld_liveness(void) {
     if ((tick & 1023u) != 0u) return;
     neko_manifest_lock_enter();
     neko_invalidate_dead_cld_entries();
+    neko_invalidate_redefined_manifest_methods();
     neko_manifest_lock_exit();
 }
 
@@ -2300,6 +2395,15 @@ static jboolean neko_init_throwable_cache(JNIEnv *env) {
 static jint neko_throw_cached(JNIEnv *env, jthrowable cached) {
     if (env == NULL || cached == NULL) return JNI_ERR;
     return (*env)->Throw(env, cached);
+}
+
+static void neko_raise_cached_pending(void *thread, jthrowable cached) {
+    uintptr_t cell;
+    void *oop;
+    if (thread == NULL || cached == NULL) return;
+    cell = ((uintptr_t)cached) & ~(uintptr_t)(sizeof(void*) - 1u);
+    oop = neko_load_oop_from_cell((const void*)cell);
+    if (oop != NULL) neko_set_pending_exception(thread, oop);
 }
 
 static inline jthrowable neko_cached_throwable_for_kind(uint32_t kind) {

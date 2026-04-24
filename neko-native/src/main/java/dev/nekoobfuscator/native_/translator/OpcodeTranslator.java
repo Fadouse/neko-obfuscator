@@ -408,6 +408,7 @@ public final class OpcodeTranslator {
     }
 
     private void appendDirectStubCall(StringBuilder sb, NativeMethodBinding binding, Type[] args, Type ret, String receiverExpr, String resultName) {
+        sb.append("if (!neko_manifest_method_active(").append(binding.manifestIndex()).append("u)) { neko_raise_cached_pending(thread, g_neko_throw_loader_linkage); goto __neko_exception_exit; } ");
         if (ret.getSort() != Type.VOID) {
             sb.append(jniTypeName(ret)).append(' ').append(resultName).append(" = ");
         }
@@ -533,6 +534,7 @@ public final class OpcodeTranslator {
             .append(", \"")
             .append(cStringLiteral(mi.desc))
             .append("\"); ");
+        sb.append("if (!neko_manifest_method_active(").append(binding.manifestIndex()).append("u)) { neko_raise_cached_pending(thread, g_neko_throw_loader_linkage); goto __neko_exception_exit; } ");
         if (ret.getSort() == Type.VOID) {
             sb.append(binding.cFunctionName()).append('(');
             appendDirectInvokeCallArgs(sb, args, receiverExpr);

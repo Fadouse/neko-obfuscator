@@ -193,10 +193,15 @@ __attribute__((visibility("default"))) void* neko_resolve_invoke_site(NekoManife
     void *resolved;
     if (site == NULL) return NULL;
     resolved = __atomic_load_n(&site->resolved_method, __ATOMIC_ACQUIRE);
-    if (resolved != NULL) return resolved;
+    if (resolved != NULL) {
+        if (!neko_method_is_redefined_stale(resolved)) return resolved;
+        __atomic_store_n(&site->resolved_method, NULL, __ATOMIC_RELEASE);
+        resolved = NULL;
+    }
     for (uint32_t i = 0; i < g_neko_manifest_method_count; i++) {
         const NekoManifestMethod *method = &g_neko_manifest_methods[i];
         void *method_star;
+        if (!neko_manifest_method_active(i)) continue;
         if (method->owner_internal == NULL || site->owner_internal == NULL) continue;
         if (strcmp(method->owner_internal, site->owner_internal) != 0) continue;
         if (strcmp(method->method_name, site->method_name) != 0) continue;
@@ -296,6 +301,8 @@ static void neko_log_wave3_ready(void) {
         StringBuilder sb = new StringBuilder();
         sb.append("static jvalue ").append(icacheDirectStubSymbol(stub)).append("(JNIEnv *env, jobject receiver, const jvalue *args) {\n");
         sb.append("    jvalue result = {0};\n");
+        sb.append("    void *thread = neko_get_current_thread();\n");
+        sb.append("    if (!neko_manifest_method_active(").append(stub.binding().manifestIndex()).append("u)) { neko_raise_cached_pending(thread, g_neko_throw_loader_linkage); return result; }\n");
         if (stub.returnType().getSort() != Type.VOID) {
             sb.append("    result").append(jvalueAccessor(stub.returnType())).append(" = ");
         } else {
