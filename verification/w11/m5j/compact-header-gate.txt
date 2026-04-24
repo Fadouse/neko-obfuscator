@@ -1,0 +1,26 @@
+# W11-M5j Compact Object Headers Defensive Gate
+# Branch: dev-impl-nojni
+# Target JDK range: 8-21 PRIMARY; 24+ defensive
+
+== DETECTION PATH ==
+parse_vm_layout: attempts to read Universe::_compact_object_headers_enabled via VMStructs
+  - JDK 8-22: field absent, default to 0 (off)
+  - JDK 24+: read the runtime flag
+
+== JNI_OnLoad GATE ==
+if g_neko_vm_layout.compact_object_headers == 1:
+  emit "[nk] compact_object_headers=on; not supported by NekoObfuscator"
+  return JNI_EVERSION
+
+if g_neko_vm_layout.compact_object_headers == 0:
+  proceed (this is the JDK 8-21 path)
+
+== HOST VERIFICATION ==
+JDK 21.0.10: trace shows compact_object_headers=0, bootstrap proceeds
+  - TEST.stderr:      [nk] compact_object_headers=0 ... [nk] dp 1/14
+  - obfusjack.stderr: [nk] compact_object_headers=0 ... [nk] dp 6/17
+  - SnakeGame.stderr: [nk] compact_object_headers=0 ... [nk] dp 2/12
+JDK 22.0.x:  no compact-header host flag available here; expected same absent-field path as JDK 21
+
+== JDK 24+ COVERAGE ==
+DEFERRED to W12 final smoke or post-W12 follow-up. Defensive gate is in place.

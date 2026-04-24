@@ -1,0 +1,6 @@
+TEST: compact_object_headers=0, dp 1/14 -> PASS
+obfusjack: compact_object_headers=0, dp 6/17 -> PASS
+SnakeGame: compact_object_headers=0, dp 2/12 -> PASS
+
+Host: JDK 21 debug native build.
+Runtime result: all three jars reached JNI_OnLoad, emitted the compact-header trace, and kept the expected W11 fail-closed LinkageError baseline.

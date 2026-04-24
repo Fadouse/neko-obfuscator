@@ -1,0 +1,4 @@
+[nk] lj 24/24[nk] compact_object_headers=0[nk] vm j=21[nk] cap enter[nk] cap ok str=0x7f957f00e878 arr_b=0x7f957f002318 arr_c=0x7f957f001d30[nk] ol mark_loader_loaded ok str=0x7f957f00e878[nk] ol resolve_string_intern_layout ok hash_off=12[nk] ol prewarm ok backend=1[nk] dm 6/17[nk] dp 6/17Exception in thread "main" java.lang.LinkageError: please check your native library load correctly
+	at org.example.Main$2.get(Main.java)
+	at org.example.Main$2.get(Main.java:267)
+	at org.example.Main.main(Main.java:268)
