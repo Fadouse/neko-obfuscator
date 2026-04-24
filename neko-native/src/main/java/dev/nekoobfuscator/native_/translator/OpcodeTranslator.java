@@ -334,20 +334,56 @@ public final class OpcodeTranslator {
         sb.append(nullReceiverCheck("__recv"));
         sb.append("jmethodID mid = ").append(cachedMethodExpression(mi.owner, mi.name, mi.desc, false)).append("; ");
         sb.append("if (mid == NULL) goto __neko_exception_exit; ");
+        if (canInlineVtableDispatch(mi, directCandidate)) {
+            sb.append("NekoManifestInvokeSite *__vsite = ").append(manifestInvokeSiteExpression(mi)).append("; ");
+            sb.append("void *__vmethod = neko_resolve_invoke_site(__vsite); ");
+            sb.append("if (__vmethod != NULL && neko_vtable_inline_supported(__recv, __vmethod, JNI_FALSE)) { ");
+            appendDirectStubCall(sb, directCandidate, args, ret, "__recv", "__vt_result");
+            if (ret.getSort() != Type.VOID) {
+                sb.append(pushForType(ret, "__vt_result"));
+            }
+            sb.append(" } else ");
+        }
         if (ret.getSort() == Type.VOID) {
-            sb.append("neko_icache_dispatch(env, &").append(cacheSite).append(", &")
+            sb.append("{ neko_icache_dispatch(env, &").append(cacheSite).append(", &")
                 .append(metaSite).append(", __recv, mid, __args); ");
         } else {
-            sb.append("jvalue __ic_result = neko_icache_dispatch(env, &").append(cacheSite).append(", &")
+            sb.append("{ jvalue __ic_result = neko_icache_dispatch(env, &").append(cacheSite).append(", &")
                 .append(metaSite).append(", __recv, mid, __args); ");
             sb.append("if (neko_pending_exception(thread) != NULL) goto __neko_exception_exit; ");
             sb.append(pushForType(ret, "__ic_result" + jvalueAccessor(ret))).append(' ');
         }
+        sb.append("} ");
         if (ret.getSort() == Type.VOID) {
             sb.append("if (neko_pending_exception(thread) != NULL) goto __neko_exception_exit; ");
         }
         sb.append("}");
         return sb.toString();
+    }
+
+    private boolean canInlineVtableDispatch(MethodInsnNode mi, NativeMethodBinding directCandidate) {
+        return mi.getOpcode() == Opcodes.INVOKEVIRTUAL && directCandidate != null && directCandidate.directCallSafe();
+    }
+
+    private String manifestInvokeSiteExpression(MethodInsnNode mi) {
+        return codeGenerator.reserveManifestInvokeSite(
+            currentMethodKey,
+            currentOwnerInternalName,
+            mi.owner,
+            mi.name,
+            mi.desc,
+            mi.getOpcode()
+        );
+    }
+
+    private void appendDirectStubCall(StringBuilder sb, NativeMethodBinding binding, Type[] args, Type ret, String receiverExpr, String resultName) {
+        if (ret.getSort() != Type.VOID) {
+            sb.append(jniTypeName(ret)).append(' ').append(resultName).append(" = ");
+        }
+        sb.append(binding.cFunctionName()).append('(');
+        appendDirectInvokeCallArgs(sb, args, receiverExpr);
+        sb.append("); ");
+        sb.append("if (neko_pending_exception(thread) != NULL) goto __neko_exception_exit; ");
     }
 
     private List<NativeMethodBinding> directInvokeCacheCandidates(MethodInsnNode mi) {
@@ -438,7 +474,6 @@ public final class OpcodeTranslator {
             sb.append(jniTypeName(args[i])).append(" arg").append(i).append(" = ").append(popForType(args[i])).append("; ");
         }
         String receiverExpr = null;
-        String guardExpr = null;
         if (isStatic) {
             codeGenerator.registerOwnerClassReference(currentOwnerInternalName, mi.owner);
         } else {
@@ -454,16 +489,10 @@ public final class OpcodeTranslator {
             .append(cStringLiteral(mi.desc))
             .append("\"); ");
         if (ret.getSort() == Type.VOID) {
-            if (guardExpr != null) {
-                sb.append("if (").append(guardExpr).append(") ");
-            }
             sb.append(binding.cFunctionName()).append('(');
             appendDirectInvokeCallArgs(sb, args, receiverExpr);
         } else {
             sb.append(jniTypeName(ret)).append(" result = (").append(jniTypeName(ret)).append(")0; ");
-            if (guardExpr != null) {
-                sb.append("if (").append(guardExpr).append(") ");
-            }
             sb.append("result = ").append(binding.cFunctionName()).append('(');
             appendDirectInvokeCallArgs(sb, args, receiverExpr);
         }

@@ -510,6 +510,7 @@ public final class CCodeGenerator {
             static void neko_bootstrap_owner_discovery(void);
             static inline oop neko_resolve_mirror_oop_from_klass(const NekoVmLayout *layout, Klass *klass);
             static void* neko_find_boot_class_loader_data(void);
+            static inline void* neko_method_holder_klass(void *method_star);
             static ptrdiff_t neko_wave2_object_field_offset_by_name(JNIEnv *env, const char *owner_internal, const char *field_name);
             static void neko_derive_wave2_layout_offsets(JNIEnv *env);
             static inline void* neko_load_heap_oop_at(void *base, ptrdiff_t offset, jboolean is_volatile);
