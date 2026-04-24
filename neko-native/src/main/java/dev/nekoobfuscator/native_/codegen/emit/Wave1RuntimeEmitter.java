@@ -882,6 +882,21 @@ static jboolean neko_vtable_inline_supported(jobject receiver, void *resolved_me
     return JNI_TRUE;
 }
 
+static jboolean neko_itable_inline_supported(jobject receiver, jclass translated_class, void *resolved_method, void *interface_klass) {
+    void *receiver_klass;
+    void *translated_klass;
+    void *inline_method;
+    if (receiver == NULL || translated_class == NULL || resolved_method == NULL) return JNI_FALSE;
+    receiver_klass = neko_receiver_klass(receiver);
+    if (receiver_klass == NULL) return JNI_FALSE;
+    translated_klass = neko_class_klass_pointer(translated_class);
+    if (translated_klass == NULL || translated_klass != receiver_klass) return JNI_FALSE;
+    inline_method = neko_itable_offset_for(receiver_klass, interface_klass, resolved_method);
+    if (inline_method != resolved_method) return JNI_FALSE;
+    NEKO_TRACE(1, "[nk] neko_vtable_inline=%p itable_method=%p", receiver_klass, resolved_method);
+    return JNI_TRUE;
+}
+
 typedef jvalue (*neko_icache_direct_stub)(JNIEnv *env, jobject receiver, const jvalue *args);
 
 typedef struct {

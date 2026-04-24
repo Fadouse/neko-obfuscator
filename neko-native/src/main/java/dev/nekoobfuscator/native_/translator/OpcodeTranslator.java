@@ -309,7 +309,7 @@ public final class OpcodeTranslator {
         int siteIndex = invokeSiteIndex++;
         String cacheSite = codeGenerator.reserveInvokeCacheSite(currentOwnerInternalName, currentMethodKey, siteIndex);
         List<NativeMethodBinding> directCandidates = directInvokeCacheCandidates(mi);
-        NativeMethodBinding directCandidate = directCandidates.isEmpty() ? null : directCandidates.get(0);
+        NativeMethodBinding directCandidate = directCandidates.size() == 1 ? directCandidates.get(0) : null;
         String directStub = directCandidate == null
             ? "NULL"
             : codeGenerator.reserveInvokeCacheDirectStub(currentOwnerInternalName, currentMethodKey, siteIndex, directCandidate, args, ret);
@@ -343,6 +343,19 @@ public final class OpcodeTranslator {
                 sb.append(pushForType(ret, "__vt_result"));
             }
             sb.append(" } else ");
+        } else if (canInlineItableDispatch(mi, directCandidate)) {
+            String translatedClass = directCandidate.ownerInternalName();
+            sb.append("NekoManifestInvokeSite *__isite = ").append(manifestInvokeSiteExpression(mi)).append("; ");
+            sb.append("void *__imethod = neko_resolve_invoke_site(__isite); ");
+            sb.append("jclass __icls = ").append(cachedClassExpression(translatedClass)).append("; ");
+            sb.append("jclass __ifcls = ").append(cachedClassExpression(mi.owner)).append("; ");
+            sb.append("void *__iklass = __ifcls == NULL ? NULL : neko_class_klass_pointer(__ifcls); ");
+            sb.append("if (__imethod != NULL && neko_itable_inline_supported(__recv, __icls, __imethod, __iklass)) { ");
+            appendDirectStubCall(sb, directCandidate, args, ret, "__recv", "__it_result");
+            if (ret.getSort() != Type.VOID) {
+                sb.append(pushForType(ret, "__it_result"));
+            }
+            sb.append(" } else ");
         }
         if (ret.getSort() == Type.VOID) {
             sb.append("{ neko_icache_dispatch(env, &").append(cacheSite).append(", &")
@@ -363,6 +376,13 @@ public final class OpcodeTranslator {
 
     private boolean canInlineVtableDispatch(MethodInsnNode mi, NativeMethodBinding directCandidate) {
         return mi.getOpcode() == Opcodes.INVOKEVIRTUAL && directCandidate != null && directCandidate.directCallSafe();
+    }
+
+    private boolean canInlineItableDispatch(MethodInsnNode mi, NativeMethodBinding directCandidate) {
+        return mi.getOpcode() == Opcodes.INVOKEINTERFACE
+            && directCandidate != null
+            && directCandidate.directCallSafe()
+            && directCandidate.implementedInterfaces().contains(mi.owner);
     }
 
     private String manifestInvokeSiteExpression(MethodInsnNode mi) {
@@ -391,6 +411,20 @@ public final class OpcodeTranslator {
         NativeMethodBinding binding = translatedBindings.get(bindingKey(mi.owner, mi.name, mi.desc));
         if (binding != null && !binding.isStatic() && binding.directCallSafe()) {
             candidates.add(binding);
+        }
+        if (mi.getOpcode() == Opcodes.INVOKEINTERFACE) {
+            for (NativeMethodBinding candidate : translatedBindings.values()) {
+                if (candidate.isStatic()
+                    || !candidate.directCallSafe()
+                    || !candidate.methodName().equals(mi.name)
+                    || !candidate.descriptor().equals(mi.desc)
+                    || !candidate.implementedInterfaces().contains(mi.owner)) {
+                    continue;
+                }
+                if (!candidates.contains(candidate)) {
+                    candidates.add(candidate);
+                }
+            }
         }
         return candidates;
     }

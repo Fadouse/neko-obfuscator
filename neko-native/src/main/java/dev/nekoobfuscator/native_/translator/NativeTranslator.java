@@ -28,8 +28,10 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 public final class NativeTranslator {
     private static final String METHOD_HANDLE_DESC = "Ljava/lang/invoke/MethodHandle;";
@@ -62,7 +64,8 @@ public final class NativeTranslator {
                 null,
                 null,
                 selection.method().isStatic(),
-                isDirectCallSafe(selection.owner(), selection.method())
+                isDirectCallSafe(selection.owner(), selection.method()),
+                implementsInterfaces(selection.owner(), ownersByName)
             );
             bindings.add(binding);
             bindingMap.put(bindingKey(binding.ownerInternalName(), binding.methodName(), binding.descriptor()), binding);
@@ -491,6 +494,24 @@ public final class NativeTranslator {
             || (owner.access() & Opcodes.ACC_FINAL) != 0;
     }
 
+    private Set<String> implementsInterfaces(L1Class owner, Map<String, L1Class> ownersByName) {
+        Set<String> interfaces = new HashSet<>();
+        collectInterfaces(owner, ownersByName, interfaces, new HashSet<>());
+        return Set.copyOf(interfaces);
+    }
+
+    private void collectInterfaces(L1Class owner, Map<String, L1Class> ownersByName, Set<String> interfaces, Set<String> visitedClasses) {
+        if (owner == null || !visitedClasses.add(owner.name())) {
+            return;
+        }
+        for (String interfaceName : owner.interfaces()) {
+            interfaces.add(interfaceName);
+            collectInterfaces(ownersByName.get(interfaceName), ownersByName, interfaces, visitedClasses);
+        }
+        L1Class parent = owner.superName() == null ? null : ownersByName.get(owner.superName());
+        collectInterfaces(parent, ownersByName, interfaces, visitedClasses);
+    }
+
     private String c(String s) {
         return s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t");
     }
@@ -515,7 +536,8 @@ public final class NativeTranslator {
         String helperMethodName,
         String helperDescriptor,
         boolean isStatic,
-        boolean directCallSafe
+        boolean directCallSafe,
+        Set<String> implementedInterfaces
     ) {
         public NativeMethodBinding(
             String ownerInternalName,
@@ -527,7 +549,7 @@ public final class NativeTranslator {
             boolean isStatic,
             boolean directCallSafe
         ) {
-            this(ownerInternalName, methodName, descriptor, -1, cFunctionName, helperMethodName, helperDescriptor, isStatic, directCallSafe);
+            this(ownerInternalName, methodName, descriptor, -1, cFunctionName, helperMethodName, helperDescriptor, isStatic, directCallSafe, Set.of());
         }
     }
 
