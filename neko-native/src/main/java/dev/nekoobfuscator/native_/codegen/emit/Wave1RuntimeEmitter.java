@@ -819,6 +819,14 @@ NEKO_FAST_INLINE jint neko_fast_array_length(JNIEnv *env, jarray arr) {
     return (jint)neko_get_array_length(env, arr);
 }
 
+NEKO_FAST_INLINE jint neko_raw_array_length(void *array_oop) {
+    jint base_offset;
+    if (array_oop == NULL || !g_hotspot.initialized) return 0;
+    base_offset = g_hotspot.primitive_array_base_offsets[NEKO_PRIM_I];
+    if (base_offset < (jint)sizeof(jint)) return 0;
+    return *(jint*)((char*)array_oop + base_offset - (jint)sizeof(jint));
+}
+
 NEKO_FAST_INLINE jboolean neko_receiver_key_supported(void) {
     return g_hotspot.initialized
         && g_hotspot.use_compact_object_headers == JNI_FALSE

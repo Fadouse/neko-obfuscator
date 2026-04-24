@@ -116,7 +116,7 @@ public final class OpcodeTranslator {
             case Opcodes.LASTORE -> stmts.add(raw(primitiveArrayStore("jlong", "POP_L()", "jlongArray", "neko_fast_lastore(env, __a, __idx, __value); /* fallback: neko_set_long_array_region */")));
             case Opcodes.FASTORE -> stmts.add(raw(primitiveArrayStore("jfloat", "POP_F()", "jfloatArray", "neko_fast_fastore(env, __a, __idx, __value); /* fallback: neko_set_float_array_region */")));
             case Opcodes.DASTORE -> stmts.add(raw(primitiveArrayStore("jdouble", "POP_D()", "jdoubleArray", "neko_fast_dastore(env, __a, __idx, __value); /* fallback: neko_set_double_array_region */")));
-            case Opcodes.AASTORE -> stmts.add(raw("{ jobject __value = POP_O(); jint __idx = POP_I(); jobjectArray __a = (jobjectArray)POP_O(); " + arrayBoundsCheck("__a", "__idx") + " if (__value != NULL) { jclass __array_class = neko_get_object_class(env, __a); jmethodID __component_mid = " + cachedMethodExpression("java/lang/Class", "getComponentType", "()Ljava/lang/Class;", false) + "; if (__array_class == NULL || __component_mid == NULL) goto __neko_exception_exit; jclass __component = (jclass)neko_call_object_method_a(env, __array_class, __component_mid, NULL); if (neko_pending_exception(thread) != NULL) goto __neko_exception_exit; if (__component != NULL && !neko_is_instance_of(env, __value, __component)) { (void)neko_throw_cached(env, g_neko_throw_ase); goto __neko_exception_exit; } } neko_set_object_array_element(env, __a, __idx, __value); if (neko_pending_exception(thread) != NULL) goto __neko_exception_exit; }"));
+            case Opcodes.AASTORE -> stmts.add(raw("{ jobject __value = POP_O(); jint __idx = POP_I(); jobjectArray __a = (jobjectArray)POP_O(); " + arrayBoundsCheck("__a", "__idx") + " if (__value != NULL) { jclass __array_class = neko_get_object_class(env, __a); jmethodID __component_mid = " + cachedMethodExpression("java/lang/Class", "getComponentType", "()Ljava/lang/Class;", false) + "; if (__array_class == NULL || __component_mid == NULL) goto __neko_exception_exit; jclass __component = (jclass)neko_call_object_method_a(env, __array_class, __component_mid, NULL); if (neko_pending_exception(thread) != NULL) goto __neko_exception_exit; if (__component != NULL && !neko_is_instance_of(env, __value, __component)) { neko_raise_cached_pending(thread, g_neko_throw_ase); goto __neko_exception_exit; } } neko_set_object_array_element(env, __a, __idx, __value); if (neko_pending_exception(thread) != NULL) goto __neko_exception_exit; }"));
             case Opcodes.BASTORE -> stmts.add(raw(primitiveArrayStore("jint", "POP_I()", "jbyteArray", "neko_fast_bastore(env, __a, __idx, (jbyte)__value); /* fallback: neko_set_byte_array_region */")));
             case Opcodes.CASTORE -> stmts.add(raw(primitiveArrayStore("jint", "POP_I()", "jcharArray", "neko_fast_castore(env, __a, __idx, (jchar)__value); /* fallback: neko_set_char_array_region */")));
             case Opcodes.SASTORE -> stmts.add(raw(primitiveArrayStore("jint", "POP_I()", "jshortArray", "neko_fast_sastore(env, __a, __idx, (jshort)__value); /* fallback: neko_set_short_array_region */")));
@@ -124,8 +124,8 @@ public final class OpcodeTranslator {
             case Opcodes.IADD -> stmts.add(raw("{ jint b = POP_I(); jint a = POP_I(); PUSH_I(a + b); }"));
             case Opcodes.ISUB -> stmts.add(raw("{ jint b = POP_I(); jint a = POP_I(); PUSH_I(a - b); }"));
             case Opcodes.IMUL -> stmts.add(raw("{ jint b = POP_I(); jint a = POP_I(); PUSH_I(a * b); }"));
-            case Opcodes.IDIV -> stmts.add(raw("{ jint __b = POP_I(); jint __a = POP_I(); if (__b == 0) { (void)neko_throw_cached(env, g_neko_throw_ae); goto __neko_exception_exit; } if (__a == (jint)INT32_MIN && __b == -1) { PUSH_I(__a); } else { PUSH_I(__a / __b); } }"));
-            case Opcodes.IREM -> stmts.add(raw("{ jint __b = POP_I(); jint __a = POP_I(); if (__b == 0) { (void)neko_throw_cached(env, g_neko_throw_ae); goto __neko_exception_exit; } if (__a == (jint)INT32_MIN && __b == -1) { PUSH_I(0); } else { PUSH_I(__a % __b); } }"));
+            case Opcodes.IDIV -> stmts.add(raw("{ jint __b = POP_I(); jint __a = POP_I(); if (__b == 0) { neko_raise_cached_pending(thread, g_neko_throw_ae); goto __neko_exception_exit; } if (__a == (jint)INT32_MIN && __b == -1) { PUSH_I(__a); } else { PUSH_I(__a / __b); } }"));
+            case Opcodes.IREM -> stmts.add(raw("{ jint __b = POP_I(); jint __a = POP_I(); if (__b == 0) { neko_raise_cached_pending(thread, g_neko_throw_ae); goto __neko_exception_exit; } if (__a == (jint)INT32_MIN && __b == -1) { PUSH_I(0); } else { PUSH_I(__a % __b); } }"));
             case Opcodes.INEG -> stmts.add(raw("PUSH_I(-POP_I());"));
             case Opcodes.ISHL -> stmts.add(raw("{ jint b = POP_I(); jint a = POP_I(); PUSH_I(a << (b & 0x1f)); }"));
             case Opcodes.ISHR -> stmts.add(raw("{ jint b = POP_I(); jint a = POP_I(); PUSH_I(a >> (b & 0x1f)); }"));
@@ -137,8 +137,8 @@ public final class OpcodeTranslator {
             case Opcodes.LADD -> stmts.add(raw("{ jlong b = POP_L(); jlong a = POP_L(); PUSH_L(a + b); }"));
             case Opcodes.LSUB -> stmts.add(raw("{ jlong b = POP_L(); jlong a = POP_L(); PUSH_L(a - b); }"));
             case Opcodes.LMUL -> stmts.add(raw("{ jlong b = POP_L(); jlong a = POP_L(); PUSH_L(a * b); }"));
-            case Opcodes.LDIV -> stmts.add(raw("{ jlong __b = POP_L(); jlong __a = POP_L(); if (__b == 0LL) { (void)neko_throw_cached(env, g_neko_throw_ae); goto __neko_exception_exit; } if (__a == (jlong)INT64_MIN && __b == -1LL) { PUSH_L(__a); } else { PUSH_L(__a / __b); } }"));
-            case Opcodes.LREM -> stmts.add(raw("{ jlong __b = POP_L(); jlong __a = POP_L(); if (__b == 0LL) { (void)neko_throw_cached(env, g_neko_throw_ae); goto __neko_exception_exit; } if (__a == (jlong)INT64_MIN && __b == -1LL) { PUSH_L(0LL); } else { PUSH_L(__a % __b); } }"));
+            case Opcodes.LDIV -> stmts.add(raw("{ jlong __b = POP_L(); jlong __a = POP_L(); if (__b == 0LL) { neko_raise_cached_pending(thread, g_neko_throw_ae); goto __neko_exception_exit; } if (__a == (jlong)INT64_MIN && __b == -1LL) { PUSH_L(__a); } else { PUSH_L(__a / __b); } }"));
+            case Opcodes.LREM -> stmts.add(raw("{ jlong __b = POP_L(); jlong __a = POP_L(); if (__b == 0LL) { neko_raise_cached_pending(thread, g_neko_throw_ae); goto __neko_exception_exit; } if (__a == (jlong)INT64_MIN && __b == -1LL) { PUSH_L(0LL); } else { PUSH_L(__a % __b); } }"));
             case Opcodes.LNEG -> stmts.add(raw("PUSH_L(-POP_L());"));
             case Opcodes.LSHL -> stmts.add(raw("{ jint __s = POP_I(); jlong __v = POP_L(); PUSH_L(__v << (__s & 0x3F)); }"));
             case Opcodes.LSHR -> stmts.add(raw("{ jint __s = POP_I(); jlong __v = POP_L(); PUSH_L(__v >> (__s & 0x3F)); }"));
@@ -200,8 +200,8 @@ public final class OpcodeTranslator {
             case Opcodes.ARETURN -> stmts.add(raw("return (void*)POP_O();"));
             case Opcodes.RETURN -> stmts.add(raw("return;"));
 
-            case Opcodes.ARRAYLENGTH -> stmts.add(raw("{ jarray __arr = (jarray)POP_O(); if (__arr == NULL) { (void)neko_throw_cached(env, g_neko_throw_npe); goto __neko_exception_exit; } PUSH_I((jint)neko_get_array_length(env, __arr)); }"));
-            case Opcodes.ATHROW -> stmts.add(raw("{ jobject __thrown = POP_O(); if (__thrown == NULL) { (void)neko_throw_cached(env, g_neko_throw_npe); goto __neko_exception_exit; } neko_set_pending_exception(thread, (void*)__thrown); goto __neko_exception_exit; }"));
+            case Opcodes.ARRAYLENGTH -> stmts.add(raw("{ void *__arr = POP_O(); if (__arr == NULL) { neko_raise_cached_pending(thread, g_neko_throw_npe); goto __neko_exception_exit; } PUSH_I(neko_raw_array_length(__arr)); }"));
+            case Opcodes.ATHROW -> stmts.add(raw("{ jobject __thrown = POP_O(); if (__thrown == NULL) { neko_raise_cached_pending(thread, g_neko_throw_npe); goto __neko_exception_exit; } neko_set_pending_exception(thread, (void*)__thrown); goto __neko_exception_exit; }"));
             case Opcodes.MONITORENTER -> stmts.add(raw("neko_monitor_enter(env, POP_O());"));
             case Opcodes.MONITOREXIT -> stmts.add(raw("neko_monitor_exit(env, POP_O());"));
             case Opcodes.NOP -> stmts.add(raw("/* nop */"));
@@ -212,9 +212,9 @@ public final class OpcodeTranslator {
 
             case Opcodes.NEW -> {
                 TypeInsnNode ti = (TypeInsnNode) insn;
-                stmts.add(raw("{ jclass __cls = " + cachedClassExpression(ti.desc) + "; if (__cls == NULL) goto __neko_exception_exit; Klass *__klass = (Klass*)neko_class_klass_pointer(__cls); oop __fast = NULL; if (__klass != NULL) { uint32_t __lh = *(uint32_t*)((uint8_t*)__klass + g_neko_vm_layout.off_klass_layout_helper); __fast = neko_rt_try_alloc_instance_fast_nosafepoint(__klass, neko_lh_instance_size(__lh)); } jobject __obj = __fast != NULL ? (jobject)__fast : neko_alloc_object(env, __cls); if (__obj == NULL) { (void)neko_throw_cached(env, g_neko_throw_oom); goto __neko_exception_exit; } PUSH_O(__obj); }"));
+                stmts.add(raw("{ jclass __cls = " + cachedClassExpression(ti.desc) + "; if (__cls == NULL) goto __neko_exception_exit; Klass *__klass = (Klass*)neko_class_klass_pointer(__cls); oop __fast = NULL; if (__klass != NULL) { uint32_t __lh = *(uint32_t*)((uint8_t*)__klass + g_neko_vm_layout.off_klass_layout_helper); __fast = neko_rt_try_alloc_instance_fast_nosafepoint(__klass, neko_lh_instance_size(__lh)); } jobject __obj = __fast != NULL ? (jobject)__fast : neko_alloc_object(env, __cls); if (__obj == NULL) { neko_raise_cached_pending(thread, g_neko_throw_oom); goto __neko_exception_exit; } PUSH_O(__obj); }"));
             }
-            case Opcodes.NEWARRAY -> stmts.add(raw("{ jint __len = POP_I(); if (__len < 0) { (void)neko_throw_cached(env, g_neko_throw_nase); goto __neko_exception_exit; } jarray __arr = (jarray)" + newArrayCall(((IntInsnNode) insn).operand, "__len") + "; if (__arr == NULL) { (void)neko_throw_cached(env, g_neko_throw_oom); goto __neko_exception_exit; } PUSH_O(__arr); }"));
+            case Opcodes.NEWARRAY -> stmts.add(raw("{ jint __len = POP_I(); if (__len < 0) { neko_raise_cached_pending(thread, g_neko_throw_nase); goto __neko_exception_exit; } jarray __arr = (jarray)" + newArrayCall(((IntInsnNode) insn).operand, "__len") + "; if (__arr == NULL) { neko_raise_cached_pending(thread, g_neko_throw_oom); goto __neko_exception_exit; } PUSH_O(__arr); }"));
             case Opcodes.ANEWARRAY -> {
                 TypeInsnNode ti = (TypeInsnNode) insn;
                 stmts.add(raw("{ jint len = POP_I(); jclass cls = " + cachedClassExpression(ti.desc) + "; if (cls != NULL) { PUSH_O(neko_new_object_array(env, len, cls, NULL)); } }"));
@@ -234,7 +234,7 @@ public final class OpcodeTranslator {
             }
             case Opcodes.CHECKCAST -> {
                 TypeInsnNode ti = (TypeInsnNode) insn;
-                stmts.add(raw("{ jobject __obj = POP_O(); if (__obj != NULL) { jclass __target = " + cachedTypeClassExpression(ti.desc) + "; if (__target == NULL) goto __neko_exception_exit; if (!neko_is_instance_of(env, __obj, __target)) { (void)neko_throw_cached(env, g_neko_throw_cce); goto __neko_exception_exit; } } PUSH_O(__obj); }"));
+                stmts.add(raw("{ jobject __obj = POP_O(); if (__obj != NULL) { jclass __target = " + cachedTypeClassExpression(ti.desc) + "; if (__target == NULL) goto __neko_exception_exit; if (!neko_is_instance_of(env, __obj, __target)) { neko_raise_cached_pending(thread, g_neko_throw_cce); goto __neko_exception_exit; } } PUSH_O(__obj); }"));
             }
             case Opcodes.MULTIANEWARRAY -> stmts.add(raw(translateMultiANewArray((MultiANewArrayInsnNode) insn)));
             case Opcodes.INVOKEDYNAMIC -> stmts.add(raw(translateInvokeDynamic((InvokeDynamicInsnNode) insn)));
@@ -444,10 +444,10 @@ public final class OpcodeTranslator {
     private String translateIntrinsicMethodInvoke(MethodInsnNode mi, int opcode) {
         if (opcode == Opcodes.INVOKEVIRTUAL || opcode == Opcodes.INVOKESPECIAL) {
             if ("java/lang/String".equals(mi.owner) && "length".equals(mi.name) && "()I".equals(mi.desc)) {
-                return "{ jstring obj = (jstring)POP_O(); if (obj == NULL) { (void)neko_throw_cached(env, g_neko_throw_npe); goto __neko_exception_exit; } else { PUSH_I((jint)neko_get_string_length(env, obj)); } }";
+                return "{ jstring obj = (jstring)POP_O(); if (obj == NULL) { neko_raise_cached_pending(thread, g_neko_throw_npe); goto __neko_exception_exit; } else { PUSH_I((jint)neko_get_string_length(env, obj)); } }";
             }
             if ("java/lang/Object".equals(mi.owner) && "getClass".equals(mi.name) && "()Ljava/lang/Class;".equals(mi.desc)) {
-                return "{ jobject obj = POP_O(); if (obj == NULL) { (void)neko_throw_cached(env, g_neko_throw_npe); goto __neko_exception_exit; } else { PUSH_O(neko_get_object_class(env, obj)); } }";
+                return "{ jobject obj = POP_O(); if (obj == NULL) { neko_raise_cached_pending(thread, g_neko_throw_npe); goto __neko_exception_exit; } else { PUSH_O(neko_get_object_class(env, obj)); } }";
             }
         }
         return null;
@@ -619,7 +619,7 @@ public final class OpcodeTranslator {
     }
 
     private String nullReceiverCheck(String receiverExpr) {
-        return "if (" + receiverExpr + " == NULL) { (void)neko_throw_cached(env, g_neko_throw_npe); goto __neko_exception_exit; } ";
+        return "if (" + receiverExpr + " == NULL) { neko_raise_cached_pending(thread, g_neko_throw_npe); goto __neko_exception_exit; } ";
     }
 
     private void appendCompiledInvokeCallArgs(StringBuilder sb, Type[] args, String receiverExpr) {
@@ -942,9 +942,9 @@ public final class OpcodeTranslator {
     }
 
     private String arrayBoundsCheck(String arrayVar, String indexVar) {
-        return "if (" + arrayVar + " == NULL) { (void)neko_throw_cached(env, g_neko_throw_npe); goto __neko_exception_exit; } "
-            + "jsize __len = neko_get_array_length(env, (jarray)" + arrayVar + "); "
-            + "if ((jint)__len <= " + indexVar + " || " + indexVar + " < 0) { (void)neko_throw_cached(env, g_neko_throw_aioobe); goto __neko_exception_exit; } ";
+        return "if (" + arrayVar + " == NULL) { neko_raise_cached_pending(thread, g_neko_throw_npe); goto __neko_exception_exit; } "
+            + "jint __len = neko_raw_array_length((void*)" + arrayVar + "); "
+            + "if ((jint)__len <= " + indexVar + " || " + indexVar + " < 0) { neko_raise_cached_pending(thread, g_neko_throw_aioobe); goto __neko_exception_exit; } ";
     }
 
     private String newArrayCall(int operand, String lengthExpr) {
@@ -1057,7 +1057,7 @@ public final class OpcodeTranslator {
         sb.append("jobject __arr = neko_multi_new_array(env, ").append(insn.dims).append(", __dims, \"")
             .append(cStringLiteral(insn.desc)).append("\"); ")
             .append("if (neko_pending_exception(thread) != NULL) goto __neko_exception_exit; ")
-            .append("if (__arr == NULL) { (void)neko_throw_cached(env, g_neko_throw_oom); goto __neko_exception_exit; } ")
+            .append("if (__arr == NULL) { neko_raise_cached_pending(thread, g_neko_throw_oom); goto __neko_exception_exit; } ")
             .append("PUSH_O(__arr); }");
         return sb.toString();
     }
