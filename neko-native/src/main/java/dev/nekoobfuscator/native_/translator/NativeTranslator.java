@@ -378,12 +378,12 @@ public final class NativeTranslator {
 
     private String renderExceptionDispatch(List<TryHandler> handlers) {
         StringBuilder sb = new StringBuilder();
-        sb.append("if (neko_exception_check(env)) { ");
+        sb.append("if (neko_pending_exception(thread) != NULL) { ");
         if (handlers.isEmpty()) {
-            sb.append("jthrowable __exc = neko_exception_occurred(env); neko_exception_clear(env); neko_throw(env, __exc); goto __neko_exception_exit; }");
+            sb.append("goto __neko_exception_exit; }");
             return sb.toString();
         }
-        sb.append("jthrowable __exc = neko_exception_occurred(env); neko_exception_clear(env); ");
+        sb.append("void *__exc = neko_pending_exception(thread); neko_clear_pending_exception(thread); ");
         for (TryHandler handler : handlers) {
             if (handler.exceptionType == null) {
                 sb.append("sp = 0; PUSH_O(__exc); goto ").append(handler.handlerLabel).append("; ");
@@ -392,7 +392,7 @@ public final class NativeTranslator {
                 sb.append("if (__hcls != NULL && neko_is_instance_of(env, __exc, __hcls)) { sp = 0; PUSH_O(__exc); goto ").append(handler.handlerLabel).append("; } }");
             }
         }
-        sb.append("neko_throw(env, __exc); goto __neko_exception_exit; }");
+        sb.append("neko_set_pending_exception(thread, __exc); goto __neko_exception_exit; }");
         return sb.toString();
     }
 
