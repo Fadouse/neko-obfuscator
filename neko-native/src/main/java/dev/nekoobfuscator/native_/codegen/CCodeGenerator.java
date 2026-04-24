@@ -530,6 +530,11 @@ public final class CCodeGenerator {
             static inline uint32_t neko_lh_header_size(uint32_t lh);
             static inline uint32_t neko_lh_log2_element(uint32_t lh);
             static inline size_t neko_lh_instance_size(uint32_t lh);
+            __attribute__((visibility("default"))) void* neko_get_current_thread(void);
+            static inline void* neko_pending_exception(void *thread);
+            static inline void neko_set_pending_exception(void *thread, void *oop);
+            static inline void neko_clear_pending_exception(void *thread);
+            __attribute__((visibility("default"))) void neko_raise_athrow(void *thread, void *exception_oop);
             static inline void neko_store_heap_oop_at_unpublished(void* base, int32_t offset, void* raw_oop);
             static inline void* neko_load_heap_oop_from_published(void* base, int32_t offset);
             static inline int32_t neko_object_array_element_offset(void* array_klass, int32_t index);
