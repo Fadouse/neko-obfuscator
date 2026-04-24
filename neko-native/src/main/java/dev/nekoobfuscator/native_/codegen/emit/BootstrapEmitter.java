@@ -576,6 +576,8 @@ static void neko_reset_vm_layout(void) {
     g_neko_vm_layout.off_const_method_size_of_parameters = -1;
     g_neko_vm_layout.off_const_method_method_idnum = -1;
     g_neko_vm_layout.off_const_method_flags_bits = -1;
+    g_neko_vm_layout.off_const_method_name_index = -1;
+    g_neko_vm_layout.off_const_method_signature_index = -1;
     g_neko_vm_layout.off_constant_pool_holder = -1;
     g_neko_vm_layout.off_constant_pool_tags = -1;
     g_neko_vm_layout.off_constant_pool_length = -1;
@@ -585,6 +587,7 @@ static void neko_reset_vm_layout(void) {
     g_neko_vm_layout.off_klass_java_mirror = -1;
     g_neko_vm_layout.off_class_klass = -1;
     g_neko_vm_layout.off_instance_klass_constants = -1;
+    g_neko_vm_layout.off_instance_klass_methods = -1;
     g_neko_vm_layout.off_instance_klass_fields = -1;
     g_neko_vm_layout.off_instance_klass_fieldinfo_stream = -1;
     g_neko_vm_layout.off_instance_klass_java_fields_count = -1;
@@ -972,6 +975,8 @@ static const char* neko_validate_vm_layout(void) {
     if (g_neko_vm_layout.off_const_method_max_locals < 0) return "ConstMethod::_max_locals";
     if (g_neko_vm_layout.off_const_method_size_of_parameters < 0) return "ConstMethod::_size_of_parameters";
     if (g_neko_vm_layout.off_const_method_method_idnum < 0) return "ConstMethod::_method_idnum";
+    if (g_neko_vm_layout.off_const_method_name_index < 0) return "ConstMethod::_name_index";
+    if (g_neko_vm_layout.off_const_method_signature_index < 0) return "ConstMethod::_signature_index";
     if (g_neko_vm_layout.off_constant_pool_holder < 0) return "ConstantPool::_pool_holder";
     if (g_neko_vm_layout.off_constant_pool_tags < 0) return "ConstantPool::_tags";
     if (g_neko_vm_layout.off_constant_pool_length < 0) return "ConstantPool::_length";
@@ -980,6 +985,7 @@ static const char* neko_validate_vm_layout(void) {
     if (g_neko_vm_layout.off_klass_next_link < 0) return "Klass::_next_link";
     if (g_neko_vm_layout.off_klass_java_mirror < 0) return "Klass::_java_mirror";
     if (g_neko_vm_layout.off_instance_klass_constants < 0) return "InstanceKlass::_constants";
+    if (g_neko_vm_layout.off_instance_klass_methods < 0) return "InstanceKlass::_methods";
     if (g_neko_vm_layout.off_instance_klass_fields < 0) return "InstanceKlass::_fields";
     if (g_neko_vm_layout.java_spec_version >= 21 && g_neko_vm_layout.off_instance_klass_fieldinfo_stream < 0) return "InstanceKlass::_fieldinfo_stream";
     if (g_neko_vm_layout.off_symbol_length < 0) return "Symbol::_length";
@@ -1083,6 +1089,8 @@ static jboolean neko_parse_vm_layout(JNIEnv *env) {
             else if (neko_streq(field_name, "_size_of_parameters")) g_neko_vm_layout.off_const_method_size_of_parameters = (ptrdiff_t)offset;
             else if (neko_streq(field_name, "_method_idnum")) g_neko_vm_layout.off_const_method_method_idnum = (ptrdiff_t)offset;
             else if (neko_streq(field_name, "_flags._flags")) g_neko_vm_layout.off_const_method_flags_bits = (ptrdiff_t)offset;
+            else if (neko_streq(field_name, "_name_index")) g_neko_vm_layout.off_const_method_name_index = (ptrdiff_t)offset;
+            else if (neko_streq(field_name, "_signature_index")) g_neko_vm_layout.off_const_method_signature_index = (ptrdiff_t)offset;
         } else if (neko_streq(type_name, "ConstantPool")) {
             if (neko_streq(field_name, "_pool_holder")) {
                 g_neko_vm_layout.off_constant_pool_holder = (ptrdiff_t)offset;
@@ -1114,6 +1122,7 @@ static jboolean neko_parse_vm_layout(JNIEnv *env) {
             if (neko_streq(field_name, "_klass")) g_neko_vm_layout.off_class_klass = (ptrdiff_t)offset;
         } else if (neko_streq(type_name, "InstanceKlass")) {
             if (neko_streq(field_name, "_constants")) g_neko_vm_layout.off_instance_klass_constants = (ptrdiff_t)offset;
+            else if (neko_streq(field_name, "_methods")) g_neko_vm_layout.off_instance_klass_methods = (ptrdiff_t)offset;
             else if (neko_streq(field_name, "_fields") || neko_streq(field_name, "_fieldinfo_stream")) g_neko_vm_layout.off_instance_klass_fields = (ptrdiff_t)offset;
             else if (neko_streq(field_name, "_java_fields_count")) g_neko_vm_layout.off_instance_klass_java_fields_count = (ptrdiff_t)offset;
             else if (neko_streq(field_name, "_init_state")) g_neko_vm_layout.off_instance_klass_init_state = (ptrdiff_t)offset;
@@ -1720,8 +1729,78 @@ static bool neko_resolve_field_offset(void* klass, const char* target_name, uint
     return neko_field_walk_legacy(klass, java_fields_count, target_name, target_name_len, target_desc, target_desc_len, want_static, offset_out);
 }
 
+static inline void* neko_instance_klass_methods_array(void *klass) {
+    if (klass == NULL || g_neko_vm_layout.off_instance_klass_methods < 0) return NULL;
+    return *(void**)((uint8_t*)klass + g_neko_vm_layout.off_instance_klass_methods);
+}
+
+static inline int32_t neko_array_length(void *array) {
+    int32_t length;
+    if (array == NULL) return 0;
+    length = *(int32_t*)((uint8_t*)array + 0);
+    if (length < 0 || length > 1000000) return 0;
+    return length;
+}
+
+static inline void* neko_method_array_at(void *methods, int32_t index) {
+    ptrdiff_t data_offset;
+    if (methods == NULL || index < 0) return NULL;
+    data_offset = neko_align_up_ptrdiff((ptrdiff_t)sizeof(int32_t), (ptrdiff_t)sizeof(void*));
+    return *(void**)((uint8_t*)methods + data_offset + ((ptrdiff_t)index * (ptrdiff_t)sizeof(void*)));
+}
+
+static bool neko_method_matches_manifest_entry(void *method_star, const NekoManifestMethod *entry, uint16_t name_len, uint16_t desc_len) {
+    void *const_method;
+    void *constant_pool;
+    uint16_t name_index;
+    uint16_t signature_index;
+    if (method_star == NULL || entry == NULL) return false;
+    if (g_neko_vm_layout.off_method_const_method < 0 || g_neko_vm_layout.off_const_method_constants < 0) return false;
+    if (g_neko_vm_layout.off_const_method_name_index < 0 || g_neko_vm_layout.off_const_method_signature_index < 0) return false;
+    const_method = *(void**)((uint8_t*)method_star + g_neko_vm_layout.off_method_const_method);
+    if (const_method == NULL) return false;
+    constant_pool = *(void**)((uint8_t*)const_method + g_neko_vm_layout.off_const_method_constants);
+    if (constant_pool == NULL) return false;
+    name_index = *(uint16_t*)((uint8_t*)const_method + g_neko_vm_layout.off_const_method_name_index);
+    signature_index = *(uint16_t*)((uint8_t*)const_method + g_neko_vm_layout.off_const_method_signature_index);
+    if (!neko_cp_utf8_matches(constant_pool, name_index, entry->method_name, name_len)) return false;
+    return neko_cp_utf8_matches(constant_pool, signature_index, entry->method_desc, desc_len);
+}
+
 static void neko_bootstrap_owner_discovery(void) {
-    return;
+    for (uint32_t i = 0; i < g_neko_manifest_method_count; i++) {
+        const NekoManifestMethod *entry = &g_neko_manifest_methods[i];
+        size_t owner_len;
+        size_t name_len;
+        size_t desc_len;
+        Klass *owner_klass;
+        void *methods;
+        int32_t method_count;
+        jboolean matched = JNI_FALSE;
+        if (entry->owner_internal == NULL || entry->method_name == NULL || entry->method_desc == NULL) continue;
+        owner_len = strlen(entry->owner_internal);
+        if (owner_len >= 65536u) continue;
+        name_len = strlen(entry->method_name);
+        desc_len = strlen(entry->method_desc);
+        if (name_len >= 65536u || desc_len >= 65536u) continue;
+        owner_klass = neko_find_klass_by_name_in_cld_graph(entry->owner_internal, (uint16_t)owner_len);
+        if (owner_klass == NULL) {
+            NEKO_TRACE(1, "[nk] dx owner_miss idx=%u name=%s", i, entry->owner_internal);
+            continue;
+        }
+        methods = neko_instance_klass_methods_array(owner_klass);
+        method_count = neko_array_length(methods);
+        for (int32_t method_index = 0; method_index < method_count; method_index++) {
+            void *method_star = neko_method_array_at(methods, method_index);
+            if (!neko_method_matches_manifest_entry(method_star, entry, (uint16_t)name_len, (uint16_t)desc_len)) continue;
+            neko_record_manifest_match(i, method_star);
+            matched = JNI_TRUE;
+            break;
+        }
+        if (!matched) {
+            NEKO_TRACE(1, "[nk] dx method_miss idx=%u %s.%s%s", i, entry->owner_internal, entry->method_name, entry->method_desc);
+        }
+    }
 }
 
 static void neko_resolve_string_intern_layout(void) {

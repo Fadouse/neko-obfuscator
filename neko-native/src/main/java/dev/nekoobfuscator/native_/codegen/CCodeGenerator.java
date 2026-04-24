@@ -330,6 +330,8 @@ public final class CCodeGenerator {
                 ptrdiff_t off_const_method_size_of_parameters;
                 ptrdiff_t off_const_method_method_idnum;
                 ptrdiff_t off_const_method_flags_bits;
+                ptrdiff_t off_const_method_name_index;
+                ptrdiff_t off_const_method_signature_index;
                 ptrdiff_t off_constant_pool_holder;
                 ptrdiff_t off_klass_layout_helper;
                 ptrdiff_t off_klass_name;
@@ -337,6 +339,7 @@ public final class CCodeGenerator {
                 ptrdiff_t off_klass_java_mirror;
                 ptrdiff_t off_class_klass;
                 ptrdiff_t off_instance_klass_constants;
+                ptrdiff_t off_instance_klass_methods;
                 ptrdiff_t off_instance_klass_fields;
                 ptrdiff_t off_instance_klass_java_fields_count;
                 ptrdiff_t off_instance_klass_init_state;
