@@ -1,0 +1,103 @@
+W2 verification v5 trace summary
+Generated: 2026-04-24T12:19:21+08:00
+
+Artifacts:
+total 85
+-rwxr-xr-x 1 fadouse fadouse 29892 Apr 24 12:17 obfusjack-native-debug.jar
+-rwxr-xr-x 1 fadouse fadouse  1312 Apr 24 12:18 obfusjack-native-debug.stderr
+-rwxr-xr-x 1 fadouse fadouse  8227 Apr 24 12:17 SnakeGame-native-debug.jar
+-rwxr-xr-x 1 fadouse fadouse     0 Apr 24 12:18 SnakeGame-native-debug.stderr
+-rwxr-xr-x 1 fadouse fadouse 29114 Apr 24 12:16 TEST-native-debug.jar
+-rwxr-xr-x 1 fadouse fadouse   649 Apr 24 12:17 TEST-native-debug.stderr
+-rwxr-xr-x 1 fadouse fadouse    82 Apr 24 12:19 traces-summary.txt
+
+== verification/w1/final-v5/obfusjack-native-debug.stderr ==
+throwable_cache_ok: 0
+onload_enter: 0
+loader_mark_ready: 0
+dm lines:
+dp lines:
+pp lines:
+dx miss lines:
+LinkageError load text count: 0
+SIGSEGV count: 0
+
+== verification/w1/final-v5/SnakeGame-native-debug.stderr ==
+throwable_cache_ok: 0
+onload_enter: 0
+loader_mark_ready: 0
+dm lines:
+dp lines:
+pp lines:
+dx miss lines:
+LinkageError load text count: 0
+SIGSEGV count: 0
+
+== verification/w1/final-v5/TEST-native-debug.stderr ==
+throwable_cache_ok: 0
+onload_enter: 0
+loader_mark_ready: 0
+dm lines:
+dp lines:
+pp lines:
+dx miss lines:
+LinkageError load text count: 0
+SIGSEGV count: 0
+
+hs_err files:
+./hs_err_pid199044.log
+./hs_err_pid1253781.log
+./hs_err_pid1254874.log
+./hs_err_pid1281719.log
+./hs_err_pid1281741.log
+./hs_err_pid1281760.log
+./hs_err_pid1401364.log
+./hs_err_pid1408977.log
+./hs_err_pid1628554.log
+./hs_err_pid1632911.log
+./hs_err_pid1637186.log
+./hs_err_pid1662532.log
+./hs_err_pid1663612.log
+./hs_err_pid1716027.log
+./hs_err_pid1727962.log
+./hs_err_pid1784603.log
+./hs_err_pid199330.log
+./hs_err_pid2090318.log
+./hs_err_pid2196279.log
+./hs_err_pid2197300.log
+./hs_err_pid2432107.log
+./hs_err_pid2433115.log
+./verification/w1/final-v4/hs_err_pid1253781.log
+./verification/w1/final-v4/hs_err_pid1254874.log
+./verification/w1/final-v4/hs_err_pid1281719.log
+./verification/w1/final-v4/hs_err_pid1281741.log
+./verification/w1/final-v4/hs_err_pid1281760.log
+./verification/w1/final-v4/hs_err_pid1401364.log
+./verification/w1/final-v4/hs_err_pid1408977.log
+./verification/w1/final-v4/hs_err_pid1628554.log
+./verification/w1/final-v4/hs_err_pid1632911.log
+./verification/w1/final-v4/hs_err_pid1637186.log
+./verification/w1/final-v4/hs_err_pid1662532.log
+./verification/w1/final-v4/hs_err_pid1663612.log
+./verification/w1/final-v4/hs_err_pid1716027.log
+./verification/w1/final-v4/hs_err_pid1727962.log
+./verification/w1/final-v4/hs_err_pid1784603.log
+./verification/w1/final-v4/hs_err_pid199044.log
+./verification/w1/final-v4/hs_err_pid199330.log
+./verification/w1/final-v4/hs_err_pid2090318.log
+./verification/w1/final-v4/hs_err_pid2196279.log
+./verification/w1/final-v4/hs_err_pid2197300.log
+./verification/w1/final-v4/hs_err_pid2432107.log
+./verification/w1/final-v4/hs_err_pid2433115.log
+hs_err_count: 44
+
+
+Unit tests:
+PTY: pty_736d1b75 exit=1
+Result: 83 tests completed, 18 failed, 4 skipped
+Baseline comparison: 18 failed baseline, current 18 failed (<=18 yes)
+
+Native build note:
+Obfuscation PTYs exited 0 but native stage produced no libraries (translated=0) due undeclared neko_exception_* C compile errors; runtime [nk] traces absent.
+final-v5 SIGSEGV count across stderr files: 0
+final-v5 hs_err files: 0
