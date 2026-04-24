@@ -1,0 +1,53 @@
+# GC Matrix - W11-M5c
+# JDK x Jar x Collector x Result
+# Canonical GATE-11 target is JDK 8-21; this host provides JDK 21 plus optional JDK 22 smoke coverage.
+# Result: PASS (exit 0) | FALLBACK (expected LinkageError/HeadlessException/fail-closed non-crash path) | SKIPPED (unsupported collector) | FAIL (crash/SIGSEGV/timeout/unexpected error)
+# Baseline patch counts: TEST dp_1/14, obfusjack dp_6/17, SnakeGame dp_2/12
+# Runtime harness: NEKO_DEBUG=1 java -jar ...; SnakeGame used timeout 5; no -Dneko.native.debug=true; no headless flag.
+
+## JDK21 (21.0.10+7)
+JDK=21.0.10+7  jdk_id=JDK21 jar=TEST       collector=Serial     exit=1   patch_count=dp_1/14  result=FALLBACK note=expected LinkageError fallback after baseline native patch count
+JDK=21.0.10+7  jdk_id=JDK21 jar=TEST       collector=Parallel   exit=1   patch_count=dp_1/14  result=FALLBACK note=expected LinkageError fallback after baseline native patch count
+JDK=21.0.10+7  jdk_id=JDK21 jar=TEST       collector=G1         exit=1   patch_count=dp_1/14  result=FALLBACK note=expected LinkageError fallback after baseline native patch count
+JDK=21.0.10+7  jdk_id=JDK21 jar=TEST       collector=ZGC        exit=1   patch_count=dp_1/14  result=FALLBACK note=expected LinkageError fallback after baseline native patch count
+JDK=21.0.10+7  jdk_id=JDK21 jar=TEST       collector=Shenandoah exit=1   patch_count=dp_1/14  result=FALLBACK note=expected LinkageError fallback after baseline native patch count
+JDK=21.0.10+7  jdk_id=JDK21 jar=TEST       collector=Epsilon    exit=1   patch_count=dp_1/14  result=FALLBACK note=expected LinkageError fallback after baseline native patch count
+JDK=21.0.10+7  jdk_id=JDK21 jar=SnakeGame  collector=Serial     exit=1   patch_count=dp_2/12  result=FALLBACK note=expected LinkageError fallback after baseline native patch count
+JDK=21.0.10+7  jdk_id=JDK21 jar=SnakeGame  collector=Parallel   exit=1   patch_count=dp_2/12  result=FALLBACK note=expected LinkageError fallback after baseline native patch count
+JDK=21.0.10+7  jdk_id=JDK21 jar=SnakeGame  collector=G1         exit=1   patch_count=dp_2/12  result=FALLBACK note=expected LinkageError fallback after baseline native patch count
+JDK=21.0.10+7  jdk_id=JDK21 jar=SnakeGame  collector=ZGC        exit=1   patch_count=dp_2/12  result=FALLBACK note=expected LinkageError fallback after baseline native patch count
+JDK=21.0.10+7  jdk_id=JDK21 jar=SnakeGame  collector=Shenandoah exit=1   patch_count=dp_2/12  result=FALLBACK note=expected LinkageError fallback after baseline native patch count
+JDK=21.0.10+7  jdk_id=JDK21 jar=SnakeGame  collector=Epsilon    exit=1   patch_count=dp_2/12  result=FALLBACK note=expected LinkageError fallback after baseline native patch count
+JDK=21.0.10+7  jdk_id=JDK21 jar=obfusjack  collector=Serial     exit=1   patch_count=dp_6/17  result=FALLBACK note=expected LinkageError fallback after baseline native patch count
+JDK=21.0.10+7  jdk_id=JDK21 jar=obfusjack  collector=Parallel   exit=1   patch_count=dp_6/17  result=FALLBACK note=expected LinkageError fallback after baseline native patch count
+JDK=21.0.10+7  jdk_id=JDK21 jar=obfusjack  collector=G1         exit=1   patch_count=dp_6/17  result=FALLBACK note=expected LinkageError fallback after baseline native patch count
+JDK=21.0.10+7  jdk_id=JDK21 jar=obfusjack  collector=ZGC        exit=1   patch_count=dp_6/17  result=FALLBACK note=expected LinkageError fallback after baseline native patch count
+JDK=21.0.10+7  jdk_id=JDK21 jar=obfusjack  collector=Shenandoah exit=1   patch_count=dp_6/17  result=FALLBACK note=expected LinkageError fallback after baseline native patch count
+JDK=21.0.10+7  jdk_id=JDK21 jar=obfusjack  collector=Epsilon    exit=1   patch_count=dp_6/17  result=FALLBACK note=expected LinkageError fallback after baseline native patch count
+# Summary JDK21: PASS=0 FALLBACK=18 SKIPPED=0 FAIL=0 passing_rows=18/18 target=18
+
+## JDK22 (22.0.2+9)
+JDK=22.0.2+9   jdk_id=JDK22 jar=TEST       collector=Serial     exit=1   patch_count=n/a      result=FALLBACK note=optional JDK22 out-of-scope fail-closed VM layout fallback before admission
+JDK=22.0.2+9   jdk_id=JDK22 jar=TEST       collector=Parallel   exit=1   patch_count=n/a      result=FALLBACK note=optional JDK22 out-of-scope fail-closed VM layout fallback before admission
+JDK=22.0.2+9   jdk_id=JDK22 jar=TEST       collector=G1         exit=1   patch_count=n/a      result=FALLBACK note=optional JDK22 out-of-scope fail-closed VM layout fallback before admission
+JDK=22.0.2+9   jdk_id=JDK22 jar=TEST       collector=ZGC        exit=1   patch_count=n/a      result=FALLBACK note=optional JDK22 out-of-scope fail-closed VM layout fallback before admission
+JDK=22.0.2+9   jdk_id=JDK22 jar=TEST       collector=Shenandoah exit=1   patch_count=n/a      result=FALLBACK note=optional JDK22 out-of-scope fail-closed VM layout fallback before admission
+JDK=22.0.2+9   jdk_id=JDK22 jar=TEST       collector=Epsilon    exit=1   patch_count=n/a      result=FALLBACK note=optional JDK22 out-of-scope fail-closed VM layout fallback before admission
+JDK=22.0.2+9   jdk_id=JDK22 jar=SnakeGame  collector=Serial     exit=1   patch_count=n/a      result=FALLBACK note=optional JDK22 out-of-scope fail-closed VM layout fallback before admission
+JDK=22.0.2+9   jdk_id=JDK22 jar=SnakeGame  collector=Parallel   exit=1   patch_count=n/a      result=FALLBACK note=optional JDK22 out-of-scope fail-closed VM layout fallback before admission
+JDK=22.0.2+9   jdk_id=JDK22 jar=SnakeGame  collector=G1         exit=1   patch_count=n/a      result=FALLBACK note=optional JDK22 out-of-scope fail-closed VM layout fallback before admission
+JDK=22.0.2+9   jdk_id=JDK22 jar=SnakeGame  collector=ZGC        exit=1   patch_count=n/a      result=FALLBACK note=optional JDK22 out-of-scope fail-closed VM layout fallback before admission
+JDK=22.0.2+9   jdk_id=JDK22 jar=SnakeGame  collector=Shenandoah exit=1   patch_count=n/a      result=FALLBACK note=optional JDK22 out-of-scope fail-closed VM layout fallback before admission
+JDK=22.0.2+9   jdk_id=JDK22 jar=SnakeGame  collector=Epsilon    exit=1   patch_count=n/a      result=FALLBACK note=optional JDK22 out-of-scope fail-closed VM layout fallback before admission
+JDK=22.0.2+9   jdk_id=JDK22 jar=obfusjack  collector=Serial     exit=1   patch_count=n/a      result=FALLBACK note=optional JDK22 out-of-scope fail-closed VM layout fallback before admission
+JDK=22.0.2+9   jdk_id=JDK22 jar=obfusjack  collector=Parallel   exit=1   patch_count=n/a      result=FALLBACK note=optional JDK22 out-of-scope fail-closed VM layout fallback before admission
+JDK=22.0.2+9   jdk_id=JDK22 jar=obfusjack  collector=G1         exit=1   patch_count=n/a      result=FALLBACK note=optional JDK22 out-of-scope fail-closed VM layout fallback before admission
+JDK=22.0.2+9   jdk_id=JDK22 jar=obfusjack  collector=ZGC        exit=1   patch_count=n/a      result=FALLBACK note=optional JDK22 out-of-scope fail-closed VM layout fallback before admission
+JDK=22.0.2+9   jdk_id=JDK22 jar=obfusjack  collector=Shenandoah exit=1   patch_count=n/a      result=FALLBACK note=optional JDK22 out-of-scope fail-closed VM layout fallback before admission
+JDK=22.0.2+9   jdk_id=JDK22 jar=obfusjack  collector=Epsilon    exit=1   patch_count=n/a      result=FALLBACK note=optional JDK22 out-of-scope fail-closed VM layout fallback before admission
+# Summary JDK22: PASS=0 FALLBACK=18 SKIPPED=0 FAIL=0 passing_rows=18/18 target=optional
+
+# Overall
+# JDK21 canonical GATE-11: PASS=0 FALLBACK=18 SKIPPED=0 FAIL=0; passing_rows=18/18
+# JDK22 optional host smoke: PASS=0 FALLBACK=18 SKIPPED=0 FAIL=0; rows_recorded=18
+# Matrix status: DONE - no FAIL rows
