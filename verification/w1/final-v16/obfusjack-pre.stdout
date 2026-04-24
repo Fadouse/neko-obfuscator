@@ -1,0 +1,65 @@
+=== JDK 21 Feature & Obfuscation Compatibility Test ===
+Sum=15 Product=50 Mix=21474836490 d=492.59841819737056
+Bits=701
+--------
+JDK21 demo
+--------
+char=中
+0 2 4 
+###
+1 2 3 4 5 
+grid[0][1]=X
+Lambda Hello World!
+a
+b
+c
+Hi, Alice
+HI, BOB
+Anonymous run()
+GREEN
+42
+sparse ok
+Optional=246
+ParallelSum=332833500
+fact50.len=65 div=0.33333333333333333333333333333333333333333333333333
+merged=579.0
+VOL=8 ATOMIC=1
+Caught MyException: boom
+TWR: line1 | line2
+Files.mismatch index=2
+staticHello: from MethodHandle
+instanceCounter(before)=1
+instanceCounter(after)=99
+hiddenAdd(3,4)=7
+Inner.value=106
+StaticInner.msg=OK
+Local.z=5
+anon-sup
+area(circle)=12.566370614359172
+area(rect)=12.0
+area(tri)=6.0
+woof
+null
+long string: hello...
+positive int 123
+Point(2,5)
+P@(7,9)
+sumPoint=10
+Sequenced list first=0 last=4
+Reversed view: [4, 3, 2, 1, 0]
+Set reversed view: [c, b, a]
+Map first=1=one last=3=three
+Map reversed keys=[3, 2, 1]
+RandomGenerator default=L32X64MixRandom sample=357574735
+Using jumpable PRNG: Xoshiro256PlusPlus nextInt=16
+clone equal? true hash1=3820 hash2=3820
+
+--- Microbench: Platform vs Virtual Threads ---
+Platform threads: 19 ms  (50000 tasks)
+Virtual threads: 15 ms  (50000 tasks)
+
+--- Microbench: Matrix Multiply (double) ---
+Seq:       2 ms
+Parallel:  0 ms
+VThreads:  2 ms
+=== All tests completed ===

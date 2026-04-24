@@ -1,0 +1,49 @@
+[NekoObfuscator] Starting...
+[NekoObfuscator] Registered 10 transform passes
+20:36:33.330 [main] INFO dev.nekoobfuscator.core.pipeline.ObfuscationPipeline -- Reading input JAR: test-jars/SnakeGame.jar
+20:36:33.336 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: DataOfSquare
+20:36:33.336 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: KeyboardListener
+20:36:33.336 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: Main
+20:36:33.336 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: SquarePanel
+20:36:33.337 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: ThreadsController
+20:36:33.337 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: Tuple
+20:36:33.337 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: Window
+20:36:33.337 [main] INFO dev.nekoobfuscator.core.jar.JarInput -- Loaded 7 classes and 0 resources
+20:36:33.337 [main] INFO dev.nekoobfuscator.core.pipeline.ObfuscationPipeline -- Loaded 7 classes, 0 resources
+20:36:33.338 [main] INFO dev.nekoobfuscator.core.pipeline.ObfuscationPipeline -- Class hierarchy: 15 entries
+20:36:33.344 [main] INFO dev.nekoobfuscator.core.pipeline.ObfuscationPipeline -- Master seed: 0x3039
+20:36:33.344 [main] INFO dev.nekoobfuscator.core.pipeline.ObfuscationPipeline -- Scheduled 0 transform passes
+20:36:33.345 [main] DEBUG dev.nekoobfuscator.core.pipeline.ObfuscationPipeline -- Injected runtime class: dev/nekoobfuscator/runtime/NekoNativeLoader
+20:36:33.345 [main] INFO dev.nekoobfuscator.core.pipeline.ObfuscationPipeline -- Running native compilation stage
+20:36:33.355 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for DataOfSquare#<init>(I)V: constructors remain in bytecode form; W9 deferred to W11-M5h: reference PUTFIELD/PUTSTATIC requires SATB/incremental update write barriers; pending W11 hardening; W9 deferred to W11-M5h: reference GETSTATIC requires GC load barrier coverage for ZGC/Shenandoah; G1/Serial/Parallel paths pending
+20:36:33.355 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for KeyboardListener#<init>()V: constructors remain in bytecode form
+20:36:33.355 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for Main#<init>()V: constructors remain in bytecode form
+20:36:33.356 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for SquarePanel#<init>(Ljava/awt/Color;)V: constructors remain in bytecode form
+20:36:33.356 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for ThreadsController#<init>(LTuple;)V: constructors remain in bytecode form; W9 deferred to W11-M5h: reference PUTFIELD/PUTSTATIC requires SATB/incremental update write barriers; pending W11 hardening; W9 deferred to W11-M5h: reference GETSTATIC requires GC load barrier coverage for ZGC/Shenandoah; G1/Serial/Parallel paths pending
+20:36:33.356 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for ThreadsController#checkCollision()V: W9 deferred to W11-M5h: reference GETSTATIC requires GC load barrier coverage for ZGC/Shenandoah; G1/Serial/Parallel paths pending; W9 deferred to W11-M5h: reference PUTFIELD/PUTSTATIC requires SATB/incremental update write barriers; pending W11 hardening
+20:36:33.356 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for ThreadsController#stopTheGame()V: W9 deferred to W11-M5h: reference GETSTATIC requires GC load barrier coverage for ZGC/Shenandoah; G1/Serial/Parallel paths pending
+20:36:33.356 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for ThreadsController#getValAleaNotInSnake()LTuple;: reference return requires direct ALOAD/ACONST_NULL producer
+20:36:33.356 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for Tuple#<init>(II)V: constructors remain in bytecode form
+20:36:33.356 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for Window#<init>()V: constructors remain in bytecode form; W9 deferred to W11-M5h: reference PUTFIELD/PUTSTATIC requires SATB/incremental update write barriers; pending W11 hardening; W9 deferred to W11-M5h: reference GETSTATIC requires GC load barrier coverage for ZGC/Shenandoah; G1/Serial/Parallel paths pending
+20:36:33.356 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for Window#<clinit>()V: class initializers are not translated
+20:36:33.357 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for Main#main([Ljava/lang/String;)V: INVOKE target not in neko manifest (translated→translated only)
+20:36:33.357 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for ThreadsController#pauser()V: INVOKE target not in neko manifest (translated→translated only)
+20:36:33.357 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for ThreadsController#moveInterne(I)V: INVOKE target not in neko manifest (translated→translated only)
+20:36:33.399 [main] INFO dev.nekoobfuscator.native_.codegen.NativeBuildEngine -- zig cc: compiling 1 .c + 1 .S files for target x86_64-linux-gnu
+20:36:33.399 [main] INFO dev.nekoobfuscator.native_.codegen.NativeBuildEngine -- Building native for LINUX_X64: zig cc -shared -Oz -std=c11 -Wall -Wextra -target x86_64-linux-gnu -I /usr/lib/jvm/java-21-openjdk/include -DNEKO_DEBUG_ENABLED=1 -I /usr/lib/jvm/java-21-openjdk/include/linux -o /tmp/neko_native_12130984276411207738/libneko_linux_x64.so /tmp/neko_native_sources_7582607725984652984/neko_native.c /tmp/neko_native_sources_7582607725984652984/neko_stubs.S
+20:36:33.845 [main] INFO dev.nekoobfuscator.native_.codegen.NativeBuildEngine -- Built libneko_linux_x64.so (57128 bytes)
+20:36:33.847 [main] INFO dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Native stage rejected 14 method(s)
+20:36:33.848 [main] INFO dev.nekoobfuscator.core.pipeline.ObfuscationPipeline -- Native stage: translated=12 rejected=14
+20:36:33.848 [main] INFO dev.nekoobfuscator.core.pipeline.ObfuscationPipeline -- Writing output JAR: verification/w1/final-v16/SnakeGame-native-debug.jar
+20:36:33.849 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: DataOfSquare
+20:36:33.849 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: KeyboardListener
+20:36:33.850 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: Main
+20:36:33.850 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: SquarePanel
+20:36:33.850 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: ThreadsController
+20:36:33.851 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: Tuple
+20:36:33.851 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: Window
+20:36:33.851 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: dev/nekoobfuscator/runtime/NekoNativeLoader
+20:36:33.853 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote resource: neko/native/libneko_linux_x64.so
+20:36:33.853 [main] INFO dev.nekoobfuscator.core.jar.JarOutput -- Wrote 8 classes and 1 resources to verification/w1/final-v16/SnakeGame-native-debug.jar
+20:36:33.853 [main] INFO dev.nekoobfuscator.core.pipeline.ObfuscationPipeline -- Obfuscation completed in 523ms
+[NekoObfuscator] Done in 591ms

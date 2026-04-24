@@ -1,0 +1,174 @@
+[NekoObfuscator] Starting...
+[NekoObfuscator] Registered 10 transform passes
+20:36:33.260 [main] INFO dev.nekoobfuscator.core.pipeline.ObfuscationPipeline -- Reading input JAR: test-jars/TEST.jar
+20:36:33.266 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: pack/Clazz
+20:36:33.266 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: pack/Main
+20:36:33.267 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: pack/tests/basics/accu/Digi
+20:36:33.267 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: pack/tests/basics/cross/Abst1
+20:36:33.267 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: pack/tests/basics/cross/Inte
+20:36:33.267 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: pack/tests/basics/cross/Top
+20:36:33.267 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: pack/tests/basics/ctrl/Ctrl
+20:36:33.267 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: pack/tests/basics/inner/Exec$Inner
+20:36:33.268 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: pack/tests/basics/inner/Exec
+20:36:33.268 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: pack/tests/basics/inner/Test
+20:36:33.268 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: pack/tests/basics/overwirte/Face
+20:36:33.268 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: pack/tests/basics/overwirte/Sub
+20:36:33.268 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: pack/tests/basics/overwirte/Super
+20:36:33.268 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: pack/tests/basics/runable/Exec
+20:36:33.268 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: pack/tests/basics/runable/Pool
+20:36:33.268 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: pack/tests/basics/runable/Task
+20:36:33.268 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: pack/tests/basics/sub/flo
+20:36:33.268 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: pack/tests/basics/sub/med
+20:36:33.268 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: pack/tests/basics/sub/SolAdd
+20:36:33.268 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: pack/tests/basics/sub/Solver
+20:36:33.269 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: pack/tests/bench/Calc
+20:36:33.269 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: pack/tests/reflects/annot/anno
+20:36:33.269 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: pack/tests/reflects/annot/annoe
+20:36:33.269 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: pack/tests/reflects/annot/annot
+20:36:33.269 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: pack/tests/reflects/counter/Count
+20:36:33.269 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: pack/tests/reflects/counter/Countee
+20:36:33.269 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: pack/tests/reflects/field/FObject
+20:36:33.269 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: pack/tests/reflects/field/FTest
+20:36:33.270 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: pack/tests/reflects/loader/Loader
+20:36:33.270 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: pack/tests/reflects/loader/LRun
+20:36:33.270 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: pack/tests/reflects/loader/LTest
+20:36:33.270 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: pack/tests/reflects/res/Accesor
+20:36:33.270 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: pack/tests/reflects/retrace/Tracee
+20:36:33.270 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: pack/tests/reflects/retrace/Tracer
+20:36:33.270 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: pack/tests/security/SecExec
+20:36:33.270 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: pack/tests/security/SecTest
+20:36:33.270 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: pack/tests/security/Sman
+20:36:33.270 [main] INFO dev.nekoobfuscator.core.jar.JarInput -- Loaded 37 classes and 4 resources
+20:36:33.271 [main] INFO dev.nekoobfuscator.core.pipeline.ObfuscationPipeline -- Loaded 37 classes, 4 resources
+20:36:33.271 [main] INFO dev.nekoobfuscator.core.pipeline.ObfuscationPipeline -- Class hierarchy: 45 entries
+20:36:33.277 [main] INFO dev.nekoobfuscator.core.pipeline.ObfuscationPipeline -- Master seed: 0x3039
+20:36:33.277 [main] INFO dev.nekoobfuscator.core.pipeline.ObfuscationPipeline -- Scheduled 0 transform passes
+20:36:33.278 [main] DEBUG dev.nekoobfuscator.core.pipeline.ObfuscationPipeline -- Injected runtime class: dev/nekoobfuscator/runtime/NekoNativeLoader
+20:36:33.278 [main] INFO dev.nekoobfuscator.core.pipeline.ObfuscationPipeline -- Running native compilation stage
+20:36:33.293 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/Clazz#<init>()V: constructors remain in bytecode form
+20:36:33.293 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/Main#<init>()V: constructors remain in bytecode form
+20:36:33.293 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/Main#main([Ljava/lang/String;)V: W9 deferred to W11-M5h: reference GETSTATIC requires GC load barrier coverage for ZGC/Shenandoah; G1/Serial/Parallel paths pending
+20:36:33.293 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/basics/accu/Digi#<init>()V: constructors remain in bytecode form
+20:36:33.293 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/basics/accu/Digi#run()V: W9 deferred to W11-M5h: reference GETSTATIC requires GC load barrier coverage for ZGC/Shenandoah; G1/Serial/Parallel paths pending
+20:36:33.293 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/basics/cross/Abst1#<init>()V: constructors remain in bytecode form
+20:36:33.293 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/basics/cross/Abst1#add(II)I: abstract methods have no translatable bytecode body
+20:36:33.294 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/basics/cross/Inte#mul(II)I: abstract methods have no translatable bytecode body
+20:36:33.294 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/basics/cross/Top#<init>()V: constructors remain in bytecode form
+20:36:33.294 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/basics/cross/Top#run()V: W9 deferred to W11-M5h: reference GETSTATIC requires GC load barrier coverage for ZGC/Shenandoah; G1/Serial/Parallel paths pending
+20:36:33.294 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/basics/ctrl/Ctrl#<init>()V: constructors remain in bytecode form; W9 deferred to W11-M5h: reference PUTFIELD/PUTSTATIC requires SATB/incremental update write barriers; pending W11 hardening
+20:36:33.294 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/basics/ctrl/Ctrl#runf()V: W9 deferred to W11-M5h: reference PUTFIELD/PUTSTATIC requires SATB/incremental update write barriers; pending W11 hardening
+20:36:33.294 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/basics/ctrl/Ctrl#run()V: W9 deferred to W11-M5h: reference GETSTATIC requires GC load barrier coverage for ZGC/Shenandoah; G1/Serial/Parallel paths pending
+20:36:33.294 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/basics/inner/Exec$Inner#<init>(Lpack/tests/basics/inner/Exec;I)V: constructors remain in bytecode form; W9 deferred to W11-M5h: reference PUTFIELD/PUTSTATIC requires SATB/incremental update write barriers; pending W11 hardening
+20:36:33.294 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/basics/inner/Exec#<init>()V: constructors remain in bytecode form
+20:36:33.294 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/basics/inner/Test#<init>()V: constructors remain in bytecode form
+20:36:33.295 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/basics/inner/Test#run()V: W9 deferred to W11-M5h: reference GETSTATIC requires GC load barrier coverage for ZGC/Shenandoah; G1/Serial/Parallel paths pending
+20:36:33.295 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/basics/overwirte/Face#face(I)Ljava/lang/String;: abstract methods have no translatable bytecode body; reference return requires bytecode body
+20:36:33.295 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/basics/overwirte/Sub#<init>()V: constructors remain in bytecode form
+20:36:33.295 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/basics/overwirte/Sub#run()V: W9 deferred to W11-M5h: reference GETSTATIC requires GC load barrier coverage for ZGC/Shenandoah; G1/Serial/Parallel paths pending
+20:36:33.295 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/basics/overwirte/Super#<init>()V: constructors remain in bytecode form
+20:36:33.295 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/basics/overwirte/Super#run()V: W9 deferred to W11-M5h: reference GETSTATIC requires GC load barrier coverage for ZGC/Shenandoah; G1/Serial/Parallel paths pending
+20:36:33.295 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/basics/runable/Exec#<init>(I)V: constructors remain in bytecode form
+20:36:33.296 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/basics/runable/Exec#<clinit>()V: class initializers are not translated
+20:36:33.296 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/basics/runable/Pool#<init>()V: constructors remain in bytecode form
+20:36:33.296 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/basics/runable/Pool#<clinit>()V: class initializers are not translated; W9 deferred to W11-M5h: reference GETSTATIC requires GC load barrier coverage for ZGC/Shenandoah; G1/Serial/Parallel paths pending; W9 deferred to W11-M5h: reference PUTFIELD/PUTSTATIC requires SATB/incremental update write barriers; pending W11 hardening
+20:36:33.296 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/basics/runable/Task#<init>()V: constructors remain in bytecode form
+20:36:33.296 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/basics/runable/Task#run()V: W9 deferred to W11-M5h: reference GETSTATIC requires GC load barrier coverage for ZGC/Shenandoah; G1/Serial/Parallel paths pending; W9 deferred to W11-M5f: BootstrapMethod CallSite resolution under strict no-JNI requires JavaCalls dlsym chain; cached g_neko_throw_bme slot is reserved
+20:36:33.296 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/basics/sub/flo#<init>()V: constructors remain in bytecode form
+20:36:33.296 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/basics/sub/med#<init>(II)V: constructors remain in bytecode form
+20:36:33.296 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/basics/sub/SolAdd#<init>()V: constructors remain in bytecode form
+20:36:33.296 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/basics/sub/Solver#<init>()V: constructors remain in bytecode form; W9 deferred to W11-M5h: reference GETSTATIC requires GC load barrier coverage for ZGC/Shenandoah; G1/Serial/Parallel paths pending
+20:36:33.296 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/bench/Calc#<init>()V: constructors remain in bytecode form
+20:36:33.296 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/bench/Calc#runAll()V: W9 deferred to W11-M5h: reference GETSTATIC requires GC load barrier coverage for ZGC/Shenandoah; G1/Serial/Parallel paths pending
+20:36:33.296 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/bench/Calc#<clinit>()V: class initializers are not translated
+20:36:33.297 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/reflects/annot/anno#val()Ljava/lang/String;: abstract methods have no translatable bytecode body; reference return requires bytecode body
+20:36:33.297 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/reflects/annot/anno#val2()Ljava/lang/String;: abstract methods have no translatable bytecode body; reference return requires bytecode body
+20:36:33.297 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/reflects/annot/annoe#<init>()V: constructors remain in bytecode form
+20:36:33.297 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/reflects/annot/annoe#dox()V: W9 deferred to W11-M5h: reference GETSTATIC requires GC load barrier coverage for ZGC/Shenandoah; G1/Serial/Parallel paths pending
+20:36:33.297 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/reflects/annot/annoe#dov()V: W9 deferred to W11-M5h: reference GETSTATIC requires GC load barrier coverage for ZGC/Shenandoah; G1/Serial/Parallel paths pending
+20:36:33.297 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/reflects/annot/annot#<init>()V: constructors remain in bytecode form
+20:36:33.297 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/reflects/counter/Count#<init>()V: constructors remain in bytecode form
+20:36:33.297 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/reflects/counter/Count#run()V: W9 deferred to W11-M5h: reference GETSTATIC requires GC load barrier coverage for ZGC/Shenandoah; G1/Serial/Parallel paths pending
+20:36:33.297 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/reflects/counter/Countee#<init>()V: constructors remain in bytecode form
+20:36:33.297 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/reflects/field/FObject#<init>(I)V: constructors remain in bytecode form
+20:36:33.297 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/reflects/field/FTest#<init>()V: constructors remain in bytecode form
+20:36:33.298 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/reflects/field/FTest#run()V: W9 deferred to W11-M5h: reference GETSTATIC requires GC load barrier coverage for ZGC/Shenandoah; G1/Serial/Parallel paths pending
+20:36:33.298 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/reflects/loader/Loader#<init>()V: constructors remain in bytecode form
+20:36:33.298 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/reflects/loader/Loader#readAllBytes(Ljava/io/InputStream;)[B: reference return requires direct ALOAD/ACONST_NULL producer
+20:36:33.298 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/reflects/loader/Loader#getResourceAsStream(Ljava/lang/String;)Ljava/io/InputStream;: reference return requires direct ALOAD/ACONST_NULL producer
+20:36:33.298 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/reflects/loader/Loader#findClass(Ljava/lang/String;)Ljava/lang/Class;: reference return requires direct ALOAD/ACONST_NULL producer
+20:36:33.298 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/reflects/loader/LRun#<init>()V: constructors remain in bytecode form
+20:36:33.298 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/reflects/loader/LTest#<init>()V: constructors remain in bytecode form
+20:36:33.298 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/reflects/loader/LTest#readAllBytes(Ljava/io/InputStream;)[B: reference return requires direct ALOAD/ACONST_NULL producer
+20:36:33.298 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/reflects/loader/LTest#run()V: W9 deferred to W11-M5h: reference GETSTATIC requires GC load barrier coverage for ZGC/Shenandoah; G1/Serial/Parallel paths pending
+20:36:33.298 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/reflects/res/Accesor#<init>()V: constructors remain in bytecode form
+20:36:33.298 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/reflects/res/Accesor#run()V: W9 deferred to W11-M5h: reference GETSTATIC requires GC load barrier coverage for ZGC/Shenandoah; G1/Serial/Parallel paths pending
+20:36:33.298 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/reflects/retrace/Tracee#<init>()V: constructors remain in bytecode form
+20:36:33.298 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/reflects/retrace/Tracee#doTrace(I)V: W9 deferred to W11-M5h: reference GETSTATIC requires GC load barrier coverage for ZGC/Shenandoah; G1/Serial/Parallel paths pending
+20:36:33.298 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/reflects/retrace/Tracee#<clinit>()V: class initializers are not translated
+20:36:33.298 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/reflects/retrace/Tracer#<init>()V: constructors remain in bytecode form
+20:36:33.298 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/reflects/retrace/Tracer#run()V: W9 deferred to W11-M5h: reference GETSTATIC requires GC load barrier coverage for ZGC/Shenandoah; G1/Serial/Parallel paths pending
+20:36:33.298 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/security/SecExec#<init>()V: constructors remain in bytecode form
+20:36:33.299 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/security/SecTest#<init>()V: constructors remain in bytecode form
+20:36:33.299 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/security/SecTest#run()V: W9 deferred to W11-M5h: reference GETSTATIC requires GC load barrier coverage for ZGC/Shenandoah; G1/Serial/Parallel paths pending
+20:36:33.299 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/security/Sman#<init>()V: constructors remain in bytecode form
+20:36:33.299 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/basics/ctrl/Ctrl#runt()V: INVOKE target not in neko manifest (translated→translated only)
+20:36:33.299 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/basics/runable/Exec#doAdd()V: INVOKE target not in neko manifest (translated→translated only)
+20:36:33.299 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/basics/sub/SolAdd#get()I: INVOKE target not in neko manifest (translated→translated only)
+20:36:33.299 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/bench/Calc#runStr()V: INVOKE target not in neko manifest (translated→translated only)
+20:36:33.299 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/reflects/annot/annot#run()V: INVOKE target not in neko manifest (translated→translated only)
+20:36:33.299 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/reflects/loader/LRun#run()V: INVOKE target not in neko manifest (translated→translated only)
+20:36:33.299 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/reflects/retrace/Tracee#toTrace(I)V: INVOKE target not in neko manifest (translated→translated only)
+20:36:33.300 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/security/SecExec#doShutdown()V: INVOKE target not in neko manifest (translated→translated only)
+20:36:33.300 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/security/Sman#checkPermission(Ljava/security/Permission;)V: INVOKE target not in neko manifest (translated→translated only)
+20:36:33.333 [main] INFO dev.nekoobfuscator.native_.codegen.NativeBuildEngine -- zig cc: compiling 1 .c + 1 .S files for target x86_64-linux-gnu
+20:36:33.333 [main] INFO dev.nekoobfuscator.native_.codegen.NativeBuildEngine -- Building native for LINUX_X64: zig cc -shared -Oz -std=c11 -Wall -Wextra -target x86_64-linux-gnu -I /usr/lib/jvm/java-21-openjdk/include -DNEKO_DEBUG_ENABLED=1 -I /usr/lib/jvm/java-21-openjdk/include/linux -o /tmp/neko_native_17982534943628759765/libneko_linux_x64.so /tmp/neko_native_sources_1951014990328411700/neko_native.c /tmp/neko_native_sources_1951014990328411700/neko_stubs.S
+20:36:33.823 [main] INFO dev.nekoobfuscator.native_.codegen.NativeBuildEngine -- Built libneko_linux_x64.so (59448 bytes)
+20:36:33.825 [main] INFO dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Native stage rejected 75 method(s)
+20:36:33.826 [main] INFO dev.nekoobfuscator.core.pipeline.ObfuscationPipeline -- Native stage: translated=14 rejected=75
+20:36:33.826 [main] INFO dev.nekoobfuscator.core.pipeline.ObfuscationPipeline -- Writing output JAR: verification/w1/final-v16/TEST-native-debug.jar
+20:36:33.828 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: pack/Clazz
+20:36:33.828 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: pack/Main
+20:36:33.828 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: pack/tests/basics/accu/Digi
+20:36:33.829 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: pack/tests/basics/cross/Abst1
+20:36:33.829 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: pack/tests/basics/cross/Inte
+20:36:33.829 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: pack/tests/basics/cross/Top
+20:36:33.829 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: pack/tests/basics/ctrl/Ctrl
+20:36:33.829 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: pack/tests/basics/inner/Exec$Inner
+20:36:33.829 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: pack/tests/basics/inner/Exec
+20:36:33.829 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: pack/tests/basics/inner/Test
+20:36:33.829 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: pack/tests/basics/overwirte/Face
+20:36:33.830 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: pack/tests/basics/overwirte/Sub
+20:36:33.830 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: pack/tests/basics/overwirte/Super
+20:36:33.830 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: pack/tests/basics/runable/Exec
+20:36:33.830 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: pack/tests/basics/runable/Pool
+20:36:33.830 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: pack/tests/basics/runable/Task
+20:36:33.830 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: pack/tests/basics/sub/flo
+20:36:33.830 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: pack/tests/basics/sub/med
+20:36:33.830 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: pack/tests/basics/sub/SolAdd
+20:36:33.831 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: pack/tests/basics/sub/Solver
+20:36:33.831 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: pack/tests/bench/Calc
+20:36:33.831 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: pack/tests/reflects/annot/anno
+20:36:33.831 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: pack/tests/reflects/annot/annoe
+20:36:33.831 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: pack/tests/reflects/annot/annot
+20:36:33.831 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: pack/tests/reflects/counter/Count
+20:36:33.831 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: pack/tests/reflects/counter/Countee
+20:36:33.831 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: pack/tests/reflects/field/FObject
+20:36:33.832 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: pack/tests/reflects/field/FTest
+20:36:33.832 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: pack/tests/reflects/loader/Loader
+20:36:33.832 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: pack/tests/reflects/loader/LRun
+20:36:33.832 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: pack/tests/reflects/loader/LTest
+20:36:33.832 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: pack/tests/reflects/res/Accesor
+20:36:33.832 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: pack/tests/reflects/retrace/Tracee
+20:36:33.832 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: pack/tests/reflects/retrace/Tracer
+20:36:33.832 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: pack/tests/security/SecExec
+20:36:33.832 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: pack/tests/security/SecTest
+20:36:33.833 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: pack/tests/security/Sman
+20:36:33.833 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: dev/nekoobfuscator/runtime/NekoNativeLoader
+20:36:33.833 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote resource: pack/tests/reflects/loader/TEST
+20:36:33.833 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote resource: pack/tests/reflects/res/file
+20:36:33.833 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote resource: pack/tests/reflects/res/file2
+20:36:33.833 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote resource: pack/tests/reflects/res/file3
+20:36:33.835 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote resource: neko/native/libneko_linux_x64.so
+20:36:33.835 [main] INFO dev.nekoobfuscator.core.jar.JarOutput -- Wrote 38 classes and 5 resources to verification/w1/final-v16/TEST-native-debug.jar
+20:36:33.835 [main] INFO dev.nekoobfuscator.core.pipeline.ObfuscationPipeline -- Obfuscation completed in 575ms
+[NekoObfuscator] Done in 631ms
