@@ -723,7 +723,6 @@ static jobject neko_resolve_constant_dynamic(JNIEnv *env, const char *caller_own
 
 static jobject neko_multi_new_array(JNIEnv *env, jint num_dims, jint *dims, const char *desc) {
     if (num_dims <= 0) return NULL;
-    if (dims[0] < 0) { (void)neko_throw_cached(env, g_neko_throw_nase); return NULL; }
     if (num_dims == 1) {
         char leaf = desc[1];
         switch (leaf) {
@@ -746,12 +745,9 @@ static jobject neko_multi_new_array(JNIEnv *env, jint num_dims, jint *dims, cons
     }
     jclass topElemClass = neko_class_for_descriptor(env, desc + 1);
     jobjectArray arr = (jobjectArray)neko_new_object_array(env, dims[0], topElemClass, NULL);
-    if (arr == NULL) return NULL;
     for (jint i = 0; i < dims[0]; i++) {
         jobject sub = neko_multi_new_array(env, num_dims - 1, dims + 1, desc + 1);
-        if (sub == NULL) return NULL;
         neko_set_object_array_element(env, arr, i, sub);
-        if (neko_pending_exception(neko_get_current_thread()) != NULL) return NULL;
     }
     return (jobject)arr;
 }
