@@ -31,59 +31,6 @@ static inline JNIEnv* neko_current_env(void) {
     return env;
 }
 
-static inline void* neko_take_pending_jni_exception_oop(JNIEnv *env) {
-    jthrowable pending;
-    void *oop;
-    if (env == NULL || !neko_exception_check(env)) return NULL;
-    pending = neko_exception_occurred(env);
-    if (pending == NULL) {
-        neko_exception_clear(env);
-        return NULL;
-    }
-    oop = neko_handle_oop((jobject)pending);
-    neko_exception_clear(env);
-    neko_delete_local_ref(env, pending);
-    return oop;
-}
-
-static inline void* neko_new_exception_oop(JNIEnv *env, const char *class_name, const char *message) {
-    jclass exc_class = NULL;
-    jmethodID init = NULL;
-    jstring text = NULL;
-    jobject exc = NULL;
-    void *oop = NULL;
-    if (env == NULL || class_name == NULL) return NULL;
-    exc_class = neko_find_class(env, class_name);
-    if (exc_class == NULL || neko_exception_check(env)) goto cleanup;
-    init = neko_get_method_id(env, exc_class, "<init>", "(Ljava/lang/String;)V");
-    if (init == NULL || neko_exception_check(env)) goto cleanup;
-    if (message != NULL) {
-        text = neko_new_string_utf(env, message);
-        if (text == NULL || neko_exception_check(env)) goto cleanup;
-    }
-    {
-        jvalue args[1];
-        args[0].l = text;
-        exc = neko_new_object_a(env, exc_class, init, args);
-    }
-    if (exc == NULL || neko_exception_check(env)) goto cleanup;
-    oop = neko_handle_oop(exc);
-cleanup:
-    if (oop == NULL) {
-        oop = neko_take_pending_jni_exception_oop(env);
-    }
-    if (exc != NULL) {
-        neko_delete_local_ref(env, exc);
-    }
-    if (text != NULL) {
-        neko_delete_local_ref(env, text);
-    }
-    if (exc_class != NULL) {
-        neko_delete_local_ref(env, exc_class);
-    }
-    return oop;
-}
-
 static inline void* neko_decode_heap_oop(u4 narrow) {
     if (narrow == 0u) return NULL;
     return (void*)(g_neko_vm_layout.narrow_oop_base + ((uintptr_t)narrow << g_neko_vm_layout.narrow_oop_shift));
@@ -149,17 +96,10 @@ __attribute__((visibility("default"))) void neko_raise_athrow(void *thread, void
 
 __attribute__((visibility("default"))) void* neko_tlab_alloc_slow(void *thread, size_t size) {
     JNIEnv *env;
-    void *oom_oop;
     (void)size;
     if (thread == NULL) return NULL;
     env = neko_current_env();
-    oom_oop = neko_new_exception_oop(env, "java/lang/OutOfMemoryError", "neko tlab slow path unavailable");
-    if (oom_oop == NULL) {
-        oom_oop = neko_take_pending_jni_exception_oop(env);
-    }
-    if (oom_oop != NULL) {
-        neko_set_pending_exception(thread, oom_oop);
-    }
+    (void)neko_throw_cached(env, g_neko_throw_oom);
     return NULL;
 }
 
@@ -241,9 +181,6 @@ static inline jfieldID neko_get_field_id(JNIEnv *env, jclass c, const char *n, c
 static inline jfieldID neko_get_static_field_id(JNIEnv *env, jclass c, const char *n, const char *s) { return NEKO_JNI_FN_PTR(env, 144, jfieldID, jclass, const char*, const char*)(env, c, n, s); }
 static inline jobject neko_to_reflected_field(JNIEnv *env, jclass cls, jfieldID fid, jboolean isStatic) { return NEKO_JNI_FN_PTR(env, 12, jobject, jclass, jfieldID, jboolean)(env, cls, fid, isStatic); }
 static inline jint neko_throw(JNIEnv *env, jthrowable exc) { return NEKO_JNI_FN_PTR(env, 13, jint, jthrowable)(env, exc); }
-static inline jint neko_throw_new(JNIEnv *env, jclass cls, const char *msg) { return NEKO_JNI_FN_PTR(env, 14, jint, jclass, const char*)(env, cls, msg); }
-static inline jthrowable neko_exception_occurred(JNIEnv *env) { return NEKO_JNI_FN_PTR(env, 15, jthrowable)(env); }
-static inline void neko_exception_clear(JNIEnv *env) { NEKO_JNI_FN_PTR(env, 17, void)(env); }
 static inline jint neko_ensure_local_capacity(JNIEnv *env, jint capacity) { return NEKO_JNI_FN_PTR(env, 26, jint, jint)(env, capacity); }
 static inline void neko_delete_global_ref(JNIEnv *env, jobject obj) { NEKO_JNI_FN_PTR(env, 22, void, jobject)(env, obj); }
 static inline jobject neko_new_global_ref(JNIEnv *env, jobject obj) { return NEKO_JNI_FN_PTR(env, 21, jobject, jobject)(env, obj); }
@@ -353,7 +290,6 @@ static inline void neko_set_float_array_region(JNIEnv *env, jfloatArray arr, jsi
 static inline void neko_set_double_array_region(JNIEnv *env, jdoubleArray arr, jsize start, jsize len, const jdouble *buf) { NEKO_JNI_FN_PTR(env, 214, void, jdoubleArray, jsize, jsize, const jdouble*)(env, arr, start, len, buf); }
 static inline jint neko_monitor_enter(JNIEnv *env, jobject obj) { return NEKO_JNI_FN_PTR(env, 217, jint, jobject)(env, obj); }
 static inline jint neko_monitor_exit(JNIEnv *env, jobject obj) { return NEKO_JNI_FN_PTR(env, 218, jint, jobject)(env, obj); }
-static inline jboolean neko_exception_check(JNIEnv *env) { return NEKO_JNI_FN_PTR(env, 228, jboolean)(env); }
 
 static char* neko_dotted_class_name(const char *internalName) {
     size_t len = strlen(internalName);
@@ -1004,25 +940,17 @@ static jvalue neko_icache_dispatch(
             }
             if (!neko_icache_note_miss(env, site)) {
                 jclass exactClass = neko_get_object_class(env, receiver);
-                if (exactClass != NULL && !neko_exception_check(env)) {
+                if (exactClass != NULL) {
                     jclass translatedClass = (meta != NULL && meta->translated_class_slot != NULL) ? *meta->translated_class_slot : NULL;
                     if (translatedClass != NULL && meta != NULL && meta->translated_stub != NULL && neko_is_same_object(env, exactClass, translatedClass)) {
                         jclass cachedExactClass = (jclass)neko_new_global_ref(env, exactClass);
-                        if (neko_exception_check(env)) {
-                            neko_exception_clear(env);
-                            cachedExactClass = NULL;
-                        }
                         neko_icache_store_direct(env, site, receiverKey, cachedExactClass, (void*)meta->translated_stub);
                         neko_delete_local_ref(env, exactClass);
                         return meta->translated_stub(env, receiver, args);
                     }
                     jmethodID exactMid = neko_get_method_id(env, exactClass, meta != NULL ? meta->name : NULL, meta != NULL ? meta->desc : NULL);
-                    if (exactMid != NULL && !neko_exception_check(env)) {
+                    if (exactMid != NULL) {
                         jclass cachedExactClass = (jclass)neko_new_global_ref(env, exactClass);
-                        if (neko_exception_check(env)) {
-                            neko_exception_clear(env);
-                            cachedExactClass = NULL;
-                        }
                         if (cachedExactClass != NULL) {
                             neko_icache_store_nonvirt(env, site, receiverKey, cachedExactClass, exactMid);
                         }
@@ -1030,10 +958,7 @@ static jvalue neko_icache_dispatch(
                         neko_delete_local_ref(env, exactClass);
                         return result;
                     }
-                    if (neko_exception_check(env)) neko_exception_clear(env);
                     neko_delete_local_ref(env, exactClass);
-                } else if (neko_exception_check(env)) {
-                    neko_exception_clear(env);
                 }
             }
         }

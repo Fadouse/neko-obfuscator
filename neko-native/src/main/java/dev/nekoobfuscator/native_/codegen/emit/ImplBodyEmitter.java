@@ -22,8 +22,7 @@ public final class ImplBodyEmitter {
         sb.append(") {\n");
         sb.append("    JNIEnv *env = neko_current_env();\n");
         sb.append("    if (!neko_loader_ready()) {\n");
-        sb.append("        void *error = neko_new_exception_oop(env, \"java/lang/LinkageError\", \"please check your native library load correctly\");\n");
-        sb.append("        if (error != NULL) neko_throw(env, (jthrowable)error);\n");
+        sb.append("        (void)neko_throw_cached(env, g_neko_throw_loader_linkage);\n");
         sb.append("        return");
         if (fn.returnType() != CType.VOID) {
             sb.append(" ").append(defaultReturnValue(fn.returnType()));
