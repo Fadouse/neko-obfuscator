@@ -1,0 +1,22 @@
+[nk] n onload enter
+[nk] n throwable_cache_ok=1 npe=0x7f824835ea62 le=0x7f824835ea82 loader_le=0x7f824835eab2
+[nk] lj 24/24[nk] o instance_klass_static_field_size_offset=268 s=A[nk] o instance_klass_static_oop_field_count_offset=284 s=A[nk] mf off=48 s=B[nk] o thread_tlab_top_offset=440 s=B[nk] o thread_tlab_start_offset=432 s=B[nk] o thread_tlab_pf_top_offset=448 s=B[nk] o thread_tlab_end_offset=456 s=B[nk] o thread_exception_oop_offset=1288 s=A[nk] o thread_exception_pc_offset=1296 s=A[nk] o java_thread_anchor_offset=928 s=A[nk] o java_thread_jni_environment_offset=960 s=B[nk] n class_klass_offset_scan=16
+neko: vm layout missing CompressedKlassPointers::_narrow_klass._base
+Exception in thread "main" java.lang.LinkageError: please check your native library load correctly
+	at org.example.Main.lambda$main$3(Main.java)
+	at java.base/java.util.stream.IntPipeline$4$1.accept(IntPipeline.java:246)
+	at java.base/java.util.stream.Streams$RangeIntSpliterator.forEachRemaining(Streams.java:104)
+	at java.base/java.util.Spliterator$OfInt.forEachRemaining(Spliterator.java:712)
+	at java.base/java.util.stream.AbstractPipeline.copyInto(AbstractPipeline.java:556)
+	at java.base/java.util.stream.AbstractPipeline.wrapAndCopyInto(AbstractPipeline.java:546)
+	at java.base/java.util.stream.ReduceOps$ReduceTask.doLeaf(ReduceOps.java:960)
+	at java.base/java.util.stream.ReduceOps$ReduceTask.doLeaf(ReduceOps.java:934)
+	at java.base/java.util.stream.AbstractTask.compute(AbstractTask.java:327)
+	at java.base/java.util.concurrent.CountedCompleter.exec(CountedCompleter.java:759)
+	at java.base/java.util.concurrent.ForkJoinTask.doExec(ForkJoinTask.java:507)
+	at java.base/java.util.concurrent.ForkJoinTask.invoke(ForkJoinTask.java:676)
+	at java.base/java.util.stream.ReduceOps$ReduceOp.evaluateParallel(ReduceOps.java:927)
+	at java.base/java.util.stream.AbstractPipeline.evaluate(AbstractPipeline.java:264)
+	at java.base/java.util.stream.IntPipeline.reduce(IntPipeline.java:515)
+	at java.base/java.util.stream.IntPipeline.sum(IntPipeline.java:473)
+	at org.example.Main.main(Main.java:193)

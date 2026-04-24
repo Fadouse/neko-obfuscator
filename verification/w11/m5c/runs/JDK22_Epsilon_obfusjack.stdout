@@ -1,0 +1,24 @@
+[0.001s][warning][gc,init] Consider setting -Xms equal to -Xmx to avoid resizing hiccups
+[0.001s][warning][gc,init] Consider enabling -XX:+AlwaysPreTouch to avoid memory commit hiccups
+=== JDK 21 Feature & Obfuscation Compatibility Test ===
+Sum=15 Product=50 Mix=21474836490 d=492.59841819737056
+Bits=701
+--------
+JDK21 demo
+--------
+char=中
+0 2 4 
+###
+1 2 3 4 5 
+grid[0][1]=X
+Lambda Hello World!
+a
+b
+c
+Hi, Alice
+HI, BOB
+Anonymous run()
+GREEN
+42
+sparse ok
+Optional=246

@@ -1,0 +1,8 @@
+[nk] n onload enter
+[nk] n throwable_cache_ok=1 npe=0x7fd4641740a2 le=0x7fd4641740c2 loader_le=0x7fd4641740f2
+[nk] lj 24/24[nk] o instance_klass_static_field_size_offset=268 s=A[nk] o instance_klass_static_oop_field_count_offset=284 s=A[nk] mf off=48 s=B[nk] o thread_tlab_top_offset=440 s=B[nk] o thread_tlab_start_offset=432 s=B[nk] o thread_tlab_pf_top_offset=448 s=B[nk] o thread_tlab_end_offset=456 s=B[nk] o thread_exception_oop_offset=1288 s=A[nk] o thread_exception_pc_offset=1296 s=A[nk] o java_thread_anchor_offset=928 s=A[nk] o java_thread_jni_environment_offset=960 s=B[nk] n class_klass_offset_scan=16
+neko: vm layout missing CompressedKlassPointers::_narrow_klass._base
+Exception in thread "main" java.lang.LinkageError: please check your native library load correctly
+	at pack.tests.bench.Calc.call(Calc.java)
+	at pack.tests.bench.Calc.runAll(Calc.java:9)
+	at pack.Main.main(Main.java:126)

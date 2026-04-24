@@ -1,0 +1,16 @@
+[nk] n onload enter
+[nk] n throwable_cache_ok=1 npe=0x7f47283557a2 le=0x7f47283557c2 loader_le=0x7f47283557f2
+[nk] lj 24/24[nk] o instance_klass_static_field_size_offset=284 s=A[nk] o instance_klass_static_oop_field_count_offset=300 s=A[nk] mf off=48 s=B[nk] o thread_tlab_top_offset=440 s=B[nk] o thread_tlab_start_offset=432 s=B[nk] o thread_tlab_pf_top_offset=448 s=B[nk] o thread_tlab_end_offset=456 s=B[nk] o thread_exception_oop_offset=1280 s=A[nk] o thread_exception_pc_offset=1288 s=A[nk] o java_thread_anchor_offset=928 s=A[nk] o java_thread_jni_environment_offset=960 s=B[nk] n class_klass_offset_scan=16
+[nk] o instance_klass_java_mirror_offset=112 s=B[nk] o thread_thread_state_offset=1100 s=A[nk] o java_thread_last_Java_sp_offset=928 s=B[nk] o java_thread_last_Java_fp_offset=944 s=B[nk] o java_thread_last_Java_pc_offset=936 s=B[nk] o oophandle_obj_offset=0 s=A[nk] vm j=21[nk] n strict_vm_layout_ok=1 next_link=144 cld_klasses=56 cld_handles=48 klass_mirror=112
+[nk] cap enter[nk] n boot_cld=0x7f472803a850 first_klass=0x7f46b2059e88 klass_count=1008 klass_name_off=24 sym_len_off=4 sym_body_off=6
+[nk] n boot_well_known_scan_ok=1 string=0x7f46b100e878 byte=0x7f46b1002318 char=0x7f46b1001d30 loader=0x7f46b2000400
+[nk] cap ok str=0x7f46b100e878 arr_b=0x7f46b1002318 arr_c=0x7f46b1001d30[nk] n loader_mark ready=1 klass=0x7f46b2000400 mirror=0x709b39dc8 off=116
+[nk] ol mark_loader_loaded ok str=0x7f46b100e878[nk] n w1 os=3 ks=0 tl=yes ex=yes
+[nk] n w4r tso=1100 ao=928+0 mo=112 hoo=0 tf=yes
+[nk] ol resolve_string_intern_layout ok hash_off=12[nk] n boot_cld_root_chain_ok=1
+[nk] ol prewarm ok backend=1[nk] dx owner_miss idx=0 name=org/example/Main$2[nk] dx owner_miss idx=1 name=org/example/Main$Circle[nk] dx owner_miss idx=2 name=org/example/Main$CloneThing[nk] dx owner_miss idx=3 name=org/example/Main$CloneThing[nk] dx owner_miss idx=4 name=org/example/Main$Point[nk] dx owner_miss idx=5 name=org/example/Main$Point[nk] dx owner_miss idx=6 name=org/example/Main$Rectangle[nk] dx owner_miss idx=7 name=org/example/Main$Rectangle[nk] dx owner_miss idx=8 name=org/example/Main$Triangle[nk] dx owner_miss idx=9 name=org/example/Main$Triangle[nk] dx owner_miss idx=10 name=org/example/Main$Triangle[nk] mm org/example/Main.isValidTriangle(Lorg/example/Main$Triangle;)Z 0x7f46a5406f10[nk] fp MethodFlags j=21[nk] pp org/example/Main.isValidTriangle(Lorg/example/Main$Triangle;)Z s=2[nk] mm org/example/Main.hiddenAdd(II)I 0x7f46a5407d68[nk] pp org/example/Main.hiddenAdd(II)I s=4[nk] mm org/example/Main.doTinyWork(II)J 0x7f46a5401830[nk] pp org/example/Main.doTinyWork(II)J s=5[nk] mm org/example/Main.lambda$mmulVirtualThreads$15([[DII[[D[[D)Ljava/lang/Void; 0x7f46a5402180[nk] pp org/example/Main.lambda$mmulVirtualThreads$15([[DII[[D[[D)Ljava/lang/Void; s=6[nk] mm org/example/Main.lambda$mmulParallelStream$14([[DI[[D[[DI)V 0x7f46a5402220[nk] pp org/example/Main.lambda$mmulParallelStream$14([[DI[[D[[DI)V s=7[nk] mm org/example/Main.lambda$main$3(I)I 0x7f46a5402be0[nk] pp org/example/Main.lambda$main$3(I)I s=8[nk] dm 6/17[nk] dp 6/17[nk] n w2 fs=11 ls=1 lc=0
+[nk] n w3 is=3 sb=0
+Exception in thread "main" java.lang.LinkageError: please check your native library load correctly
+	at org.example.Main$2.get(Main.java)
+	at org.example.Main$2.get(Main.java:267)
+	at org.example.Main.main(Main.java:268)

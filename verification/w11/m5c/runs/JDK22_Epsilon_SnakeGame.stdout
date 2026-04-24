@@ -1,0 +1,2 @@
+[0.001s][warning][gc,init] Consider setting -Xms equal to -Xmx to avoid resizing hiccups
+[0.001s][warning][gc,init] Consider enabling -XX:+AlwaysPreTouch to avoid memory commit hiccups
