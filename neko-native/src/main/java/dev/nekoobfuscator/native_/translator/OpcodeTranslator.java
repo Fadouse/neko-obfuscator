@@ -233,7 +233,7 @@ public final class OpcodeTranslator {
             }
             case Opcodes.CHECKCAST -> {
                 TypeInsnNode ti = (TypeInsnNode) insn;
-                stmts.add(raw("{ jobject obj = POP_O(); if (obj != NULL) { jclass cls = " + cachedTypeClassExpression(ti.desc) + "; if (cls != NULL && !neko_is_instance_of(env, obj, cls)) { (void)neko_throw_cached(env, g_neko_throw_cce); goto __neko_exception_exit; } } if (neko_pending_exception(thread) == NULL) { PUSH_O(obj); } }"));
+                stmts.add(raw("{ jobject __obj = POP_O(); if (__obj != NULL) { jclass __target = " + cachedTypeClassExpression(ti.desc) + "; if (__target == NULL) goto __neko_exception_exit; if (!neko_is_instance_of(env, __obj, __target)) { (void)neko_throw_cached(env, g_neko_throw_cce); goto __neko_exception_exit; } } PUSH_O(__obj); }"));
             }
             case Opcodes.MULTIANEWARRAY -> stmts.add(raw(translateMultiANewArray((MultiANewArrayInsnNode) insn)));
             case Opcodes.INVOKEDYNAMIC -> stmts.add(raw(translateInvokeDynamic((InvokeDynamicInsnNode) insn)));

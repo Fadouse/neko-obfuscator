@@ -116,8 +116,9 @@ public final class NativeTranslationSafetyChecker {
                      Opcodes.ARRAYLENGTH -> addReason(reasons, opcodeName(opcode) + " deferred beyond Wave 2");
                 case Opcodes.MONITORENTER,
                      Opcodes.MONITOREXIT,
-                     Opcodes.CHECKCAST,
                      Opcodes.INSTANCEOF -> addReason(reasons, opcodeName(opcode) + " deferred beyond Wave 2");
+                case Opcodes.CHECKCAST -> {
+                }
                 case Opcodes.IDIV,
                      Opcodes.IREM,
                      Opcodes.LDIV,
