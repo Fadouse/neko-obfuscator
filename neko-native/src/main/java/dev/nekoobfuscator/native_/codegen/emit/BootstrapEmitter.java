@@ -37,9 +37,6 @@ public final class BootstrapEmitter {
     X(gHotSpotVMLongConstantEntryValueOffset) \
     X(gHotSpotVMLongConstantEntryArrayStride)
 
-typedef uint32_t u4;
-typedef uint64_t u8;
-
 #define JVM_CONSTANT_Utf8 1u
 #define JVM_ACC_STATIC 0x0008u
 
@@ -55,12 +52,6 @@ NekoVmLayout g_neko_vm_layout = {0};
 static JavaVM *g_neko_java_vm = NULL;
 static uint32_t g_neko_manifest_match_count = 0u;
 static volatile uint8_t g_neko_loader_ready = 0u;
-#ifdef NEKO_DEBUG_ENABLED
-static int neko_debug_level = 0;
-#define NEKO_TRACE(level, ...) do { if (neko_debug_level >= (level)) fprintf(stderr, __VA_ARGS__); } while(0)
-#else
-#define NEKO_TRACE(level, ...) ((void)0)
-#endif
 static int g_neko_flag_patch_path_logged = 0;
 static const char *g_neko_wave4a_unavailable_reason = "uninitialized";
 static int g_neko_wave4a_handle_caveat_logged = 0;
@@ -264,7 +255,6 @@ static void neko_derive_wave2_layout_offsets(JNIEnv *env);
 static void neko_resolve_prepared_class_field_sites(JNIEnv *env, jclass klass, const char *owner_internal, void *owner_klass);
 static jboolean neko_prewarm_ldc_sites(JNIEnv *env);
 static void neko_publish_prepared_ldc_class_site(JNIEnv *env, jclass klass, const char *signature, void *prepared_klass);
-static void* neko_class_klass_pointer(jclass klass_obj);
 static bool neko_read_symbol_bytes(void* sym, const uint8_t** bytes_out, uint16_t* len_out);
 static bool neko_cp_utf8_symbol(void* cp, int idx, void** sym_out);
 static bool neko_field_walk_legacy(void* ik, uint32_t java_fields_count, const char* target_name, uint32_t target_name_len, const char* target_desc, uint32_t target_desc_len, bool want_static, int32_t* offset_out);

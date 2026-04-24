@@ -307,6 +307,16 @@ public final class CCodeGenerator {
     private String renderEarlyForwardDecls() {
         return """
             /* ---------- Neko early forward declarations (auto-generated) ---------- */
+            typedef uint32_t u4;
+            typedef uint64_t u8;
+
+            #ifdef NEKO_DEBUG_ENABLED
+            static int neko_debug_level = 0;
+            #define NEKO_TRACE(level, ...) do { if (neko_debug_level >= (level)) fprintf(stderr, __VA_ARGS__); } while(0)
+            #else
+            #define NEKO_TRACE(level, ...) ((void)0)
+            #endif
+
             typedef struct NekoVmLayout {
                 int java_spec_version;
                 size_t method_size;
@@ -493,6 +503,8 @@ public final class CCodeGenerator {
                 } while (0)
             typedef struct Klass Klass;
             typedef void* oop;
+            static inline void* neko_decode_klass_pointer(u4 narrow);
+            static void* neko_class_klass_pointer(jclass klass_obj);
             static jclass neko_load_class_noinit_with_loader(JNIEnv *env, const char *internalName, jobject loader);
             static jboolean neko_ldc_site_matches_loaded_class(JNIEnv *env, NekoManifestLdcSite *site, jclass candidate, const char *signature);
             __attribute__((visibility(\"default\"))) oop neko_rt_mirror_from_klass_nosafepoint(Klass *k);
