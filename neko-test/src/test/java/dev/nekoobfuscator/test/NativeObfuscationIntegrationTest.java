@@ -5,10 +5,13 @@ import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.objectweb.asm.Opcodes;
+import org.objectweb.asm.Type;
 import org.objectweb.asm.tree.AbstractInsnNode;
 import org.objectweb.asm.tree.ClassNode;
+import org.objectweb.asm.tree.LdcInsnNode;
 import org.objectweb.asm.tree.MethodInsnNode;
 import org.objectweb.asm.tree.MethodNode;
+import org.objectweb.asm.tree.TypeInsnNode;
 
 import java.nio.file.Path;
 import java.time.Duration;
@@ -27,6 +30,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class NativeObfuscationIntegrationTest {
     private static final String CALC_CLASS_ENTRY = "pack/tests/bench/Calc.class";
     private static final String NATIVE_LOADER_OWNER = "dev/nekoobfuscator/runtime/NekoNativeLoader";
+    private static final String LINKAGE_ERROR_OWNER = "java/lang/LinkageError";
+    private static final String LINKAGE_ERROR_MESSAGE = "please check your native library load correctly";
     private static final List<String> CALC_TRANSLATED_METHODS = List.of(
         "runAll()V",
         "call(I)V",
@@ -177,7 +182,7 @@ class NativeObfuscationIntegrationTest {
     }
 
     @Test
-    void nativeObfuscation_TEST_translatedMethodsKeepJavaFallbackBodies() throws Exception {
+    void nativeObfuscation_TEST_translatedMethodsThrowLinkageErrorBodies() throws Exception {
         byte[] calcClass = NativeObfuscationHelper.extractEntry(NativeObfuscationHelper.artifact("TEST").outputJar(), CALC_CLASS_ENTRY);
 
         assertTranslatedCalcClass(calcClass);
@@ -208,7 +213,7 @@ class NativeObfuscationIntegrationTest {
 
         assertEquals(originalMethods.keySet(), rewrittenMethods.keySet(), "Method signatures changed during native rewrite");
         for (Map.Entry<String, MethodNode> entry : rewrittenMethods.entrySet()) {
-            assertJavaFallbackBody(entry.getValue());
+            assertThrowLinkageErrorBody(entry.getValue());
         }
         assertSingleLoadCallAndNoBindClass(NativeObfuscationHelper.requireMethod(nativeCalc, "<clinit>", "()V"));
     }
@@ -230,14 +235,19 @@ class NativeObfuscationIntegrationTest {
     private static void assertTranslatedCalcClass(byte[] classBytes) {
         Map<String, MethodNode> translatedMethods = methodsBySignature(classBytes, CALC_TRANSLATED_METHODS);
         for (MethodNode method : translatedMethods.values()) {
-            assertJavaFallbackBody(method);
+            assertThrowLinkageErrorBody(method);
         }
         assertSingleLoadCallAndNoBindClass(NativeObfuscationHelper.requireMethod(classBytes, "<clinit>", "()V"));
     }
 
-    private static void assertJavaFallbackBody(MethodNode method) {
+    private static void assertThrowLinkageErrorBody(MethodNode method) {
         assertFalse((method.access & Opcodes.ACC_NATIVE) != 0,
-            () -> "Expected translated method to keep Java fallback bytecode: " + method.name + method.desc);
+            () -> "Expected translated method to keep bytecode body: " + method.name + method.desc);
+        assertEquals(3, method.maxStack, () -> "Unexpected maxStack for " + method.name + method.desc);
+        assertEquals(parameterSlotCount(method.access, method.desc), method.maxLocals,
+            () -> "Unexpected maxLocals for " + method.name + method.desc);
+        assertTrue(method.tryCatchBlocks == null || method.tryCatchBlocks.isEmpty(),
+            () -> "Translated method should not keep try/catch blocks: " + method.name + method.desc);
 
         List<AbstractInsnNode> instructions = new ArrayList<>();
         for (AbstractInsnNode insn = method.instructions.getFirst(); insn != null; insn = insn.getNext()) {
@@ -246,9 +256,21 @@ class NativeObfuscationIntegrationTest {
             }
         }
 
-        assertFalse(instructions.isEmpty(), () -> "Expected fallback instructions for " + method.name + method.desc);
-        assertFalse(isSyntheticLinkageErrorBody(instructions),
-            () -> "Translated method must not use an unconditional LinkageError fallback: " + method.name + method.desc);
+        assertEquals(5, instructions.size(), () -> "Expected exact 5-opcode throw body for " + method.name + method.desc);
+        assertTrue(instructions.get(0) instanceof TypeInsnNode, "First instruction must allocate LinkageError");
+        TypeInsnNode newInsn = (TypeInsnNode) instructions.get(0);
+        assertEquals(Opcodes.NEW, newInsn.getOpcode());
+        assertEquals(LINKAGE_ERROR_OWNER, newInsn.desc);
+        assertEquals(Opcodes.DUP, instructions.get(1).getOpcode());
+        assertTrue(instructions.get(2) instanceof LdcInsnNode, "Third instruction must load LinkageError message");
+        assertEquals(LINKAGE_ERROR_MESSAGE, ((LdcInsnNode) instructions.get(2)).cst);
+        assertTrue(instructions.get(3) instanceof MethodInsnNode, "Fourth instruction must call LinkageError.<init>");
+        MethodInsnNode init = (MethodInsnNode) instructions.get(3);
+        assertEquals(Opcodes.INVOKESPECIAL, init.getOpcode());
+        assertEquals(LINKAGE_ERROR_OWNER, init.owner);
+        assertEquals("<init>", init.name);
+        assertEquals("(Ljava/lang/String;)V", init.desc);
+        assertEquals(Opcodes.ATHROW, instructions.get(4).getOpcode());
     }
 
     private static void assertSingleLoadCallAndNoBindClass(MethodNode clinit) {
@@ -268,21 +290,11 @@ class NativeObfuscationIntegrationTest {
         assertEquals(1, loadCalls, "Expected exactly one NekoNativeLoader.load() invocation in <clinit>");
     }
 
-    private static boolean isSyntheticLinkageErrorBody(List<AbstractInsnNode> instructions) {
-        if (instructions.size() != 5) {
-            return false;
+    private static int parameterSlotCount(int access, String descriptor) {
+        int slots = (access & Opcodes.ACC_STATIC) == 0 ? 1 : 0;
+        for (Type argumentType : Type.getArgumentTypes(descriptor)) {
+            slots += argumentType.getSize();
         }
-        if (instructions.get(0).getOpcode() != Opcodes.NEW
-            || instructions.get(1).getOpcode() != Opcodes.DUP
-            || instructions.get(3).getOpcode() != Opcodes.INVOKESPECIAL
-            || instructions.get(4).getOpcode() != Opcodes.ATHROW) {
-            return false;
-        }
-        if (!(instructions.get(3) instanceof MethodInsnNode init)) {
-            return false;
-        }
-        return "java/lang/LinkageError".equals(init.owner)
-            && "<init>".equals(init.name)
-            && "(Ljava/lang/String;)V".equals(init.desc);
+        return slots;
     }
 }

@@ -69,9 +69,49 @@ static jboolean neko_apply_no_compile_flags(void *method_star) {
 }
 
 static int neko_patch_method(const NekoManifestMethod *entry, void *method_star) {
+    uintptr_t index;
+    void *compiled_code;
+    void *stub_i2i;
+    void *stub_c2i;
     if (entry == NULL || method_star == NULL) return -1;
-    NEKO_TRACE(2, "[nk] ps %s.%s%s", entry->owner_internal, entry->method_name, entry->method_desc);
-    return -1;
+    index = (uintptr_t)(entry - g_neko_manifest_methods);
+    if (index >= g_neko_manifest_method_count) return -1;
+    if (g_neko_manifest_patch_states[index] == NEKO_PATCH_STATE_APPLIED) return 0;
+    if (g_neko_manifest_patch_states[index] == NEKO_PATCH_STATE_FAILED) return -1;
+
+    compiled_code = __atomic_load_n((void**)((uint8_t*)method_star + g_neko_vm_layout.off_method_code), __ATOMIC_ACQUIRE);
+    if (compiled_code != NULL) {
+        g_neko_manifest_patch_states[index] = NEKO_PATCH_STATE_FAILED;
+    NEKO_TRACE(1, "[nk] pc %s.%s%s", entry->owner_internal, entry->method_name, entry->method_desc);
+        return -1;
+    }
+    if (!neko_apply_no_compile_flags(method_star)) {
+        g_neko_manifest_patch_states[index] = NEKO_PATCH_STATE_FAILED;
+        neko_error_log("failed to set no-compile bits for %s.%s%s", entry->owner_internal, entry->method_name, entry->method_desc);
+        return -1;
+    }
+    if (entry->signature_id >= g_neko_signature_descriptor_count) {
+        g_neko_manifest_patch_states[index] = NEKO_PATCH_STATE_FAILED;
+        neko_error_log("signature_id %u out of range for %s.%s%s", entry->signature_id, entry->owner_internal, entry->method_name, entry->method_desc);
+        return -1;
+    }
+
+    stub_i2i = g_neko_signature_i2i_stubs[entry->signature_id];
+    stub_c2i = g_neko_signature_c2i_stubs[entry->signature_id];
+    if (stub_i2i == NULL || stub_c2i == NULL) {
+        g_neko_manifest_patch_states[index] = NEKO_PATCH_STATE_FAILED;
+        neko_error_log("missing stub for signature %u (%s.%s%s)", entry->signature_id, entry->owner_internal, entry->method_name, entry->method_desc);
+        return -1;
+    }
+
+    __atomic_store_n((void**)((uint8_t*)method_star + g_neko_vm_layout.off_method_i2i_entry), stub_i2i, __ATOMIC_RELEASE);
+    __atomic_store_n((void**)((uint8_t*)method_star + g_neko_vm_layout.off_method_from_interpreted_entry), stub_i2i, __ATOMIC_RELEASE);
+    __atomic_store_n((void**)((uint8_t*)method_star + g_neko_vm_layout.off_method_from_compiled_entry), stub_c2i, __ATOMIC_RELEASE);
+
+    g_neko_manifest_patch_states[index] = NEKO_PATCH_STATE_APPLIED;
+    g_neko_manifest_patch_count++;
+    NEKO_TRACE(1, "[nk] pp %s.%s%s s=%u", entry->owner_internal, entry->method_name, entry->method_desc, entry->signature_id);
+    return 0;
 }
 
 static void neko_patch_discovered_methods(void) {
