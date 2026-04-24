@@ -102,23 +102,23 @@ public final class OpcodeTranslator {
             case Opcodes.DSTORE -> stmts.add(raw("locals[" + ((VarInsnNode) insn).var + "].d = POP_D();"));
             case Opcodes.ASTORE -> stmts.add(raw("locals[" + ((VarInsnNode) insn).var + "].o = POP_O();"));
 
-            case Opcodes.IALOAD -> stmts.add(raw("{ jint __i = POP_I(); jintArray __a = (jintArray)POP_O(); PUSH_I(neko_fast_iaload(env, __a, __i)); /* fallback: neko_get_int_array_region */ }"));
-            case Opcodes.LALOAD -> stmts.add(raw("{ jint __i = POP_I(); jlongArray __a = (jlongArray)POP_O(); PUSH_L(neko_fast_laload(env, __a, __i)); /* fallback: neko_get_long_array_region */ }"));
-            case Opcodes.FALOAD -> stmts.add(raw("{ jint __i = POP_I(); jfloatArray __a = (jfloatArray)POP_O(); PUSH_F(neko_fast_faload(env, __a, __i)); /* fallback: neko_get_float_array_region */ }"));
-            case Opcodes.DALOAD -> stmts.add(raw("{ jint __i = POP_I(); jdoubleArray __a = (jdoubleArray)POP_O(); PUSH_D(neko_fast_daload(env, __a, __i)); /* fallback: neko_get_double_array_region */ }"));
-            case Opcodes.AALOAD -> stmts.add(raw("{ jint __i = POP_I(); jobjectArray __a = (jobjectArray)POP_O(); PUSH_O(neko_get_object_array_element(env, __a, __i)); }"));
-            case Opcodes.BALOAD -> stmts.add(raw("{ jint __i = POP_I(); jbyteArray __a = (jbyteArray)POP_O(); PUSH_I((jint)neko_fast_baload(env, __a, __i)); /* fallback: neko_get_byte_array_region */ }"));
-            case Opcodes.CALOAD -> stmts.add(raw("{ jint __i = POP_I(); jcharArray __a = (jcharArray)POP_O(); PUSH_I((jint)neko_fast_caload(env, __a, __i)); /* fallback: neko_get_char_array_region */ }"));
-            case Opcodes.SALOAD -> stmts.add(raw("{ jint __i = POP_I(); jshortArray __a = (jshortArray)POP_O(); PUSH_I((jint)neko_fast_saload(env, __a, __i)); /* fallback: neko_get_short_array_region */ }"));
+            case Opcodes.IALOAD -> stmts.add(raw(primitiveArrayLoad("jintArray", "PUSH_I(neko_fast_iaload(env, __a, __idx)); /* fallback: neko_get_int_array_region */")));
+            case Opcodes.LALOAD -> stmts.add(raw(primitiveArrayLoad("jlongArray", "PUSH_L(neko_fast_laload(env, __a, __idx)); /* fallback: neko_get_long_array_region */")));
+            case Opcodes.FALOAD -> stmts.add(raw(primitiveArrayLoad("jfloatArray", "PUSH_F(neko_fast_faload(env, __a, __idx)); /* fallback: neko_get_float_array_region */")));
+            case Opcodes.DALOAD -> stmts.add(raw(primitiveArrayLoad("jdoubleArray", "PUSH_D(neko_fast_daload(env, __a, __idx)); /* fallback: neko_get_double_array_region */")));
+            case Opcodes.AALOAD -> stmts.add(raw("{ jint __idx = POP_I(); jobjectArray __a = (jobjectArray)POP_O(); " + arrayBoundsCheck("__a", "__idx") + " jobject __value = neko_get_object_array_element(env, __a, __idx); if (neko_pending_exception(thread) != NULL) goto __neko_exception_exit; PUSH_O(__value); }"));
+            case Opcodes.BALOAD -> stmts.add(raw(primitiveArrayLoad("jbyteArray", "PUSH_I((jint)neko_fast_baload(env, __a, __idx)); /* fallback: neko_get_byte_array_region */")));
+            case Opcodes.CALOAD -> stmts.add(raw(primitiveArrayLoad("jcharArray", "PUSH_I((jint)neko_fast_caload(env, __a, __idx)); /* fallback: neko_get_char_array_region */")));
+            case Opcodes.SALOAD -> stmts.add(raw(primitiveArrayLoad("jshortArray", "PUSH_I((jint)neko_fast_saload(env, __a, __idx)); /* fallback: neko_get_short_array_region */")));
 
-            case Opcodes.IASTORE -> stmts.add(raw("{ jint __v = POP_I(); jint __i = POP_I(); jintArray __a = (jintArray)POP_O(); neko_fast_iastore(env, __a, __i, __v); /* fallback: neko_set_int_array_region */ }"));
-            case Opcodes.LASTORE -> stmts.add(raw("{ jlong __v = POP_L(); jint __i = POP_I(); jlongArray __a = (jlongArray)POP_O(); neko_fast_lastore(env, __a, __i, __v); /* fallback: neko_set_long_array_region */ }"));
-            case Opcodes.FASTORE -> stmts.add(raw("{ jfloat __v = POP_F(); jint __i = POP_I(); jfloatArray __a = (jfloatArray)POP_O(); neko_fast_fastore(env, __a, __i, __v); /* fallback: neko_set_float_array_region */ }"));
-            case Opcodes.DASTORE -> stmts.add(raw("{ jdouble __v = POP_D(); jint __i = POP_I(); jdoubleArray __a = (jdoubleArray)POP_O(); neko_fast_dastore(env, __a, __i, __v); /* fallback: neko_set_double_array_region */ }"));
-            case Opcodes.AASTORE -> stmts.add(raw("{ jobject __v = POP_O(); jint __i = POP_I(); jobjectArray __a = (jobjectArray)POP_O(); neko_set_object_array_element(env, __a, __i, __v); }"));
-            case Opcodes.BASTORE -> stmts.add(raw("{ jint __v = POP_I(); jint __i = POP_I(); jbyteArray __a = (jbyteArray)POP_O(); neko_fast_bastore(env, __a, __i, (jbyte)__v); /* fallback: neko_set_byte_array_region */ }"));
-            case Opcodes.CASTORE -> stmts.add(raw("{ jint __v = POP_I(); jint __i = POP_I(); jcharArray __a = (jcharArray)POP_O(); neko_fast_castore(env, __a, __i, (jchar)__v); /* fallback: neko_set_char_array_region */ }"));
-            case Opcodes.SASTORE -> stmts.add(raw("{ jint __v = POP_I(); jint __i = POP_I(); jshortArray __a = (jshortArray)POP_O(); neko_fast_sastore(env, __a, __i, (jshort)__v); /* fallback: neko_set_short_array_region */ }"));
+            case Opcodes.IASTORE -> stmts.add(raw(primitiveArrayStore("jint", "POP_I()", "jintArray", "neko_fast_iastore(env, __a, __idx, __value); /* fallback: neko_set_int_array_region */")));
+            case Opcodes.LASTORE -> stmts.add(raw(primitiveArrayStore("jlong", "POP_L()", "jlongArray", "neko_fast_lastore(env, __a, __idx, __value); /* fallback: neko_set_long_array_region */")));
+            case Opcodes.FASTORE -> stmts.add(raw(primitiveArrayStore("jfloat", "POP_F()", "jfloatArray", "neko_fast_fastore(env, __a, __idx, __value); /* fallback: neko_set_float_array_region */")));
+            case Opcodes.DASTORE -> stmts.add(raw(primitiveArrayStore("jdouble", "POP_D()", "jdoubleArray", "neko_fast_dastore(env, __a, __idx, __value); /* fallback: neko_set_double_array_region */")));
+            case Opcodes.AASTORE -> stmts.add(raw("{ jobject __value = POP_O(); jint __idx = POP_I(); jobjectArray __a = (jobjectArray)POP_O(); " + arrayBoundsCheck("__a", "__idx") + " if (__value != NULL) { jclass __array_class = neko_get_object_class(env, __a); jmethodID __component_mid = " + cachedMethodExpression("java/lang/Class", "getComponentType", "()Ljava/lang/Class;", false) + "; if (__array_class == NULL || __component_mid == NULL) goto __neko_exception_exit; jclass __component = (jclass)neko_call_object_method_a(env, __array_class, __component_mid, NULL); if (neko_pending_exception(thread) != NULL) goto __neko_exception_exit; if (__component != NULL && !neko_is_instance_of(env, __value, __component)) { (void)neko_throw_cached(env, g_neko_throw_ase); goto __neko_exception_exit; } } neko_set_object_array_element(env, __a, __idx, __value); if (neko_pending_exception(thread) != NULL) goto __neko_exception_exit; }"));
+            case Opcodes.BASTORE -> stmts.add(raw(primitiveArrayStore("jint", "POP_I()", "jbyteArray", "neko_fast_bastore(env, __a, __idx, (jbyte)__value); /* fallback: neko_set_byte_array_region */")));
+            case Opcodes.CASTORE -> stmts.add(raw(primitiveArrayStore("jint", "POP_I()", "jcharArray", "neko_fast_castore(env, __a, __idx, (jchar)__value); /* fallback: neko_set_char_array_region */")));
+            case Opcodes.SASTORE -> stmts.add(raw(primitiveArrayStore("jint", "POP_I()", "jshortArray", "neko_fast_sastore(env, __a, __idx, (jshort)__value); /* fallback: neko_set_short_array_region */")));
 
             case Opcodes.IADD -> stmts.add(raw("{ jint b = POP_I(); jint a = POP_I(); PUSH_I(a + b); }"));
             case Opcodes.ISUB -> stmts.add(raw("{ jint b = POP_I(); jint a = POP_I(); PUSH_I(a - b); }"));
@@ -199,7 +199,7 @@ public final class OpcodeTranslator {
             case Opcodes.ARETURN -> stmts.add(raw("return (void*)POP_O();"));
             case Opcodes.RETURN -> stmts.add(raw("return;"));
 
-            case Opcodes.ARRAYLENGTH -> stmts.add(raw("{ jarray arr = (jarray)POP_O(); PUSH_I(neko_get_array_length(env, arr)); }"));
+            case Opcodes.ARRAYLENGTH -> stmts.add(raw("{ jarray __arr = (jarray)POP_O(); if (__arr == NULL) { (void)neko_throw_cached(env, g_neko_throw_npe); goto __neko_exception_exit; } PUSH_I((jint)neko_get_array_length(env, __arr)); }"));
             case Opcodes.ATHROW -> stmts.add(raw("{ jobject __thrown = POP_O(); if (__thrown == NULL) { (void)neko_throw_cached(env, g_neko_throw_npe); goto __neko_exception_exit; } neko_set_pending_exception(thread, (void*)__thrown); goto __neko_exception_exit; }"));
             case Opcodes.MONITORENTER -> stmts.add(raw("neko_monitor_enter(env, POP_O());"));
             case Opcodes.MONITOREXIT -> stmts.add(raw("neko_monitor_exit(env, POP_O());"));
@@ -847,6 +847,26 @@ public final class OpcodeTranslator {
 
     private String newArrayCall(int operand) {
         return newArrayCall(operand, "len");
+    }
+
+    private String primitiveArrayLoad(String arrayType, String loadExpression) {
+        return "{ jint __idx = POP_I(); " + arrayType + " __a = (" + arrayType + ")POP_O(); "
+            + arrayBoundsCheck("__a", "__idx")
+            + loadExpression
+            + " }";
+    }
+
+    private String primitiveArrayStore(String valueType, String valueExpression, String arrayType, String storeExpression) {
+        return "{ " + valueType + " __value = " + valueExpression + "; jint __idx = POP_I(); " + arrayType + " __a = (" + arrayType + ")POP_O(); "
+            + arrayBoundsCheck("__a", "__idx")
+            + storeExpression
+            + " }";
+    }
+
+    private String arrayBoundsCheck(String arrayVar, String indexVar) {
+        return "if (" + arrayVar + " == NULL) { (void)neko_throw_cached(env, g_neko_throw_npe); goto __neko_exception_exit; } "
+            + "jsize __len = neko_get_array_length(env, (jarray)" + arrayVar + "); "
+            + "if ((jint)__len <= " + indexVar + " || " + indexVar + " < 0) { (void)neko_throw_cached(env, g_neko_throw_aioobe); goto __neko_exception_exit; } ";
     }
 
     private String newArrayCall(int operand, String lengthExpr) {
