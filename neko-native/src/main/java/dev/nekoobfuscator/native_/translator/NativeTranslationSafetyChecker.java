@@ -159,6 +159,9 @@ public final class NativeTranslationSafetyChecker {
             if (unsupportedInvokeReason(methodInsn, opcode) != null) {
                 continue;
             }
+            if (opcode == Opcodes.INVOKEVIRTUAL || opcode == Opcodes.INVOKEINTERFACE) {
+                continue;
+            }
             String targetKey = invokeTargetKey(methodInsn);
             if (!manifestMethodKeys.contains(targetKey)) {
                 addReason(reasons, "INVOKE target not in neko manifest (translated→translated only)");
@@ -344,21 +347,6 @@ public final class NativeTranslationSafetyChecker {
     }
 
     private String unsupportedInvokeReason(MethodInsnNode methodInsn, int opcode) {
-        Type returnType = Type.getReturnType(methodInsn.desc);
-        if (returnType.getSort() == Type.OBJECT || returnType.getSort() == Type.ARRAY) {
-            return "INVOKE with reference return deferred to Wave 4 (oop return adapter)";
-        }
-        for (Type argumentType : Type.getArgumentTypes(methodInsn.desc)) {
-            if (argumentType.getSort() == Type.OBJECT || argumentType.getSort() == Type.ARRAY) {
-                return "INVOKE with reference arguments deferred pending JNI-free receiver spill hardening";
-            }
-        }
-        if (opcode == Opcodes.INVOKEVIRTUAL) {
-            return "INVOKEVIRTUAL deferred pending Wave 3 vtable dispatch hardening";
-        }
-        if (opcode == Opcodes.INVOKEINTERFACE) {
-            return "INVOKEINTERFACE deferred pending Wave 3 itable dispatch hardening";
-        }
         return null;
     }
 
