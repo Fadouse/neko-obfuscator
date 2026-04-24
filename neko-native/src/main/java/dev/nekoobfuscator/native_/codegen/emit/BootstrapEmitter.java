@@ -640,6 +640,8 @@ static void neko_reset_vm_layout(void) {
     g_neko_vm_layout.off_instance_klass_java_mirror = -1;
     g_neko_vm_layout.off_instance_klass_static_field_size = -1;
     g_neko_vm_layout.off_instance_klass_static_oop_field_count = -1;
+    g_neko_vm_layout.off_instance_klass_vtable_start = -1;
+    g_neko_vm_layout.off_instance_klass_itable_start = -1;
     g_neko_vm_layout.off_symbol_length = -1;
     g_neko_vm_layout.off_symbol_body = -1;
     g_neko_vm_layout.off_string_value = -1;
@@ -1148,6 +1150,8 @@ static jboolean neko_parse_vm_layout(JNIEnv *env) {
             else if (neko_streq(field_name, "_java_mirror")) g_neko_vm_layout.off_instance_klass_java_mirror = (ptrdiff_t)offset;
             else if (neko_streq(field_name, "_static_field_size")) g_neko_vm_layout.off_instance_klass_static_field_size = (ptrdiff_t)offset;
             else if (neko_streq(field_name, "_static_oop_field_count")) g_neko_vm_layout.off_instance_klass_static_oop_field_count = (ptrdiff_t)offset;
+            else if (neko_streq(field_name, "_vtable_start")) g_neko_vm_layout.off_instance_klass_vtable_start = (ptrdiff_t)offset;
+            else if (neko_streq(field_name, "_itable_start")) g_neko_vm_layout.off_instance_klass_itable_start = (ptrdiff_t)offset;
         } else if (neko_streq(type_name, "Symbol")) {
             if (neko_streq(field_name, "_length")) g_neko_vm_layout.off_symbol_length = (ptrdiff_t)offset;
             else if (neko_streq(field_name, "_body")) g_neko_vm_layout.off_symbol_body = (ptrdiff_t)offset;
@@ -1210,6 +1214,9 @@ static jboolean neko_parse_vm_layout(JNIEnv *env) {
         type_size = (size_t)*(const uint64_t*)(entry + type_size_off);
         if (neko_streq(type_name, "Method")) g_neko_vm_layout.method_size = type_size;
         else if (neko_streq(type_name, "InstanceKlass")) g_neko_vm_layout.instance_klass_size = type_size;
+        else if (neko_streq(type_name, "vtableEntry")) g_neko_vm_layout.vtable_entry_size = type_size;
+        else if (neko_streq(type_name, "itableOffsetEntry")) g_neko_vm_layout.itable_offset_entry_size = type_size;
+        else if (neko_streq(type_name, "itableMethodEntry")) g_neko_vm_layout.itable_method_entry_size = type_size;
         else if (neko_streq(type_name, "ConstantPool")) g_neko_vm_layout.constant_pool_size = type_size;
         else if (neko_streq(type_name, "AccessFlags")) g_neko_vm_layout.access_flags_size = type_size;
         else if (neko_streq(type_name, "MethodFlags")) g_neko_vm_layout.method_flags_size = type_size;

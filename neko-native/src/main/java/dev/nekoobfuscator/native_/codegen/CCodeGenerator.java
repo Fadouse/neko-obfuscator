@@ -311,6 +311,9 @@ public final class CCodeGenerator {
                 int java_spec_version;
                 size_t method_size;
                 size_t instance_klass_size;
+                size_t vtable_entry_size;
+                size_t itable_offset_entry_size;
+                size_t itable_method_entry_size;
                 size_t access_flags_size;
                 size_t method_flags_size;
                 size_t java_frame_anchor_size;
@@ -346,6 +349,8 @@ public final class CCodeGenerator {
                 ptrdiff_t off_instance_klass_java_mirror;
                 ptrdiff_t off_instance_klass_static_field_size;
                 ptrdiff_t off_instance_klass_static_oop_field_count;
+                ptrdiff_t off_instance_klass_vtable_start;
+                ptrdiff_t off_instance_klass_itable_start;
                 ptrdiff_t off_string_value;
                 ptrdiff_t off_string_coder;
                 ptrdiff_t off_array_base_byte;
