@@ -229,7 +229,7 @@ public final class OpcodeTranslator {
 
             case Opcodes.INSTANCEOF -> {
                 TypeInsnNode ti = (TypeInsnNode) insn;
-                stmts.add(raw("{ jobject obj = POP_O(); jclass cls = " + cachedTypeClassExpression(ti.desc) + "; jint result = 0; if (cls != NULL) { result = neko_is_instance_of(env, obj, cls); } PUSH_I(result); }"));
+                stmts.add(raw("{ jobject __obj = POP_O(); jboolean __match = JNI_FALSE; if (__obj != NULL) { jclass __target = " + cachedTypeClassExpression(ti.desc) + "; if (__target == NULL) goto __neko_exception_exit; __match = neko_is_instance_of(env, __obj, __target); } PUSH_I(__match ? 1 : 0); }"));
             }
             case Opcodes.CHECKCAST -> {
                 TypeInsnNode ti = (TypeInsnNode) insn;
