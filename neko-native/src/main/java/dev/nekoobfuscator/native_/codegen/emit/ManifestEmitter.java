@@ -129,14 +129,11 @@ public final class ManifestEmitter {
         sb.append("    const char* owner_internal;\n");
         sb.append("    const char* field_name;\n");
         sb.append("    const char* field_desc;\n");
-        sb.append("    jclass *owner_class_slot;\n");
         sb.append("    uint8_t is_static;\n");
         sb.append("    uint8_t is_reference;\n");
         sb.append("    uint8_t is_volatile;\n");
         sb.append("    uint8_t _pad0;\n");
         sb.append("    void* cached_klass;\n");
-        sb.append("    jobject static_base_global_ref;\n");
-        sb.append("    void *volatile *static_base_slot;\n");
         sb.append("    ptrdiff_t field_offset_cookie;\n");
         sb.append("    ptrdiff_t resolved_offset;\n");
         sb.append("} NekoManifestFieldSite;\n\n");
@@ -157,7 +154,6 @@ public final class ManifestEmitter {
         sb.append("    uint16_t _pad1;\n");
         sb.append("    const uint8_t* raw_constant_utf8;\n");
         sb.append("    size_t raw_constant_utf8_len;\n");
-        sb.append("    jclass *owner_class_slot;\n");
         sb.append("    void* cached_klass;\n");
         sb.append("    void* resolved_cache_handle;\n");
         sb.append("} NekoManifestLdcSite;\n\n");
@@ -320,10 +316,9 @@ public final class ManifestEmitter {
             ManifestFieldSiteRef site = sites.get(i);
             sb.append("    { ")
                 .append(site.ownerClassIndex()).append("u, \"").append(c(site.owner())).append("\", \"")
-                .append(c(site.name())).append("\", \"").append(c(site.desc())).append("\", &")
-                .append(generator.classSlotName(site.owner())).append(", ")
+                .append(c(site.name())).append("\", \"").append(c(site.desc())).append("\", ")
                 .append(site.isStatic() ? "1u" : "0u").append(", ")
-                .append(site.isReference() ? "1u" : "0u").append(", 0u, 0u, NULL, NULL, NULL, -1, NEKO_FIELD_SITE_UNRESOLVED }");
+                .append(site.isReference() ? "1u" : "0u").append(", 0u, 0u, NULL, -1, NEKO_FIELD_SITE_UNRESOLVED }");
             sb.append(i + 1 == sites.size() ? '\n' : ',').append(i + 1 == sites.size() ? "" : "\n");
         }
         sb.append("};\n");
@@ -365,14 +360,11 @@ public final class ManifestEmitter {
         sb.append("static NekoManifestLdcSite ").append(manifestLdcSiteArrayName(methodId)).append('[').append(sites.size()).append("] = {\n");
         for (int i = 0; i < sites.size(); i++) {
             ManifestLdcSiteRef site = sites.get(i);
-            String ownerSlotExpr = site.kind() == LdcKind.CLASS
-                ? "&" + generator.classSlotName(site.ownerInternal())
-                : "NULL";
             sb.append("    { ").append(site.siteIndex()).append("u, ")
                 .append(site.ownerClassIndex() >= 0 ? site.ownerClassIndex() + "u" : "0u")
                 .append(", ").append(site.kind().constant()).append(", 0u, 0u, ")
                 .append(site.blob().symbol()).append(", ").append(site.blob().bytes().length).append("u, ")
-                .append(ownerSlotExpr).append(", NULL, NULL }");
+                .append("NULL, NULL }");
             sb.append(i + 1 == sites.size() ? '\n' : ',').append(i + 1 == sites.size() ? "" : "\n");
         }
         sb.append("};\n");
