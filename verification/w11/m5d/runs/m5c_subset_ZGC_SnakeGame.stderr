@@ -1,0 +1,16 @@
+[nk] n onload enter
+[nk] n throwable_cache_ok=1 npe=0x7ff54c1b498a le=0x7ff54c1b49aa loader_le=0x7ff54c1b49da
+[nk] lj 24/24[nk] o instance_klass_static_field_size_offset=284 s=A[nk] o instance_klass_static_oop_field_count_offset=300 s=A[nk] mf off=48 s=B[nk] o thread_tlab_top_offset=440 s=B[nk] o thread_tlab_start_offset=432 s=B[nk] o thread_tlab_pf_top_offset=448 s=B[nk] o thread_tlab_end_offset=456 s=B[nk] o thread_exception_oop_offset=1280 s=A[nk] o thread_exception_pc_offset=1288 s=A[nk] o java_thread_anchor_offset=928 s=A[nk] o java_thread_jni_environment_offset=960 s=B[nk] n class_klass_offset_scan=16
+[nk] o instance_klass_java_mirror_offset=112 s=B[nk] o thread_thread_state_offset=1100 s=A[nk] o java_thread_last_Java_sp_offset=928 s=B[nk] o java_thread_last_Java_fp_offset=944 s=B[nk] o java_thread_last_Java_pc_offset=936 s=B[nk] o oophandle_obj_offset=0 s=A[nk] vm j=21[nk] n strict_vm_layout_ok=1 next_link=144 cld_klasses=56 cld_handles=48 klass_mirror=112
+[nk] cap enter[nk] n boot_cld=0x7ff54c08eb10 first_klass=0x7ff26c0da520 klass_count=1846 klass_name_off=24 sym_len_off=4 sym_body_off=6
+[nk] n boot_well_known_scan_ok=1 string=0x7ff26b00e878 byte=0x7ff26b002318 char=0x7ff26b001d30 loader=0x7ff26c000c20
+[nk] cap ok str=0x7ff26b00e878 arr_b=0x7ff26b002318 arr_c=0x7ff26b001d30[nk] n loader_mark ready=1 klass=0x7ff26c000c20 mirror=0x100000eb3e10 off=192
+[nk] ol mark_loader_loaded ok str=0x7ff26b00e878[nk] n w1 os=0 ks=0 tl=yes ex=yes
+[nk] n w4r tso=1100 ao=928+0 mo=112 hoo=0 tf=yes
+[nk] ol resolve_string_intern_layout ok hash_off=12[nk] ol prewarm ok backend=1[nk] mm DataOfSquare.lightMeUp(I)V 0x7ff260401680[nk] fp MethodFlags j=21[nk] pp DataOfSquare.lightMeUp(I)V s=0[nk] dx owner_miss idx=1 name=KeyboardListener[nk] mm SquarePanel.ChangeColor(Ljava/awt/Color;)V 0x7ff260400e08[nk] pp SquarePanel.ChangeColor(Ljava/awt/Color;)V s=1[nk] dx owner_miss idx=3 name=ThreadsController[nk] dx owner_miss idx=4 name=ThreadsController[nk] dx owner_miss idx=5 name=ThreadsController[nk] dx owner_miss idx=6 name=ThreadsController[nk] dx owner_miss idx=7 name=Tuple[nk] dx owner_miss idx=8 name=Tuple[nk] dx owner_miss idx=9 name=Tuple[nk] dx owner_miss idx=10 name=Tuple[nk] dx owner_miss idx=11 name=Tuple[nk] dm 2/12[nk] dp 2/12[nk] n w2 fs=31 ls=0 lc=0
+[nk] n w3 is=2 sb=0
+Exception in thread "main" java.lang.LinkageError: please check your native library load correctly
+	at Tuple.getX(Tuple.java)
+	at ThreadsController.<init>(ThreadsController.java:24)
+	at Window.<init>(Window.java:43)
+	at Main.main(Main.java:8)
