@@ -351,6 +351,7 @@ public final class CCodeGenerator {
                 ptrdiff_t off_method_from_compiled_entry;
                 ptrdiff_t off_method_vtable_index;
                 ptrdiff_t off_method_intrinsic_id;
+                ptrdiff_t off_method_flags;
                 ptrdiff_t off_method_flags_direct;
                 ptrdiff_t off_method_flags_status;
                 ptrdiff_t off_const_method_constants;
@@ -417,6 +418,9 @@ public final class CCodeGenerator {
                 uint32_t method_flag_not_c1_osr_compilable;
                 uint32_t method_flag_not_c2_osr_compilable;
                 uint32_t method_flag_dont_inline;
+                uint32_t method_flag_is_old;
+                uint32_t method_flag_is_obsolete;
+                uint32_t method_flag_is_deleted;
                 uintptr_t narrow_oop_base;
                 int narrow_oop_shift;
                 uintptr_t narrow_klass_base;
