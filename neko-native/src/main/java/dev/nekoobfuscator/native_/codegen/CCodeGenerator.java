@@ -541,6 +541,7 @@ public final class CCodeGenerator {
             static jint neko_throw_cached(JNIEnv *env, jthrowable cached);
             static jboolean neko_init_throwable_cache(JNIEnv *env);
             static void neko_bootstrap_owner_discovery(void);
+            static void neko_maybe_rescan_cld_liveness(void);
             static inline oop neko_resolve_mirror_oop_from_klass(const NekoVmLayout *layout, Klass *klass);
             static void* neko_find_boot_class_loader_data(void);
             static inline void* neko_method_holder_klass(void *method_star);

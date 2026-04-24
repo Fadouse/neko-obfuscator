@@ -1386,6 +1386,132 @@ static Klass* neko_find_klass_by_name_in_cld_graph(const char *internal_name, ui
     return NULL;
 }
 
+static jboolean neko_cldg_contains_klass(Klass *target_klass) {
+    void *cld = neko_boot_cld_head();
+    if (target_klass == NULL || g_neko_vm_layout.off_cld_next < 0) return JNI_FALSE;
+    while (cld != NULL) {
+        for (Klass *klass = neko_cld_first_klass(cld); klass != NULL; klass = neko_klass_next_link(klass)) {
+            if (klass == target_klass) return JNI_TRUE;
+        }
+        cld = *(void**)((uint8_t*)cld + g_neko_vm_layout.off_cld_next);
+    }
+    return JNI_FALSE;
+}
+
+static uint32_t g_neko_class_unload_observed_count = 0u;
+static uint32_t g_neko_cld_liveness_rescan_counter = 0u;
+static void* g_neko_seen_clds[4096];
+static uint32_t g_neko_seen_cld_count = 0u;
+
+static void neko_note_class_unload_observed(const NekoManifestMethod *entry) {
+    uint32_t count = __atomic_add_fetch(&g_neko_class_unload_observed_count, 1u, __ATOMIC_ACQ_REL);
+    if (entry != NULL) {
+        NEKO_TRACE(0, "[nk] cul %s.%s%s", entry->owner_internal == NULL ? "<null>" : entry->owner_internal, entry->method_name == NULL ? "<null>" : entry->method_name, entry->method_desc == NULL ? "<null>" : entry->method_desc);
+    }
+    NEKO_TRACE(0, "[nk] neko_class_unload_observed=%u", count);
+}
+
+static jboolean neko_invalidate_cached_field_klass_if_dead(NekoManifestFieldSite *site) {
+    Klass *cached_klass;
+    if (site == NULL) return JNI_FALSE;
+    cached_klass = (Klass*)__atomic_load_n(&site->cached_klass, __ATOMIC_ACQUIRE);
+    if (cached_klass == NULL || neko_cldg_contains_klass(cached_klass)) return JNI_FALSE;
+    __atomic_store_n(&site->cached_klass, NULL, __ATOMIC_RELEASE);
+    __atomic_store_n(&site->resolved_offset, NEKO_FIELD_SITE_UNRESOLVED, __ATOMIC_RELEASE);
+    site->field_offset_cookie = NEKO_FIELD_SITE_UNRESOLVED;
+    return JNI_TRUE;
+}
+
+static jboolean neko_invalidate_cached_ldc_klass_if_dead(NekoManifestLdcSite *site) {
+    Klass *cached_klass;
+    if (site == NULL || site->kind != NEKO_LDC_KIND_CLASS) return JNI_FALSE;
+    cached_klass = (Klass*)__atomic_load_n(&site->cached_klass, __ATOMIC_ACQUIRE);
+    if (cached_klass == NULL || neko_cldg_contains_klass(cached_klass)) return JNI_FALSE;
+    __atomic_store_n(&site->cached_klass, NULL, __ATOMIC_RELEASE);
+    return JNI_TRUE;
+}
+
+static uint32_t neko_collect_live_clds(void **out, uint32_t capacity) {
+    void *cld = neko_boot_cld_head();
+    uint32_t count = 0u;
+    if (out == NULL || capacity == 0u || g_neko_vm_layout.off_cld_next < 0) return 0u;
+    while (cld != NULL && count < capacity) {
+        out[count++] = cld;
+        cld = *(void**)((uint8_t*)cld + g_neko_vm_layout.off_cld_next);
+    }
+    return count;
+}
+
+static jboolean neko_cld_snapshot_contains(void *const *snapshot, uint32_t count, void *cld) {
+    for (uint32_t i = 0; i < count; i++) {
+        if (snapshot[i] == cld) return JNI_TRUE;
+    }
+    return JNI_FALSE;
+}
+
+static jboolean neko_refresh_cld_snapshot_and_detect_unload(void) {
+    void *live_clds[4096];
+    uint32_t live_count = neko_collect_live_clds(live_clds, 4096u);
+    jboolean unloaded = JNI_FALSE;
+    if (g_neko_seen_cld_count != 0u) {
+        for (uint32_t i = 0; i < g_neko_seen_cld_count; i++) {
+            if (!neko_cld_snapshot_contains(live_clds, live_count, g_neko_seen_clds[i])) {
+                unloaded = JNI_TRUE;
+                break;
+            }
+        }
+    }
+    for (uint32_t i = 0; i < live_count; i++) {
+        g_neko_seen_clds[i] = live_clds[i];
+    }
+    g_neko_seen_cld_count = live_count;
+    return unloaded;
+}
+
+static void neko_invalidate_dead_cld_entries(void) {
+    jboolean unloaded_cld_seen;
+    if (g_neko_vm_layout.off_cldg_head == 0u || g_neko_vm_layout.off_cld_next < 0 || g_neko_vm_layout.off_cld_klasses < 0) return;
+    unloaded_cld_seen = neko_refresh_cld_snapshot_and_detect_unload();
+    for (uint32_t i = 0; i < g_neko_manifest_method_count; i++) {
+        NekoManifestMethod *entry = (NekoManifestMethod*)&g_neko_manifest_methods[i];
+        jboolean observed = JNI_FALSE;
+        if (entry->owner_internal != NULL && g_neko_manifest_patch_states[i] == NEKO_PATCH_STATE_APPLIED) {
+            size_t owner_len = strlen(entry->owner_internal);
+            if (owner_len < 65536u && neko_find_klass_by_name_in_cld_graph(entry->owner_internal, (uint16_t)owner_len) == NULL) {
+                g_neko_manifest_patch_states[i] = NEKO_PATCH_STATE_FAILED;
+                g_neko_manifest_method_stars[i] = NULL;
+                observed = JNI_TRUE;
+            }
+        }
+        for (uint32_t site_index = 0; site_index < entry->field_site_count; site_index++) {
+            if (neko_invalidate_cached_field_klass_if_dead(&entry->field_sites[site_index])) observed = JNI_TRUE;
+        }
+        for (uint32_t site_index = 0; site_index < entry->ldc_site_count; site_index++) {
+            if (neko_invalidate_cached_ldc_klass_if_dead(&entry->ldc_sites[site_index])) observed = JNI_TRUE;
+        }
+        if (observed) {
+            for (uint32_t invoke_index = 0; invoke_index < g_neko_manifest_invoke_site_count; invoke_index++) {
+                NekoManifestInvokeSite *site = g_neko_manifest_invoke_sites[invoke_index];
+                if (site == NULL || site->owner_internal == NULL || entry->owner_internal == NULL) continue;
+                if (strcmp(site->owner_internal, entry->owner_internal) != 0) continue;
+                __atomic_store_n(&site->resolved_method, NULL, __ATOMIC_RELEASE);
+            }
+            neko_note_class_unload_observed(entry);
+        }
+    }
+    if (unloaded_cld_seen) {
+        neko_note_class_unload_observed(NULL);
+    }
+}
+
+static void neko_maybe_rescan_cld_liveness(void) {
+    uint32_t tick = __atomic_add_fetch(&g_neko_cld_liveness_rescan_counter, 1u, __ATOMIC_RELAXED);
+    if ((tick & 1023u) != 0u) return;
+    neko_manifest_lock_enter();
+    neko_invalidate_dead_cld_entries();
+    neko_manifest_lock_exit();
+}
+
 /* W1: Derive off_class_klass by resolving the java.lang.Class mirror for a known Klass,
  * then scanning the mirror object for the hidden Klass* back-pointer. On JDK 8 the mirror
  * is read from a direct oop field; on JDK 9+ it is resolved through Klass::_java_mirror
@@ -1817,6 +1943,7 @@ static void neko_bootstrap_owner_discovery(void) {
             NEKO_TRACE(1, "[nk] dx method_miss idx=%u %s.%s%s", i, entry->owner_internal, entry->method_name, entry->method_desc);
         }
     }
+    (void)neko_refresh_cld_snapshot_and_detect_unload();
 }
 
 static void neko_resolve_string_intern_layout(void) {
