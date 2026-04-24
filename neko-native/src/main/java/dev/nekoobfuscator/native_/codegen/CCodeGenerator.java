@@ -491,6 +491,7 @@ public final class CCodeGenerator {
             static jclass neko_load_class_noinit_with_loader(JNIEnv *env, const char *internalName, jobject loader);
             static jboolean neko_ldc_site_matches_loaded_class(JNIEnv *env, NekoManifestLdcSite *site, jclass candidate, const char *signature);
             __attribute__((visibility(\"default\"))) oop neko_rt_mirror_from_klass_nosafepoint(Klass *k);
+            __attribute__((visibility(\"default\"))) oop neko_rt_static_base_from_holder_nosafepoint(Klass *holder);
             __attribute__((visibility(\"default\"))) oop neko_rt_try_alloc_instance_fast_nosafepoint(Klass *ik, size_t instance_size_bytes);
             static void* neko_rt_try_alloc_array_fast_nosafepoint(void* array_klass, int32_t length);
             static inline uint32_t neko_lh_header_size(uint32_t lh);
