@@ -444,6 +444,11 @@ public final class AssemblyStubEmitter {
     }
 
     private int alignForPopCallFrame(int bytes) {
+        // RESTORED to the pre-M5h logic after Oracle 11/12 escalation showed both
+        // alignUp(bytes,16) and alignUp(bytes+8,16)-8 cause regressions on different
+        // methods. The original 8-mod-16 logic was correct; the libjvm+0x52635f
+        // movaps crash is a SEPARATE M5h reference-field path bug, not an
+        // alignment regression. Investigate the M5h sfm/fsr path next.
         int remainder = Math.floorMod(bytes, 16);
         if (remainder == 8) {
             return bytes;
