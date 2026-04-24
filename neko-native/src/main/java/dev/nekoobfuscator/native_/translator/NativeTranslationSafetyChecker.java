@@ -337,12 +337,12 @@ public final class NativeTranslationSafetyChecker {
             return null;
         }
         if (constant instanceof Type type) {
-            return type.getSort() == Type.METHOD
-                ? "LDC MethodType deferred to M4a (Wave 3)"
-                : ((type.getSort() == Type.OBJECT || type.getSort() == Type.ARRAY) ? null : "unsupported LDC Type sort: " + type.getSort());
+            return (type.getSort() == Type.METHOD || type.getSort() == Type.OBJECT || type.getSort() == Type.ARRAY)
+                ? null
+                : "unsupported LDC Type sort: " + type.getSort();
         }
         if (constant instanceof Handle) {
-            return "LDC MethodHandle deferred to M4a (Wave 3)";
+            return null;
         }
         return "unsupported LDC constant kind: " + constant.getClass().getSimpleName();
     }

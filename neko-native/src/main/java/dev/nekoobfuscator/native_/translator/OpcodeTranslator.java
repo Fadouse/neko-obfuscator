@@ -24,6 +24,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+@SuppressWarnings("all")
 public final class OpcodeTranslator {
     @FunctionalInterface
     public interface MethodHandleBridgeFactory {
@@ -281,15 +282,25 @@ public final class OpcodeTranslator {
             stmts.add(raw("{ void *__ldc = neko_ldc_string_site_oop(env, " + siteExpr + "); if (neko_pending_exception(thread) != NULL) goto __neko_exception_exit; PUSH_O(__ldc); }"));
         } else if (ldc.cst instanceof Type type) {
             if (type.getSort() == Type.METHOD) {
-                throw new IllegalStateException("LDC MethodType deferred to M4a (Wave 3)");
+                String siteExpr = codeGenerator.reserveManifestMethodTypeLdcSite(currentMethodKey, currentOwnerInternalName, type.getDescriptor());
+                stmts.add(raw("{ void *__ldc = neko_ldc_method_type_site_oop(env, " + siteExpr + "); if (neko_pending_exception(thread) != NULL) goto __neko_exception_exit; PUSH_O(__ldc); }"));
             } else if (type.getSort() != Type.OBJECT && type.getSort() != Type.ARRAY) {
                 throw new IllegalStateException("unsupported LDC Type sort: " + type.getSort());
             } else {
                 String siteExpr = codeGenerator.reserveManifestClassLdcSite(currentMethodKey, currentOwnerInternalName, type.getDescriptor());
                 stmts.add(raw("{ void *__ldc = neko_ldc_class_site_oop(thread, " + siteExpr + "); if (neko_pending_exception(thread) != NULL) goto __neko_exception_exit; PUSH_O(__ldc); }"));
             }
-        } else if (ldc.cst instanceof Handle) {
-            throw new IllegalStateException("LDC MethodHandle deferred to M4a (Wave 3)");
+        } else if (ldc.cst instanceof Handle handle) {
+            String siteExpr = codeGenerator.reserveManifestMethodHandleLdcSite(
+                currentMethodKey,
+                currentOwnerInternalName,
+                handle.getTag(),
+                handle.getOwner(),
+                handle.getName(),
+                handle.getDesc(),
+                handle.isInterface()
+            );
+            stmts.add(raw("{ void *__ldc = neko_ldc_method_handle_site_oop(env, " + siteExpr + "); if (neko_pending_exception(thread) != NULL) goto __neko_exception_exit; PUSH_O(__ldc); }"));
         } else {
             stmts.add(raw("/* unsupported ldc constant */"));
         }

@@ -147,6 +147,22 @@ public final class CCodeGenerator {
         return manifestEmitter.reserveManifestClassLdcSite(bindingKey, bindingOwner, descriptor);
     }
 
+    public String reserveManifestMethodTypeLdcSite(String bindingKey, String bindingOwner, String descriptor) {
+        return manifestEmitter.reserveManifestMethodTypeLdcSite(bindingKey, bindingOwner, descriptor);
+    }
+
+    public String reserveManifestMethodHandleLdcSite(
+        String bindingKey,
+        String bindingOwner,
+        int tag,
+        String owner,
+        String name,
+        String desc,
+        boolean isInterface
+    ) {
+        return manifestEmitter.reserveManifestMethodHandleLdcSite(bindingKey, bindingOwner, tag, owner, name, desc, isInterface);
+    }
+
     public void registerOwnerClassReference(String bindingOwner, String classOwner) {
         registerBindingOwner(bindingOwner);
         ownerResolutions.get(bindingOwner).classes.add(classOwner);
