@@ -54,6 +54,7 @@ NekoVmLayout g_neko_vm_layout = {0};
 
 static JavaVM *g_neko_java_vm = NULL;
 static uint32_t g_neko_manifest_match_count = 0u;
+static volatile uint8_t g_neko_loader_ready = 0u;
 #ifdef NEKO_DEBUG_ENABLED
 static int neko_debug_level = 0;
 #define NEKO_TRACE(level, ...) do { if (neko_debug_level >= (level)) fprintf(stderr, __VA_ARGS__); } while(0)
@@ -95,6 +96,31 @@ static int neko_debug_enabled(void) {
 
 static int neko_debug_level_at_least(int level) {
     return neko_debug_enabled() >= level;
+}
+
+static int neko_parse_debug_level_text(const char *value) {
+#ifdef NEKO_DEBUG_ENABLED
+    char *end = NULL;
+    long parsed;
+    if (value == NULL || value[0] == '\0') return 0;
+    if (strcmp(value, "true") == 0 || strcmp(value, "yes") == 0 || strcmp(value, "on") == 0) return 1;
+    if (strcmp(value, "false") == 0 || strcmp(value, "no") == 0 || strcmp(value, "off") == 0) return 0;
+    parsed = strtol(value, &end, 10);
+    if (end == value || parsed <= 0) return 0;
+    return parsed > 9 ? 9 : (int)parsed;
+#else
+    (void)value;
+    return 0;
+#endif
+}
+
+static void neko_init_debug_level_from_env(void) {
+#ifdef NEKO_DEBUG_ENABLED
+    const char *value = getenv("NEKO_DEBUG");
+    if (value == NULL || value[0] == '\0') value = getenv("NEKO_NATIVE_DEBUG");
+    neko_debug_level = neko_parse_debug_level_text(value);
+#else
+#endif
 }
 
 static void neko_vlog(FILE *stream, const char *fmt, va_list args) {
@@ -854,14 +880,29 @@ static int neko_detect_java_spec_version(JNIEnv *env) {
 
 static void neko_mark_loader_loaded(void) {
     Klass *loader_klass = (Klass*)g_neko_vm_layout.klass_neko_native_loader;
-    oop mirror_oop;
+    oop mirror_oop = NULL;
+
+    /* Native authority: once JNI_OnLoad reached here, translated entrypoints may proceed. */
+    __atomic_store_n(&g_neko_loader_ready, 1u, __ATOMIC_RELEASE);
+
+    /* Best-effort mirror sync only; Java itself will also execute loaded = true after System.load returns. */
     if (loader_klass == NULL || g_neko_vm_layout.off_loader_loaded_field < 0) return;
     mirror_oop = neko_resolve_mirror_oop_from_klass(&g_neko_vm_layout, loader_klass);
     if (mirror_oop == NULL) {
         neko_error_log("strict bootstrap failed to resolve NekoNativeLoader mirror");
         return;
     }
+    neko_native_debug_log(
+        "loader_mark ready=1 klass=%p mirror=%p off=%td",
+        loader_klass,
+        mirror_oop,
+        g_neko_vm_layout.off_loader_loaded_field
+    );
     *(volatile uint8_t*)((uint8_t*)mirror_oop + g_neko_vm_layout.off_loader_loaded_field) = 1u;
+}
+
+static inline jboolean neko_loader_ready(void) {
+    return __atomic_load_n(&g_neko_loader_ready, __ATOMIC_ACQUIRE) != 0u ? JNI_TRUE : JNI_FALSE;
 }
 
 """);

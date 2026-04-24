@@ -1,0 +1,492 @@
+# Oracle 8 — LinkageError `loaded` Guard Diagnosis
+
+## Confirm/refute hypothesis
+
+### 1) Does `neko_mark_loader_loaded()` use the same mirror helper as the guard?
+
+**Confirmed.**
+
+Both paths read the loader mirror through the same shared helper:
+
+- `BootstrapEmitter.java:855-865`:
+
+```c
+static void neko_mark_loader_loaded(void) {
+    Klass *loader_klass = (Klass*)g_neko_vm_layout.klass_neko_native_loader;
+    oop mirror_oop;
+    if (loader_klass == NULL || g_neko_vm_layout.off_loader_loaded_field < 0) return;
+    mirror_oop = neko_resolve_mirror_oop_from_klass(&g_neko_vm_layout, loader_klass);
+    if (mirror_oop == NULL) {
+        neko_error_log("strict bootstrap failed to resolve NekoNativeLoader mirror");
+        return;
+    }
+    *(volatile uint8_t*)((uint8_t*)mirror_oop + g_neko_vm_layout.off_loader_loaded_field) = 1u;
+}
+```
+
+- `Wave4aRuntimeApiEmitter.java:241-254`:
+
+```c
+static inline oop neko_resolve_mirror_oop_from_klass(const NekoVmLayout *layout, Klass *klass) {
+    const void *cell;
+    const void *storage_slot;
+    if (layout == NULL || klass == NULL || layout->off_klass_java_mirror < 0) return NULL;
+
+    if (layout->java_spec_version >= 9) {
+        storage_slot = neko_resolve_mirror_storage_slot_from_klass(layout, klass);
+        if (storage_slot == NULL) return NULL;
+        return __atomic_load_n((void* const*)storage_slot, __ATOMIC_ACQUIRE);
+    }
+
+    cell = (const uint8_t*)klass + layout->off_klass_java_mirror;
+    return (oop)neko_load_oop_from_cell(cell);
+}
+```
+
+So this is **not** a “mark path vs guard path helper mismatch” regression. Oracle 7’s OopHandle-aware resolver is shared by both.
+
+### 2) Is `neko_mark_loader_loaded()` called before `klass_neko_native_loader` is captured?
+
+**Refuted. Sequence order is correct.**
+
+`JniOnLoadEmitter.java:23-33` clearly does:
+
+```c
+if (!neko_resolve_vm_symbols()) {
+    return JNI_VERSION_1_6;
+}
+if (!neko_parse_vm_layout_strict(env)) {
+    return JNI_VERSION_1_6;
+}
+if (!neko_capture_wellknown_klasses()) {
+    return JNI_VERSION_1_6;
+}
+neko_mark_loader_loaded();
+```
+
+So `capture_wellknown_klasses()` runs **before** `neko_mark_loader_loaded()`. This is not an N/M ordering bug.
+
+### 3) Is there a silent early-return precondition in `neko_mark_loader_loaded()`?
+
+**Yes, but it does not fit the observed post-Oracle-7 state.**
+
+There are only two early exits:
+
+1. `loader_klass == NULL || off_loader_loaded_field < 0`
+2. `mirror_oop == NULL`
+
+The first would mean the later stub guard should usually also lack the same prerequisites. The second logs an explicit error (`strict bootstrap failed to resolve NekoNativeLoader mirror`). Your current evidence says the later guard sees:
+
+- `off_loader_loaded_field >= 0`
+- `klass_neko_native_loader != NULL`
+- mirror resolver returns non-NULL
+
+That makes the early-return theory a poor fit for the current failure signature.
+
+### 4) Is the write path using a different address derivation than the read path?
+
+**No.**
+
+Both are `mirror + off_loader_loaded_field`, and both use the same `klass_neko_native_loader` anchor. The emitted write is a plain byte store:
+
+```c
+*(volatile uint8_t*)((uint8_t*)mirror_oop + g_neko_vm_layout.off_loader_loaded_field) = 1u;
+```
+
+So there is no separate “writer uses one object, reader uses another helper” split inside native code itself.
+
+### 5) Could the write be hitting a read-only page and getting silently ignored?
+
+**Effectively refuted.**
+
+A raw native store to a truly read-only or invalid page would normally fault, not fail silently. You already have post-Oracle-7 ground truth that the process no longer SIGSEGVs. That leaves two realistic classes of failure:
+
+- native code is reading/writing the **wrong object / wrong field location**, but still within mapped writable memory; or
+- the Java-side authoritative write happens to a **different class mirror** than the one native code later checks.
+
+The source strongly points to the second class of bug.
+
+### 6) What does the Java runtime class itself do?
+
+`neko-runtime/src/main/java/dev/nekoobfuscator/runtime/NekoNativeLoader.java:16-31` matters a lot:
+
+```java
+public static void load() {
+    if (loaded) {
+        return;
+    }
+    synchronized (LOCK) {
+        if (loaded) {
+            return;
+        }
+        ...
+        System.load(tmp.toAbsolutePath().toString());
+        loaded = true;
+    }
+}
+```
+
+This means the authoritative Java-side field write to `loaded` happens **after** `System.load(...)` returns from `JNI_OnLoad`. Therefore:
+
+- even if `neko_mark_loader_loaded()` were a no-op,
+- once `load()` completes successfully,
+- the real executing `NekoNativeLoader.loaded` field should still become `true`.
+
+That is the key source-level clue: if later native guards still read `0`, they are almost certainly **not observing the same logical class state that Java just updated**.
+
+---
+
+## Root cause for Problem A (primary)
+
+**Primary diagnosis:** the design is using the wrong authority for the “loader is ready” bit.
+
+More precisely:
+
+1. `BootstrapEmitter.java:1471` captures `klass_neko_native_loader` by **name-only graph scan**:
+
+```c
+g_neko_vm_layout.klass_neko_native_loader = neko_find_klass_by_name_in_cld_graph(
+    "dev/nekoobfuscator/runtime/NekoNativeLoader",
+    (uint16_t)(sizeof("dev/nekoobfuscator/runtime/NekoNativeLoader") - 1u)
+);
+```
+
+2. `BootstrapEmitter.java:1310-1320` shows that helper simply walks the CLD graph and returns the **first matching class name**:
+
+```c
+static Klass* neko_find_klass_by_name_in_cld_graph(const char *internal_name, uint16_t internal_name_len) {
+    void *cld = neko_boot_cld_head();
+    if (internal_name == NULL || g_neko_vm_layout.off_cld_next < 0) return NULL;
+    while (cld != NULL) {
+        Klass *klass = neko_find_klass_by_name_in_cld(cld, internal_name, internal_name_len);
+        if (klass != NULL) {
+            return klass;
+        }
+        cld = *(void**)((uint8_t*)cld + g_neko_vm_layout.off_cld_next);
+    }
+    return NULL;
+}
+```
+
+3. Nothing in that capture ties the selected `Klass*` to the **actual Java class currently executing `NekoNativeLoader.load()`**.
+
+4. But the Java runtime field write happens on the **executing** class:
+
+```java
+System.load(...);
+loaded = true;
+```
+
+5. Therefore the current native scheme is only correct if the first name match in the CLD graph is guaranteed to be the same `NekoNativeLoader` class whose `load()` method invoked `System.load(...)`.
+
+That guarantee does **not** exist in the current source.
+
+### Why this explains the observed behavior better than the other hypotheses
+
+It explains all of the current evidence in one shot:
+
+- no more SIGSEGV → Oracle 7 fixed the mirror resolution mechanics;
+- `off_loader_loaded_field`, `klass_neko_native_loader`, and mirror resolution all look valid → the selected class object is structurally real;
+- later guard still sees byte `0` → native code is looking at a mirror/field that Java never set to `true`;
+- this reproduces across multiple jars → the bug is architectural, not method-specific.
+
+### What this diagnosis rules out
+
+- **Not helper mismatch:** mark and guard both use `neko_resolve_mirror_oop_from_klass()`.
+- **Not call order:** `capture_wellknown_klasses()` precedes `neko_mark_loader_loaded()`.
+- **Not “JNI_OnLoad happened before class capture”:** source order disproves it.
+- **Not “read-only page silently dropped the write”:** that would not match the no-crash outcome.
+
+### Why the Java post-load write is the decisive clue
+
+If the native-only write were the only write, one could still suspect a write-path bug. But `NekoNativeLoader.load()` itself executes `loaded = true` after `System.load(...)`. So if the guard still reads `0`, the most plausible source-level explanation is:
+
+> native code is not anchored to the same `NekoNativeLoader` class instance that Java later updates.
+
+That makes the current mirror field check a fragile proxy for “library finished JNI_OnLoad and is now usable”.
+
+---
+
+## Fix I (prescription for Problem A)
+
+### Recommendation
+
+**Stop using the recovered Java static field as the guard authority.**
+
+Keep `NekoNativeLoader.loaded` for Java-side idempotence and compatibility, but make the native guard depend on a native process-local flag that is set in `JNI_OnLoad`. That is the minimum fix that:
+
+- avoids the CLD/name ambiguity entirely,
+- preserves Oracle 7’s JDK 9+ OopHandle path unchanged,
+- respects DD-5 Option 1 strict-no-JNI,
+- does not touch `MANIFEST_ENTRY_SIZE`,
+- works across JDK 8-21 and all supported platforms.
+
+### Why this is the minimum safe fix
+
+The current bug is not that the mirror resolver cannot read a mirror anymore; it is that the chosen loader class is not a reliable identity anchor for the guard. A native flag is already in exactly the right authority domain:
+
+- it is set by the same native image that patches/serves translated methods;
+- it cannot drift across CLDs;
+- it does not require extra JNI.
+
+### Exact C change to emit from `BootstrapEmitter`
+
+Add a native readiness flag near the other globals:
+
+```c
+static volatile uint8_t g_neko_loader_ready = 0u;
+```
+
+Replace `neko_mark_loader_loaded()` with a native-authoritative version that still performs the Java mirror write as best effort only:
+
+```c
+static void neko_mark_loader_loaded(void) {
+    Klass *loader_klass = (Klass*)g_neko_vm_layout.klass_neko_native_loader;
+    oop mirror_oop = NULL;
+
+    /* Native authority: once JNI_OnLoad reached here, translated entrypoints may proceed. */
+    __atomic_store_n(&g_neko_loader_ready, 1u, __ATOMIC_RELEASE);
+
+    /* Best-effort mirror sync only; Java itself will also execute loaded = true after System.load returns. */
+    if (loader_klass == NULL || g_neko_vm_layout.off_loader_loaded_field < 0) return;
+
+    mirror_oop = neko_resolve_mirror_oop_from_klass(&g_neko_vm_layout, loader_klass);
+    if (mirror_oop == NULL) {
+        neko_error_log("strict bootstrap failed to resolve NekoNativeLoader mirror");
+        return;
+    }
+
+    *(volatile uint8_t*)((uint8_t*)mirror_oop + g_neko_vm_layout.off_loader_loaded_field) = 1u;
+}
+```
+
+Add a tiny helper if you want the guard site to stay readable:
+
+```c
+static inline jboolean neko_loader_ready(void) {
+    return __atomic_load_n(&g_neko_loader_ready, __ATOMIC_ACQUIRE) != 0u ? JNI_TRUE : JNI_FALSE;
+}
+```
+
+### Exact guard change
+
+Where the current per-method stub guard emits the mirror-field check, replace it with the native readiness gate:
+
+```c
+if (!neko_loader_ready()) {
+    env->Throw(LinkageError("please check your native library load correctly"));
+    return;
+}
+```
+
+If you do not want a helper, inline it directly:
+
+```c
+if (__atomic_load_n(&g_neko_loader_ready, __ATOMIC_ACQUIRE) == 0u) {
+    env->Throw(LinkageError("please check your native library load correctly"));
+    return;
+}
+```
+
+### What to keep unchanged
+
+- Keep `neko_resolve_mirror_oop_from_klass()` exactly as fixed by Oracle 7.
+- Keep `neko_capture_wellknown_klasses()` capture order.
+- Keep `NekoNativeLoader.loaded` field and Java-side `loaded = true;` assignment.
+- Keep the best-effort mirror write in `neko_mark_loader_loaded()`; it is still useful for parity/observability, just not as the native truth source.
+
+### Why I am **not** recommending a tighter CLD/class identity search in this fix
+
+That would require inventing a reliable way for `JNI_OnLoad` to discover “the exact Java `NekoNativeLoader` class that invoked `System.load`” without extra JNI. The current source provides no such anchor. Any attempt to improve the name-based CLD selection now would be more invasive and more speculative than necessary.
+
+The native-ready flag fixes the real blocker with far less risk.
+
+---
+
+## Fix J (prescription for Problem B runtime trace gate enable)
+
+### Recommendation
+
+Use an **environment-variable-based runtime gate** initialized at the very top of `JNI_OnLoad`, before any trace or debug logging.
+
+Prefer:
+
+- `NEKO_DEBUG=1` (new simple switch)
+- fallback `NEKO_NATIVE_DEBUG=<n>` (preserve current numeric mechanism)
+
+I do **not** recommend implementing `-Dneko.native.debug=true` in this fix, because reading a JVM system property robustly would require extra JNI calls (for example `FindClass`, `GetStaticMethodID`, `CallStaticObjectMethod`, string extraction, etc.), which violates the current DD-5 Option 1 strict-no-JNI direction.
+
+### Exact emitter change in `BootstrapEmitter`
+
+Add two helpers near the existing debug functions:
+
+```c
+static int neko_parse_debug_level_text(const char *value) {
+#ifdef NEKO_DEBUG_ENABLED
+    char *end = NULL;
+    long parsed;
+    if (value == NULL || value[0] == '\0') return 0;
+    if (strcmp(value, "true") == 0 || strcmp(value, "yes") == 0 || strcmp(value, "on") == 0) return 1;
+    if (strcmp(value, "false") == 0 || strcmp(value, "no") == 0 || strcmp(value, "off") == 0) return 0;
+    parsed = strtol(value, &end, 10);
+    if (end == value || parsed <= 0) return 0;
+    return parsed > 9 ? 9 : (int)parsed;
+#else
+    (void)value;
+    return 0;
+#endif
+}
+
+static void neko_init_debug_level_from_env(void) {
+#ifdef NEKO_DEBUG_ENABLED
+    const char *value = getenv("NEKO_DEBUG");
+    if (value == NULL || value[0] == '\0') value = getenv("NEKO_NATIVE_DEBUG");
+    neko_debug_level = neko_parse_debug_level_text(value);
+#else
+#endif
+}
+```
+
+This keeps the existing compile-time guard intact and adds a simple runtime gate that works on Linux/macOS/Windows.
+
+### Exact emitter change in `JniOnLoadEmitter`
+
+Replace the current top-of-function debug init:
+
+```c
+#ifdef NEKO_DEBUG_ENABLED
+    const char *env_debug = NULL;
+#endif
+...
+#ifdef NEKO_DEBUG_ENABLED
+    env_debug = getenv("NEKO_NATIVE_DEBUG");
+    neko_debug_level = env_debug != NULL ? atoi(env_debug) : 0;
+#endif
+```
+
+with:
+
+```c
+    neko_init_debug_level_from_env();
+```
+
+and place it immediately after storing `g_neko_java_vm`:
+
+```c
+JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *reserved) {
+    JNIEnv *env = NULL;
+    jint env_status;
+    (void)reserved;
+    g_neko_java_vm = vm;
+    neko_init_debug_level_from_env();
+    ...
+}
+```
+
+### Minimal observability add-ons worth making now
+
+Because `neko_native_debug_log(...)` newline-flushes and `NEKO_TRACE(...)` does not, add just these two native debug logs:
+
+1. In `JNI_OnLoad`, immediately after `neko_init_debug_level_from_env()`:
+
+```c
+neko_native_debug_log("onload enter");
+```
+
+2. In `neko_mark_loader_loaded()` after the native flag store and after mirror resolution:
+
+```c
+neko_native_debug_log(
+    "loader_mark ready=1 klass=%p mirror=%p off=%td",
+    loader_klass,
+    mirror_oop,
+    g_neko_vm_layout.off_loader_loaded_field
+);
+```
+
+Those two lines alone will make the capture/mark sequence visible on the next run.
+
+---
+
+## Verification plan
+
+### For Problem A
+
+After Fix I, the next run should prove that the translated native entrypoints are gated by the native-ready bit, not by an ambiguous recovered Java mirror.
+
+#### Expected signatures
+
+1. `JNI_OnLoad` completes without crash (already true post-Oracle-7).
+2. `neko_mark_loader_loaded()` runs and sets the native flag.
+3. Translated methods no longer throw `LinkageError("please check your native library load correctly")` solely because the mirror-field byte reads as zero.
+4. The three reproducer jars should move past the current immediate loader guard failure:
+   - TEST fixture should no longer fail every translated method at the loader guard,
+   - obfusjack JDK 21 smoke should not trip the same loader-loaded check,
+   - SnakeGame should no longer immediately throw from that guard.
+
+#### Useful trace lines to look for
+
+With `NEKO_DEBUG=1`:
+
+```text
+[nk] n onload enter
+[nk] n loader_mark ready=1 klass=0x... mirror=0x... off=...
+```
+
+If you also keep the existing `NEKO_TRACE(0, "[nk] ol mark_loader_loaded ok ...")`, that should appear as well once the runtime gate is actually enabled.
+
+#### What proves the diagnosis specifically
+
+The strongest confirmation will be:
+
+- `loader_mark ready=1 ...` appears,
+- the old LinkageError no longer fires,
+- even if the logged `klass` / `mirror` later turns out not to be the same Java-side class instance you expected.
+
+That result would validate the diagnosis that the **guard authority was wrong**, not the Oracle 7 mirror mechanics.
+
+### For Problem B
+
+Run with:
+
+```text
+NEKO_DEBUG=1
+```
+
+and expect early `JNI_OnLoad` logs to appear before the first major bootstrap phase finishes.
+
+Minimum expected sequence:
+
+```text
+[nk] n onload enter
+[nk] ...
+[nk] n loader_mark ready=1 klass=0x... mirror=0x... off=...
+```
+
+If `NEKO_NATIVE_DEBUG=2` is used instead, the existing higher-volume traces should also begin appearing.
+
+---
+
+## Risk register
+
+### 1) Native-ready flag becomes true slightly earlier than Java-side `loaded = true`
+
+This is acceptable and intentional.
+
+The native flag only means: **this native image finished `JNI_OnLoad` far enough that translated entrypoints may execute**. That is exactly the condition the current guard is trying to express. Java-side `loaded` remains for Java idempotence and remains set immediately after `System.load(...)` returns.
+
+### 2) Keeping the best-effort mirror write could still target the “wrong” `NekoNativeLoader` mirror
+
+That is fine once the native guard no longer depends on it. The write becomes advisory/diagnostic only. Java still sets the real field on the executing class after `System.load(...)` returns.
+
+### 3) Do not add JVM system-property reads in this fix
+
+That path is tempting for `-Dneko.native.debug=true`, but it would widen JNI surface area inside `JNI_OnLoad` and conflict with the strict-no-JNI direction. The environment-variable gate is the minimal compatible solution.
+
+---
+
+## Bottom line
+
+Problem A is **not** caused by Oracle 7’s mirror helper anymore, and **not** by `JNI_OnLoad` ordering. The source points to a higher-level identity bug: the native code captures `NekoNativeLoader` by first name match in the CLD graph, while the authoritative Java `loaded = true` write happens on the executing loader class; that makes the Java mirror field an unreliable native guard.
+
+The minimum safe fix is therefore to make the guard use a native `g_neko_loader_ready` flag set in `neko_mark_loader_loaded()`, while keeping the Java mirror write as best effort only. For diagnostics, initialize `neko_debug_level` from `NEKO_DEBUG`/`NEKO_NATIVE_DEBUG` at the very top of `JNI_OnLoad` so the capture/mark sequence is visible on the next run.

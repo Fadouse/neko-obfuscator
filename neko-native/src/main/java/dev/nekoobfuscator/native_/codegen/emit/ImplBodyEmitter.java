@@ -21,6 +21,15 @@ public final class ImplBodyEmitter {
         }
         sb.append(") {\n");
         sb.append("    JNIEnv *env = neko_current_env();\n");
+        sb.append("    if (!neko_loader_ready()) {\n");
+        sb.append("        void *error = neko_new_exception_oop(env, \"java/lang/LinkageError\", \"please check your native library load correctly\");\n");
+        sb.append("        if (error != NULL) neko_throw(env, (jthrowable)error);\n");
+        sb.append("        return");
+        if (fn.returnType() != CType.VOID) {
+            sb.append(" ").append(defaultReturnValue(fn.returnType()));
+        }
+        sb.append(";\n");
+        sb.append("    }\n");
         sb.append("    void *thread = neko_get_current_thread();\n");
         if (fn.traceIndex() >= 0 && fn.traceSignature() != null) {
             sb.append("    NEKO_TRACE(2, \"[nk] e idx=%d sig=\\\"%s\\\"\\n\", ")
@@ -89,6 +98,17 @@ public final class ImplBodyEmitter {
             case JDOUBLE -> "double";
             case JOBJECT, JCLASS, JSTRING, JARRAY -> CEmissionContext.RAW_OOP_ABI_C_TYPE;
             default -> "int32_t";
+        };
+    }
+
+    private String defaultReturnValue(CType type) {
+        return switch (type) {
+            case VOID -> "";
+            case JLONG -> "0LL";
+            case JFLOAT -> "0.0f";
+            case JDOUBLE -> "0.0";
+            case JOBJECT, JCLASS, JSTRING, JARRAY -> "NULL";
+            default -> "0";
         };
     }
 
