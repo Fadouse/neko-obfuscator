@@ -994,6 +994,7 @@ static jvalue neko_icache_dispatch(
     jvalue result = {0};
     uintptr_t receiverKey;
     if (env == NULL || receiver == NULL || fallback_mid == NULL) return result;
+    neko_maybe_rescan_cld_liveness();
     if (site != NULL && neko_receiver_key_supported()) {
         receiverKey = neko_receiver_key(receiver);
         if (receiverKey != 0 && site->target_kind != NEKO_ICACHE_MEGA) {

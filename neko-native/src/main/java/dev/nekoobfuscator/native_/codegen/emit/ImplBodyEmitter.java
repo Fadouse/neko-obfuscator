@@ -20,8 +20,9 @@ public final class ImplBodyEmitter {
             }
         }
         sb.append(") {\n");
-        sb.append("    JNIEnv *env = neko_current_env();\n");
+        sb.append("    JNIEnv *env = NULL;\n");
         sb.append("    if (!neko_loader_ready()) {\n");
+        sb.append("        env = neko_current_env();\n");
         sb.append("        (void)neko_throw_cached(env, g_neko_throw_loader_linkage);\n");
         sb.append("        return");
         if (fn.returnType() != CType.VOID) {
@@ -29,6 +30,8 @@ public final class ImplBodyEmitter {
         }
         sb.append(";\n");
         sb.append("    }\n");
+        sb.append("    neko_maybe_rescan_cld_liveness();\n");
+        sb.append("    env = neko_current_env();\n");
         sb.append("    void *thread = neko_get_current_thread();\n");
         if (fn.traceIndex() >= 0 && fn.traceSignature() != null) {
             sb.append("    NEKO_TRACE(2, \"[nk] e idx=%d sig=\\\"%s\\\"\\n\", ")

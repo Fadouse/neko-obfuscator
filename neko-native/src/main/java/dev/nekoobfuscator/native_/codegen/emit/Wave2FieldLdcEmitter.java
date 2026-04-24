@@ -245,6 +245,7 @@ public final class Wave2FieldLdcEmitter {
         sb.append("    Klass *owner_klass;\n");
         sb.append("    size_t owner_len;\n");
         sb.append("    if (site == NULL) return JNI_FALSE;\n");
+        sb.append("    neko_maybe_rescan_cld_liveness();\n");
         sb.append("    if (current >= 0) return JNI_TRUE;\n");
         sb.append("    if (current == NEKO_FIELD_SITE_FAILED) {\n");
         sb.append("        (void)thread;\n");
@@ -708,6 +709,7 @@ static void neko_resolve_ldc_string(NekoManifestLdcSite* site) {
         sb.append("    return JNI_FALSE;\n");
         sb.append("}\n\n");
         sb.append("__attribute__((visibility(\"default\"))) void* neko_ldc_class_site_oop(void *thread, NekoManifestLdcSite *site) {\n");
+        sb.append("    neko_maybe_rescan_cld_liveness();\n");
         sb.append("    if (!neko_ensure_ldc_class_site_resolved(thread, site)) return NULL;\n");
         sb.append("    return neko_rt_mirror_from_klass_nosafepoint(neko_ldc_site_owner_klass(site));\n");
         sb.append("}\n\n");
