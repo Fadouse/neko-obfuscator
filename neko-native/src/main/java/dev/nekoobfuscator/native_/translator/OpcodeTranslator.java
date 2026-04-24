@@ -211,7 +211,7 @@ public final class OpcodeTranslator {
 
             case Opcodes.NEW -> {
                 TypeInsnNode ti = (TypeInsnNode) insn;
-                stmts.add(raw("{ jclass cls = " + cachedClassExpression(ti.desc) + "; if (cls != NULL) { PUSH_O(neko_alloc_object(env, cls)); } }"));
+                stmts.add(raw("{ jclass cls = " + cachedClassExpression(ti.desc) + "; if (cls != NULL) { Klass *__klass = (Klass*)neko_class_klass_pointer(cls); oop __fast = NULL; if (__klass != NULL) { uint32_t __lh = *(uint32_t*)((uint8_t*)__klass + g_neko_vm_layout.off_klass_layout_helper); __fast = neko_rt_try_alloc_instance_fast_nosafepoint(__klass, neko_lh_instance_size(__lh)); } if (__fast != NULL) { PUSH_O((jobject)__fast); } else { PUSH_O(neko_alloc_object(env, cls)); } } }"));
             }
             case Opcodes.NEWARRAY -> stmts.add(raw("{ jint len = POP_I(); PUSH_O(" + newArrayCall(((IntInsnNode) insn).operand) + "); }"));
             case Opcodes.ANEWARRAY -> {
