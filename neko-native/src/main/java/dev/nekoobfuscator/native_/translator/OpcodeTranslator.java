@@ -438,6 +438,7 @@ public final class OpcodeTranslator {
             codeGenerator.registerOwnerClassReference(currentOwnerInternalName, mi.owner);
         } else {
             sb.append("jobject obj = POP_O(); ");
+            sb.append(nullReceiverCheck("obj"));
             receiverExpr = "obj";
         }
         sb.append("NEKO_TRACE(2, \"[nk] di c=%d t=%d sig=\\\"%s\\\"\\n\", ")
@@ -509,7 +510,7 @@ public final class OpcodeTranslator {
         sb.append("NekoManifestInvokeSite *__site = ").append(siteExpr).append("; ");
         if (!isStatic) {
             sb.append("void *__recv = POP_O(); ");
-            sb.append("if (__recv == NULL) { neko_raise_null_pointer_exception(thread); goto __neko_exception_exit; } ");
+            sb.append(nullReceiverCheck("__recv"));
         }
         sb.append("void *__method = neko_resolve_invoke_site(__site); ");
         sb.append("if (__method == NULL) goto __neko_exception_exit; ");
@@ -542,6 +543,10 @@ public final class OpcodeTranslator {
         if (!isStatic && !isSpecial && mi.getOpcode() != Opcodes.INVOKEVIRTUAL) {
             throw new IllegalStateException("unsupported compiled invoke opcode: " + mi.getOpcode());
         }
+    }
+
+    private String nullReceiverCheck(String receiverExpr) {
+        return "if (" + receiverExpr + " == NULL) { (void)neko_throw_cached(env, g_neko_throw_npe); goto __neko_exception_exit; } ";
     }
 
     private void appendCompiledInvokeCallArgs(StringBuilder sb, Type[] args, String receiverExpr) {
