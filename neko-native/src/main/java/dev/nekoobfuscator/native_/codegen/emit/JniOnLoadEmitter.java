@@ -32,6 +32,10 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *reserved) {
     if (!neko_parse_vm_layout_strict(env)) {
         return JNI_VERSION_1_6;
     }
+    if (g_neko_vm_layout.compact_object_headers) {
+        NEKO_TRACE(0, "[nk] compact_object_headers=on; not supported by NekoObfuscator (JDK 8-21 target)");
+        return JNI_EVERSION;
+    }
     if (!neko_capture_wellknown_klasses()) {
         return JNI_VERSION_1_6;
     }
