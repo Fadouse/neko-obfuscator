@@ -1,0 +1,7 @@
+Exception in thread "main" java.lang.LinkageError: please check your native library load correctly
+	at pack.tests.bench.Calc.call(Calc.java)
+	at pack.tests.bench.Calc.runAll(Calc.java:9)
+	at pack.Main.main(Main.java:126)
+real 1.24
+user 0.08
+sys 0.01

@@ -1,0 +1,7 @@
+Exception in thread "main" java.lang.LinkageError: please check your native library load correctly
+	at org.example.Main$2.get(Main.java)
+	at org.example.Main$2.get(Main.java:267)
+	at org.example.Main.main(Main.java:268)
+real 0.06
+user 0.08
+sys 0.03
