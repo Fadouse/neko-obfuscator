@@ -68,8 +68,9 @@ public final class NativeTranslationSafetyChecker {
                     }
                 }
                 case Opcodes.INVOKEDYNAMIC -> addReason(reasons, "INVOKEDYNAMIC deferred to M5f");
-                case Opcodes.NEW,
-                     Opcodes.NEWARRAY,
+                case Opcodes.NEW -> {
+                }
+                case Opcodes.NEWARRAY,
                      Opcodes.ANEWARRAY,
                      Opcodes.MULTIANEWARRAY -> addReason(reasons, opcodeName(opcode) + " deferred beyond Wave 2");
                 case Opcodes.GETFIELD -> {
