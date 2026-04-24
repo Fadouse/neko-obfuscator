@@ -9,6 +9,7 @@ import org.objectweb.asm.tree.ClassNode;
 import org.objectweb.asm.tree.FieldInsnNode;
 import org.objectweb.asm.tree.FieldNode;
 import org.objectweb.asm.tree.InsnNode;
+import org.objectweb.asm.tree.InvokeDynamicInsnNode;
 import org.objectweb.asm.tree.LdcInsnNode;
 import org.objectweb.asm.Handle;
 import org.objectweb.asm.tree.MethodNode;
@@ -185,7 +186,7 @@ class NativeTranslationSafetyCheckerTest {
     }
 
     @Test
-    void rejectsLdcMethodHandleReferenceReturn() {
+    void rejectsLdcMethodHandleReferenceReturnFromNonDirectProducer() {
         Handle handle = new Handle(Opcodes.H_INVOKESTATIC, "pkg/HandleOwner", "call", "()V", false);
         L1Method method = method("sampleHandle", "()Ljava/lang/Object;", Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC, insns -> {
             insns.add(new LdcInsnNode(handle));
@@ -194,7 +195,40 @@ class NativeTranslationSafetyCheckerTest {
 
         List<String> reasons = new ArrayList<>();
         assertFalse(checker.isSafe(method, reasons));
-        assertTrue(reasons.contains("LDC MethodHandle deferred to M4a (Wave 3)"), () -> String.join("; ", reasons));
+        assertTrue(reasons.contains("reference return requires direct ALOAD/ACONST_NULL producer"), () -> String.join("; ", reasons));
+    }
+
+    @Test
+    void rejectsMonitorEnterUntilM5kStrictNoJniRuntimeExists() {
+        L1Method method = method("sampleMonitor", "(Ljava/lang/Object;)V", Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC, insns -> {
+            insns.add(new VarInsnNode(Opcodes.ALOAD, 0));
+            insns.add(new InsnNode(Opcodes.MONITORENTER));
+            insns.add(new InsnNode(Opcodes.RETURN));
+        }, 1, 1);
+
+        List<String> reasons = new ArrayList<>();
+        assertFalse(checker.isSafe(method, reasons));
+        assertTrue(reasons.stream().anyMatch(reason -> reason.contains("M5f deferred to M5k/W12")), () -> String.join("; ", reasons));
+    }
+
+    @Test
+    void rejectsInvokeDynamicUntilBootstrapOnlyStrictNoJniRuntimeExists() {
+        Handle bootstrap = new Handle(
+            Opcodes.H_INVOKESTATIC,
+            "java/lang/invoke/LambdaMetafactory",
+            "metafactory",
+            "(Ljava/lang/invoke/MethodHandles$Lookup;Ljava/lang/String;Ljava/lang/invoke/MethodType;Ljava/lang/invoke/MethodType;Ljava/lang/invoke/MethodHandle;Ljava/lang/invoke/MethodType;)Ljava/lang/invoke/CallSite;",
+            false
+        );
+        L1Method method = method("sampleIndy", "()V", Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC, insns -> {
+            insns.add(new InvokeDynamicInsnNode("run", "()Ljava/lang/Runnable;", bootstrap));
+            insns.add(new InsnNode(Opcodes.POP));
+            insns.add(new InsnNode(Opcodes.RETURN));
+        }, 1, 0);
+
+        List<String> reasons = new ArrayList<>();
+        assertFalse(checker.isSafe(method, reasons));
+        assertTrue(reasons.stream().anyMatch(reason -> reason.contains("M5f deferred to M5k/W12")), () -> String.join("; ", reasons));
     }
 
     private static L1Method method(String name, String desc, int access, MethodBody body, int maxStack, int maxLocals) {

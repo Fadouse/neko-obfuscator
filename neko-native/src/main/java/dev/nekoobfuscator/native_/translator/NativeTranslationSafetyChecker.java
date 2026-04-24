@@ -67,7 +67,7 @@ public final class NativeTranslationSafetyChecker {
                         }
                     }
                 }
-                case Opcodes.INVOKEDYNAMIC -> addReason(reasons, "W9 deferred to W11-M5f: BootstrapMethod CallSite resolution under strict no-JNI requires JavaCalls dlsym chain; cached g_neko_throw_bme slot is reserved");
+                case Opcodes.INVOKEDYNAMIC -> addReason(reasons, "M5f deferred to M5k/W12: BootstrapMethod CallSite resolution under strict no-JNI requires a compliant bootstrap-only indy design; cached g_neko_throw_bme slot remains reserved");
                 case Opcodes.NEW -> {
                 }
                 case Opcodes.NEWARRAY -> {
@@ -117,7 +117,7 @@ public final class NativeTranslationSafetyChecker {
                      Opcodes.ARRAYLENGTH -> {
                 }
                 case Opcodes.MONITORENTER,
-                     Opcodes.MONITOREXIT -> addReason(reasons, opcodeName(opcode) + " W9 deferred to W11-M5f: ObjectMonitor raw access via VMStructs not yet implemented; cached g_neko_throw_imse + g_neko_throw_le slots are reserved for the eventual implementation");
+                     Opcodes.MONITOREXIT -> addReason(reasons, opcodeName(opcode) + " M5f deferred to M5k/W12: ObjectMonitor raw access via VMStructs is not yet implemented under strict no-JNI; cached g_neko_throw_imse + g_neko_throw_le slots remain reserved");
                 case Opcodes.INSTANCEOF -> {
                 }
                 case Opcodes.CHECKCAST -> {
