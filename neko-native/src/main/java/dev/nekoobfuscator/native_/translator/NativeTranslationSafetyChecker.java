@@ -119,7 +119,7 @@ public final class NativeTranslationSafetyChecker {
                      Opcodes.ARRAYLENGTH -> {
                 }
                 case Opcodes.MONITORENTER,
-                     Opcodes.MONITOREXIT -> addReason(reasons, opcodeName(opcode) + " deferred to W11-M5f (strict no-JNI monitor runtime not ready)");
+                     Opcodes.MONITOREXIT -> addReason(reasons, opcodeName(opcode) + " W9 deferred to W11-M5f: ObjectMonitor raw access via VMStructs not yet implemented; cached g_neko_throw_imse + g_neko_throw_le slots are reserved for the eventual implementation");
                 case Opcodes.INSTANCEOF -> {
                 }
                 case Opcodes.CHECKCAST -> {
