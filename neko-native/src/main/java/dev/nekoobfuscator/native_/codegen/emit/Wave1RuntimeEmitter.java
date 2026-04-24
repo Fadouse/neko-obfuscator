@@ -834,6 +834,54 @@ NEKO_FAST_INLINE uintptr_t neko_receiver_key(jobject obj) {
     return *(uintptr_t*)klassAddr;
 }
 
+NEKO_FAST_INLINE void* neko_receiver_klass(jobject obj) {
+    char *oop;
+    char *klassAddr;
+    uintptr_t narrow;
+    if (obj == NULL || !neko_receiver_key_supported()) return NULL;
+    oop = (char*)neko_handle_oop(obj);
+    if (oop == NULL || g_hotspot.klass_offset_bytes <= 0) return NULL;
+    klassAddr = oop + g_hotspot.klass_offset_bytes;
+    if (g_hotspot.use_compressed_klass_ptrs) {
+        narrow = (uintptr_t)(*(uint32_t*)klassAddr);
+        return narrow == 0u ? NULL : neko_decode_klass_pointer((u4)narrow);
+    }
+    return *(void**)klassAddr;
+}
+
+static void* neko_vtable_offset_for(void *klass, void *resolved_method) {
+    uint16_t vtable_index;
+    uint8_t *entry;
+    if (klass == NULL || resolved_method == NULL) return NULL;
+    if (g_neko_vm_layout.off_instance_klass_vtable_start < 0 || g_neko_vm_layout.off_method_vtable_index < 0) return NULL;
+    if (g_neko_vm_layout.vtable_entry_size < sizeof(void*)) return NULL;
+    vtable_index = *(uint16_t*)((uint8_t*)resolved_method + g_neko_vm_layout.off_method_vtable_index);
+    if (vtable_index == (uint16_t)0xFFFFu) return NULL;
+    entry = (uint8_t*)klass + g_neko_vm_layout.off_instance_klass_vtable_start + ((size_t)vtable_index * g_neko_vm_layout.vtable_entry_size);
+    return __atomic_load_n((void**)entry, __ATOMIC_ACQUIRE);
+}
+
+static void* neko_itable_offset_for(void *klass, void *interface_klass, void *resolved_method) {
+    (void)klass;
+    (void)interface_klass;
+    return resolved_method;
+}
+
+static jboolean neko_vtable_inline_supported(jobject receiver, void *resolved_method, jboolean is_interface) {
+    void *receiver_klass;
+    void *holder_klass;
+    void *inline_method;
+    if (is_interface || receiver == NULL || resolved_method == NULL) return JNI_FALSE;
+    receiver_klass = neko_receiver_klass(receiver);
+    if (receiver_klass == NULL) return JNI_FALSE;
+    holder_klass = neko_method_holder_klass(resolved_method);
+    if (holder_klass == NULL || holder_klass != receiver_klass) return JNI_FALSE;
+    inline_method = neko_vtable_offset_for(receiver_klass, resolved_method);
+    if (inline_method != resolved_method) return JNI_FALSE;
+    NEKO_TRACE(1, "[nk] neko_vtable_inline=%p method=%p", receiver_klass, resolved_method);
+    return JNI_TRUE;
+}
+
 typedef jvalue (*neko_icache_direct_stub)(JNIEnv *env, jobject receiver, const jvalue *args);
 
 typedef struct {
