@@ -67,7 +67,7 @@ public final class NativeTranslationSafetyChecker {
                         }
                     }
                 }
-                case Opcodes.INVOKEDYNAMIC -> addReason(reasons, "INVOKEDYNAMIC deferred to M5f");
+                case Opcodes.INVOKEDYNAMIC -> addReason(reasons, "W9 deferred to W11-M5f: BootstrapMethod CallSite resolution under strict no-JNI requires JavaCalls dlsym chain; cached g_neko_throw_bme slot is reserved");
                 case Opcodes.NEW -> {
                 }
                 case Opcodes.NEWARRAY -> {
