@@ -1,0 +1,25 @@
+Obfuscator Test Program
+Author: huzpsb
+Version: 1.0r
+Link: https://github.com/huzpsb/JavaObfuscatorTest
+-------------Test #1: Basics-------------
+Test 1.1: Inheritance #
+# A fatal error has been detected by the Java Runtime Environment:
+#
+#  SIGSEGV (0xb) at pc=0x00007ff0304a6a52, pid=1628554, tid=1628558
+#
+# JRE version: OpenJDK Runtime Environment (21.0.10+7) (build 21.0.10+7)
+# Java VM: OpenJDK 64-Bit Server VM (21.0.10+7, mixed mode, sharing, tiered, compressed oops, compressed class ptrs, g1 gc, linux-amd64)
+# Problematic frame:
+# C  [libneko_3142760067428558596.so+0x9a52]  JNI_OnLoad+0x29bf
+#
+# Core dump will be written. Default location: Core dumps may be processed with "/usr/lib/systemd/systemd-coredump %P %u %g %s %t %c %h %d %F" (or dumping to /mnt/d/Code/Security/NekoObfuscator/worktree/dev-impl/core.1628554)
+#
+# An error report file with more information is saved as:
+# /mnt/d/Code/Security/NekoObfuscator/worktree/dev-impl/hs_err_pid1628554.log
+#
+# If you would like to submit a bug report, please visit:
+#   https://bugreport.java.com/bugreport/crash.jsp
+# The crash happened outside the Java Virtual Machine in native code.
+# See problematic frame for where to report the bug.
+#
