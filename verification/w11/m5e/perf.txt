@@ -1,0 +1,28 @@
+# W11-M5e Performance Regression Gate
+# JDK: openjdk version "21.0.10" 2026-01-20; build mode: release (no NEKO_DEBUG)
+# Timer: POSIX `time -p` fallback (`/usr/bin/time -v` unavailable on host)
+# 5 iterations per jar per pre/post, run sequentially to avoid CPU contention
+# Post-W11 runtime status: expected M5d fail-closed LinkageError fallback; timing measures wall-clock to that expected process exit.
+
+TEST.jar:
+  command pre : java -jar test-jars/TEST.jar
+  command post: java -jar verification/w11/m5e/TEST-native-release.jar
+  status pre  : exits=[0, 0, 0, 0, 0]
+  status post : exits=[1, 1, 1, 1, 1] (expected fail-closed LinkageError after M5d dp 1/14 path)
+  pre  : mean=1.420s  median=1.420s  stddev=0.000s  min=1.420s  max=1.420s  runs=[1.42, 1.42, 1.42, 1.42, 1.42]
+  post : mean=1.240s  median=1.240s  stddev=0.000s  min=1.240s  max=1.240s  runs=[1.24, 1.24, 1.24, 1.24, 1.24]
+  delta: -12.68%   (gate: <= 5%   result: PASS)
+
+obfusjack-test21.jar:
+  command pre : java -jar test-jars/obfusjack-test21.jar
+  command post: java -jar verification/w11/m5e/obfusjack-native-release.jar
+  status pre  : exits=[0, 0, 0, 0, 0]
+  status post : exits=[1, 1, 1, 1, 1] (expected fail-closed LinkageError after M5d dp 6/17 path)
+  pre  : mean=0.300s  median=0.300s  stddev=0.007s  min=0.290s  max=0.310s  runs=[0.29, 0.3, 0.3, 0.3, 0.31]
+  post : mean=0.060s  median=0.060s  stddev=0.000s  min=0.060s  max=0.060s  runs=[0.06, 0.06, 0.06, 0.06, 0.06]
+  delta: -80.00%   (gate: <= 5%   result: PASS)
+
+SnakeGame.jar:
+  excluded: GUI app (HeadlessException/headless GUI bias); not a meaningful runtime perf measure
+
+OVERALL: PASS
