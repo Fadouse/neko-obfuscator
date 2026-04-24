@@ -910,7 +910,7 @@ Each sub-wave is its own Deep A / Deep B task. All sub-waves apply §6.0 **GATE-
 
 | Sub | Topic | Deliverable | Sub-wave verification |
 |---|---|---|---|
-| M5a | ClassUnload handling | `cached_klass` invalidation via CLDG scan for dead CLDs on periodic rescan. | `*ClassUnloadTest*` passes; debug trace `neko_class_unload_observed` ≥ 1. |
+| M5a | ClassUnload handling | DONE — `cached_klass` invalidation via CLDG scan for dead CLDs on periodic rescan. | DONE — `*ClassUnloadTest*` passes; debug trace `neko_class_unload_observed` ≥ 1. |
 | M5b | RedefineClasses compat | Detect redefine / replacement methods and re-patch safely. | `*RedefineClassesTest*` passes; trace `neko_redefine_detected=` present. |
 | M5c | JDK-applicable GC matrix | Full §6.0 GATE-11 matrix executed as deliverable. | `gc-matrix.txt` has JDK-applicable number of passing rows per GATE-11 (JDK 8: 9, JDK 11: 15, JDK 17/21: 18). |
 | M5d | C1/C2 interop | JIT does not panic on patched entry. | `PrintCompilation` / `PrintInlining` smoke shows no deopt markers tied to `neko_impl`. |

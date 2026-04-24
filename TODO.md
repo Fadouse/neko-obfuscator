@@ -96,6 +96,11 @@ LDC Class re-admit — object / interface / array class literals. 3-layer bindin
 ### Debug-flag cleanup (merged)
 `NEKO_DEBUG_ENABLED` compile guard, neutral `[nk]` labels, zero trace strings in default `.so`.
 
+### W11-M5a ClassUnload handling (done on `dev-impl-nojni`)
+- Added throttled translated-dispatch CLDG liveness rescans with no new threads/timers.
+- Dead/unloaded CLDs are detected from CLDG snapshot deltas; stale field/LDC `cached_klass` entries are cleared without dereferencing reclaimed Klass pointers.
+- `NativeObfClassUnloadTest` builds a throwaway `URLClassLoader` victim jar and asserts `neko_class_unload_observed=N` in native debug stderr.
+
 ### CCodeGenerator refactor (merged)
 Decomposed into 11 emitter classes under `neko-native/.../codegen/emit/`.
 
