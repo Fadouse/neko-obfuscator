@@ -80,7 +80,7 @@ public final class NativeTranslationSafetyChecker {
                 case Opcodes.GETSTATIC -> {
                     if (insn instanceof FieldInsnNode fieldInsn) {
                         if (!isPrimitiveDescriptor(fieldInsn.desc)) {
-                            addReason(reasons, "reference GETSTATIC deferred pending oop static field support");
+                            addReason(reasons, "W9 deferred to W11-M5h: reference GETSTATIC requires GC load barrier coverage for ZGC/Shenandoah; G1/Serial/Parallel paths pending");
                         }
                     }
                 }
@@ -89,15 +89,13 @@ public final class NativeTranslationSafetyChecker {
                     if (opcode == Opcodes.PUTSTATIC) {
                         if (insn instanceof FieldInsnNode fieldInsn) {
                             if (!isPrimitiveDescriptor(fieldInsn.desc)) {
-                                addReason(reasons, "reference PUTSTATIC deferred to M5h (GC write barriers)");
+                                addReason(reasons, "W9 deferred to W11-M5h: reference PUTFIELD/PUTSTATIC requires SATB/incremental update write barriers; pending W11 hardening");
                             }
                         }
                         break;
                     }
                     if (insn instanceof FieldInsnNode fieldInsn && !isPrimitiveDescriptor(fieldInsn.desc)) {
-                        addReason(reasons, opcode == Opcodes.PUTFIELD
-                            ? "reference PUTFIELD deferred to M5h (GC write barriers)"
-                            : "reference PUTSTATIC deferred to M5h (GC write barriers)");
+                        addReason(reasons, "W9 deferred to W11-M5h: reference PUTFIELD/PUTSTATIC requires SATB/incremental update write barriers; pending W11 hardening");
                     }
                 }
                 case Opcodes.AALOAD,
