@@ -301,15 +301,23 @@ static void neko_log_wave3_ready(void) {
         } else {
             sb.append("    ");
         }
-        sb.append(stub.binding().cFunctionName()).append("(env, receiver");
+        sb.append(stub.binding().cFunctionName()).append('(');
+        boolean first = true;
+        if (!stub.binding().isStatic()) {
+            sb.append("receiver");
+            first = false;
+        }
         for (int i = 0; i < stub.args().length; i++) {
-            sb.append(", ");
+            if (!first) {
+                sb.append(", ");
+            }
             if (stub.args()[i].getSort() == Type.ARRAY) {
                 sb.append("(jarray)");
             } else if (stub.args()[i].getSort() == Type.OBJECT) {
                 sb.append("(jobject)");
             }
             sb.append("args[").append(i).append("]").append(jvalueAccessor(stub.args()[i]));
+            first = false;
         }
         sb.append(");\n");
         sb.append("    return result;\n");
