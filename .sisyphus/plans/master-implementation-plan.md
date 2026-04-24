@@ -5,6 +5,7 @@ Revision history:
 - v5: Momus [OKAY] approved, 794 lines
 - v6: this document — Option A strict-no-JNI + DD-5 Option 1 revision (m0107, m0117)
 - v6.4: Oracle 9 amendment — `InstanceKlass::allocate_instance` is not portable/exported, so DD-5 now permits a bootstrap-only JNI throwable cache and keeps post-bootstrap synthetic dispatch to cached `jthrowable` + `Throw` only.
+- v6.5: W9 recovery note — reverted the broken safe-Java fallback regression and fixed the canonical W9 debug harness reference to the v14 invocation shape.
 
 > **v6.4 amendment reason:** Oracle 9 confirmed that `InstanceKlass::allocate_instance(Thread*)` is absent from the `.dynsym` of supported OpenJDK builds and cannot be a portable synthetic-exception allocation backend. User explicitly approved the Opt-6/5 bootstrap-only JNI relaxation: construct global throwable handles during `JNI_OnLoad`; after bootstrap, generated code may only dispatch those cached handles via `(*env)->Throw(env, jthrowable)`.
 
@@ -828,6 +829,10 @@ Synthetic exception dispatch after `JNI_OnLoad` may use exactly one JNI call fam
 ---
 
 ### W9 — Wave 5: Full SafetyChecker relaxation under strict no-JNI
+
+**Status (2026-04-24): DONE for W9 valid scope after recovery.** Commits `3aa69c6` and `54cbe23` were reverted because `54cbe23` disabled core native entry patching (`dp 0/N`) by replacing patch installation and translated-method rewrites with a Java fallback. v17 verification with the v14 harness restored native patch counts: TEST `translated=14 rejected=75`, `dp 1/14`; obfusjack `translated=17 rejected=84`, `dp 6/17`; SnakeGame `translated=12 rejected=14`, `dp 2/12` on this host. The later `LinkageError` bodies are the intentional Java fallback for translated methods whose owners were not discovered at `JNI_OnLoad`, not a native crash and not the broken safe-fallback regression.
+
+**Harness clarification:** use the v14 runtime invocation for W9 debug artifacts: debug-built `.so`, plain `NEKO_DEBUG=1 java -jar ...`, no `-Dneko.native.debug=true`, and no forced `-Djava.awt.headless=true`. The v15/v16 “corrected harness” changed runtime behavior and must not be used to judge W9 recovery. Details: `.sisyphus/plans/w9-harness-clarification.md`.
 
 **Goal**: Sweep remaining SafetyChecker rejects, admit all reachable opcodes except those intentionally excluded (`JSR/RET`, `ACC_NATIVE`, `ACC_ABSTRACT`, no-body, `<clinit>`, `<init>`), and reopen remaining synthetic exception paths through cached throwable dispatch where required.
 
