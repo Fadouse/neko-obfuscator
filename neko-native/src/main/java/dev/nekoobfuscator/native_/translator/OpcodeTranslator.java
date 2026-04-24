@@ -298,8 +298,7 @@ public final class OpcodeTranslator {
     private String translateMethodInvoke(MethodInsnNode mi, int opcode) {
         return switch (opcode) {
             case Opcodes.INVOKESPECIAL -> translateCompiledInvoke(mi, false, true);
-            case Opcodes.INVOKEVIRTUAL -> throw new IllegalStateException("INVOKEVIRTUAL deferred pending Wave 3 vtable dispatch hardening");
-            case Opcodes.INVOKEINTERFACE -> throw new IllegalStateException("INVOKEINTERFACE deferred pending Wave 3 itable dispatch hardening");
+            case Opcodes.INVOKEVIRTUAL, Opcodes.INVOKEINTERFACE -> translateVirtualDispatchWithCache(mi);
             default -> throw new IllegalStateException("unsupported invoke opcode: " + opcode);
         };
     }
@@ -332,14 +331,20 @@ public final class OpcodeTranslator {
         StringBuilder sb = new StringBuilder("{ ");
         sb.append(declarePoppedArgs(args));
         sb.append("jobject __recv = POP_O(); ");
+        sb.append(nullReceiverCheck("__recv"));
         sb.append("jmethodID mid = ").append(cachedMethodExpression(mi.owner, mi.name, mi.desc, false)).append("; ");
+        sb.append("if (mid == NULL) goto __neko_exception_exit; ");
         if (ret.getSort() == Type.VOID) {
             sb.append("neko_icache_dispatch(env, &").append(cacheSite).append(", &")
                 .append(metaSite).append(", __recv, mid, __args); ");
         } else {
             sb.append("jvalue __ic_result = neko_icache_dispatch(env, &").append(cacheSite).append(", &")
                 .append(metaSite).append(", __recv, mid, __args); ");
-            sb.append("if (neko_pending_exception(thread) == NULL) { ").append(pushForType(ret, "__ic_result" + jvalueAccessor(ret))).append(" } ");
+            sb.append("if (neko_pending_exception(thread) != NULL) goto __neko_exception_exit; ");
+            sb.append(pushForType(ret, "__ic_result" + jvalueAccessor(ret))).append(' ');
+        }
+        if (ret.getSort() == Type.VOID) {
+            sb.append("if (neko_pending_exception(thread) != NULL) goto __neko_exception_exit; ");
         }
         sb.append("}");
         return sb.toString();
@@ -532,14 +537,6 @@ public final class OpcodeTranslator {
     }
 
     private void validateCompiledInvoke(MethodInsnNode mi, Type[] args, Type ret, boolean isStatic, boolean isSpecial) {
-        if (ret.getSort() == Type.OBJECT || ret.getSort() == Type.ARRAY) {
-            throw new IllegalStateException("INVOKE with reference return deferred to Wave 4 (oop return adapter)");
-        }
-        for (Type arg : args) {
-            if (arg.getSort() == Type.OBJECT || arg.getSort() == Type.ARRAY) {
-                throw new IllegalStateException("INVOKE with reference arguments deferred pending JNI-free receiver spill hardening");
-            }
-        }
         if (!isStatic && !isSpecial && mi.getOpcode() != Opcodes.INVOKEVIRTUAL) {
             throw new IllegalStateException("unsupported compiled invoke opcode: " + mi.getOpcode());
         }
