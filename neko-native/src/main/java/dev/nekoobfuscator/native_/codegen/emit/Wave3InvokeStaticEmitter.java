@@ -83,43 +83,36 @@ static void neko_bind_log_failure(JNIEnv *env, const char *errorClass, const cha
 static void neko_bind_class_slot(JNIEnv *env, jclass *slot, const char *owner) {
     jclass localClass;
     jobject globalRef;
-    char message[256];
     if (env == NULL || slot == NULL || *slot != NULL || owner == NULL) return;
     localClass = neko_find_class(env, owner);
     if (localClass == NULL) {
-        snprintf(message, sizeof(message), "Bind-time class resolution failed: %s", owner);
-        neko_bind_log_failure(env, "java/lang/NoClassDefFoundError", message);
+        neko_bind_log_failure(env, "java/lang/NoClassDefFoundError", NULL);
         if (localClass != NULL) neko_delete_local_ref(env, localClass);
         return;
     }
     globalRef = neko_new_global_ref(env, localClass);
     neko_delete_local_ref(env, localClass);
     if (globalRef == NULL) {
-        snprintf(message, sizeof(message), "Bind-time class global-ref failed: %s", owner);
-        neko_bind_log_failure(env, "java/lang/NoClassDefFoundError", message);
+        neko_bind_log_failure(env, "java/lang/NoClassDefFoundError", NULL);
         return;
     }
     *slot = (jclass)globalRef;
 }
 
 static void neko_bind_method_slot(JNIEnv *env, jmethodID *slot, jclass cls, const char *owner, const char *name, const char *desc, jboolean isStatic) {
-    char message[320];
     if (env == NULL || slot == NULL || *slot != NULL || cls == NULL || owner == NULL || name == NULL || desc == NULL) return;
     *slot = isStatic ? neko_get_static_method_id(env, cls, name, desc) : neko_get_method_id(env, cls, name, desc);
     if (*slot == NULL) {
-        snprintf(message, sizeof(message), "Bind-time %s method resolution failed: %s.%s%s", isStatic ? "static" : "instance", owner, name, desc);
-        neko_bind_log_failure(env, "java/lang/NoSuchMethodError", message);
+        neko_bind_log_failure(env, "java/lang/NoSuchMethodError", NULL);
         *slot = NULL;
     }
 }
 
 static void neko_bind_field_slot(JNIEnv *env, jfieldID *slot, jclass cls, const char *owner, const char *name, const char *desc, jboolean isStatic) {
-    char message[320];
     if (env == NULL || slot == NULL || *slot != NULL || cls == NULL || owner == NULL || name == NULL || desc == NULL) return;
     *slot = isStatic ? neko_get_static_field_id(env, cls, name, desc) : neko_get_field_id(env, cls, name, desc);
     if (*slot == NULL) {
-        snprintf(message, sizeof(message), "Bind-time %s field resolution failed: %s.%s:%s", isStatic ? "static" : "instance", owner, name, desc);
-        neko_bind_log_failure(env, "java/lang/NoSuchFieldError", message);
+        neko_bind_log_failure(env, "java/lang/NoSuchFieldError", NULL);
         *slot = NULL;
     }
 }
@@ -127,57 +120,49 @@ static void neko_bind_field_slot(JNIEnv *env, jfieldID *slot, jclass cls, const 
 static void neko_bind_string_slot(JNIEnv *env, jstring *slot, const char *utf) {
     jstring localString;
     jobject globalRef;
-    char message[256];
     if (env == NULL || slot == NULL || *slot != NULL || utf == NULL) return;
     localString = neko_new_string_utf(env, utf);
     if (localString == NULL) {
-        snprintf(message, sizeof(message), "Bind-time string resolution failed: %s", utf);
-        neko_bind_log_failure(env, "java/lang/IllegalStateException", message);
+        neko_bind_log_failure(env, "java/lang/IllegalStateException", NULL);
         if (localString != NULL) neko_delete_local_ref(env, localString);
         return;
     }
     globalRef = neko_new_global_ref(env, localString);
     neko_delete_local_ref(env, localString);
     if (globalRef == NULL) {
-        snprintf(message, sizeof(message), "Bind-time string global-ref failed: %s", utf);
-        neko_bind_log_failure(env, "java/lang/IllegalStateException", message);
+        neko_bind_log_failure(env, "java/lang/IllegalStateException", NULL);
         return;
     }
     *slot = (jstring)globalRef;
 }
 
 static jclass neko_bound_class(JNIEnv *env, jclass slot, const char *owner) {
-    char message[256];
+    (void)owner;
     if (slot != NULL) return slot;
-    snprintf(message, sizeof(message), "Unresolved bound class: %s", owner == NULL ? "<null>" : owner);
-    neko_raise_bound_resolution_error(env, "java/lang/NoClassDefFoundError", message);
+    neko_raise_bound_resolution_error(env, "java/lang/NoClassDefFoundError", NULL);
     return NULL;
 }
 
 static jmethodID neko_bound_method(JNIEnv *env, jmethodID slot, const char *owner, const char *name, const char *desc, jboolean isStatic) {
-    char message[320];
+    (void)owner; (void)name; (void)desc; (void)isStatic;
     if (slot != NULL) return slot;
-    snprintf(message, sizeof(message), "Unresolved bound %s method: %s.%s%s", isStatic ? "static" : "instance", owner == NULL ? "<null>" : owner, name == NULL ? "<null>" : name, desc == NULL ? "<null>" : desc);
-    neko_raise_bound_resolution_error(env, "java/lang/NoSuchMethodError", message);
+    neko_raise_bound_resolution_error(env, "java/lang/NoSuchMethodError", NULL);
     return NULL;
 }
 
 static jfieldID neko_bound_field(JNIEnv *env, jfieldID slot, const char *owner, const char *name, const char *desc, jboolean isStatic) {
-    char message[320];
+    (void)owner; (void)name; (void)desc; (void)isStatic;
     if (slot != NULL) return slot;
-    snprintf(message, sizeof(message), "Unresolved bound %s field: %s.%s:%s", isStatic ? "static" : "instance", owner == NULL ? "<null>" : owner, name == NULL ? "<null>" : name, desc == NULL ? "<null>" : desc);
-    neko_raise_bound_resolution_error(env, "java/lang/NoSuchFieldError", message);
+    neko_raise_bound_resolution_error(env, "java/lang/NoSuchFieldError", NULL);
     return NULL;
 }
 
 static jstring neko_bound_string(JNIEnv *env, jstring slot, const char *utf) {
-    char message[256];
+    (void)utf;
     if (slot != NULL) return slot;
-    snprintf(message, sizeof(message), "Unresolved bound string: %s", utf == NULL ? "<null>" : utf);
-    neko_raise_bound_resolution_error(env, "java/lang/IllegalStateException", message);
+    neko_raise_bound_resolution_error(env, "java/lang/IllegalStateException", NULL);
     return NULL;
 }
-
 """;
     }
 
