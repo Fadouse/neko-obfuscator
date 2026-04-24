@@ -125,7 +125,8 @@ public final class NativeTranslationSafetyChecker {
                 case Opcodes.IDIV,
                      Opcodes.IREM,
                      Opcodes.LDIV,
-                     Opcodes.LREM -> addReason(reasons, opcodeName(opcode) + " is not yet supported for leaf-native translation");
+                     Opcodes.LREM -> {
+                }
                 case Opcodes.LDC -> {
                     if (insn instanceof LdcInsnNode ldcInsn) {
                         String reason = unsupportedLdcReason(ldcInsn);

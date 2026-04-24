@@ -123,8 +123,8 @@ public final class OpcodeTranslator {
             case Opcodes.IADD -> stmts.add(raw("{ jint b = POP_I(); jint a = POP_I(); PUSH_I(a + b); }"));
             case Opcodes.ISUB -> stmts.add(raw("{ jint b = POP_I(); jint a = POP_I(); PUSH_I(a - b); }"));
             case Opcodes.IMUL -> stmts.add(raw("{ jint b = POP_I(); jint a = POP_I(); PUSH_I(a * b); }"));
-            case Opcodes.IDIV -> stmts.add(raw("{ jint b = POP_I(); jint a = POP_I(); PUSH_I(a / b); }"));
-            case Opcodes.IREM -> stmts.add(raw("{ jint b = POP_I(); jint a = POP_I(); PUSH_I(a % b); }"));
+            case Opcodes.IDIV -> stmts.add(raw("{ jint __b = POP_I(); jint __a = POP_I(); if (__b == 0) { (void)neko_throw_cached(env, g_neko_throw_ae); goto __neko_exception_exit; } if (__a == (jint)INT32_MIN && __b == -1) { PUSH_I(__a); } else { PUSH_I(__a / __b); } }"));
+            case Opcodes.IREM -> stmts.add(raw("{ jint __b = POP_I(); jint __a = POP_I(); if (__b == 0) { (void)neko_throw_cached(env, g_neko_throw_ae); goto __neko_exception_exit; } if (__a == (jint)INT32_MIN && __b == -1) { PUSH_I(0); } else { PUSH_I(__a % __b); } }"));
             case Opcodes.INEG -> stmts.add(raw("PUSH_I(-POP_I());"));
             case Opcodes.ISHL -> stmts.add(raw("{ jint b = POP_I(); jint a = POP_I(); PUSH_I(a << (b & 0x1f)); }"));
             case Opcodes.ISHR -> stmts.add(raw("{ jint b = POP_I(); jint a = POP_I(); PUSH_I(a >> (b & 0x1f)); }"));
@@ -136,8 +136,8 @@ public final class OpcodeTranslator {
             case Opcodes.LADD -> stmts.add(raw("{ jlong b = POP_L(); jlong a = POP_L(); PUSH_L(a + b); }"));
             case Opcodes.LSUB -> stmts.add(raw("{ jlong b = POP_L(); jlong a = POP_L(); PUSH_L(a - b); }"));
             case Opcodes.LMUL -> stmts.add(raw("{ jlong b = POP_L(); jlong a = POP_L(); PUSH_L(a * b); }"));
-            case Opcodes.LDIV -> stmts.add(raw("{ jlong b = POP_L(); jlong a = POP_L(); PUSH_L(a / b); }"));
-            case Opcodes.LREM -> stmts.add(raw("{ jlong b = POP_L(); jlong a = POP_L(); PUSH_L(a % b); }"));
+            case Opcodes.LDIV -> stmts.add(raw("{ jlong __b = POP_L(); jlong __a = POP_L(); if (__b == 0LL) { (void)neko_throw_cached(env, g_neko_throw_ae); goto __neko_exception_exit; } if (__a == (jlong)INT64_MIN && __b == -1LL) { PUSH_L(__a); } else { PUSH_L(__a / __b); } }"));
+            case Opcodes.LREM -> stmts.add(raw("{ jlong __b = POP_L(); jlong __a = POP_L(); if (__b == 0LL) { (void)neko_throw_cached(env, g_neko_throw_ae); goto __neko_exception_exit; } if (__a == (jlong)INT64_MIN && __b == -1LL) { PUSH_L(0LL); } else { PUSH_L(__a % __b); } }"));
             case Opcodes.LNEG -> stmts.add(raw("PUSH_L(-POP_L());"));
             case Opcodes.LSHL -> stmts.add(raw("{ jint __s = POP_I(); jlong __v = POP_L(); PUSH_L(__v << (__s & 0x3F)); }"));
             case Opcodes.LSHR -> stmts.add(raw("{ jint __s = POP_I(); jlong __v = POP_L(); PUSH_L(__v >> (__s & 0x3F)); }"));
