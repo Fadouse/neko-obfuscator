@@ -1320,10 +1320,10 @@ static Klass* neko_find_klass_by_name_in_cld_graph(const char *internal_name, ui
     return NULL;
 }
 
-/* W1: Scan mirror oop of a known klass to find off_class_klass when VMStructs doesn't expose it.
- * Klass::_java_mirror is an OopHandle (oop* stored as native pointer in the Klass struct).
- * We double-dereference: mirror_oop = *(oop*)(*(void**)(klass + off_klass_java_mirror))
- * Then scan mirror_oop for a native-word-sized pointer matching known_klass. */
+/* W1: Derive off_class_klass by resolving the java.lang.Class mirror for a known Klass,
+ * then scanning the mirror object for the hidden Klass* back-pointer. On JDK 8 the mirror
+ * is read from a direct oop field; on JDK 9+ it is resolved through Klass::_java_mirror
+ * (OopHandle -> oop storage slot -> wide oop). */
 static void neko_derive_class_klass_offset_from_mirror(void *known_klass) {
     void *mirror_oop;
     if (known_klass == NULL || g_neko_vm_layout.off_class_klass >= 0) return;

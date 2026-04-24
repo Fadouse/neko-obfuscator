@@ -226,23 +226,30 @@ __attribute__((visibility("default"))) oop neko_rt_oop_from_handle(NekoHandle h)
 """);
         sb.append("""
 
-static inline const void* neko_resolve_mirror_cell_from_klass(const NekoVmLayout *layout, Klass *klass) {
-    void *oop_handle_addr;
-    void *mirror_handle;
+static inline const void* neko_resolve_mirror_storage_slot_from_klass(const NekoVmLayout *layout, Klass *klass) {
+    const uint8_t *oop_handle_addr;
+    void *storage_slot;
     if (layout == NULL || klass == NULL || layout->off_klass_java_mirror < 0) return NULL;
-    if (layout->java_spec_version >= 9) {
-        if (layout->off_oophandle_obj < 0) return NULL;
-        oop_handle_addr = (uint8_t*)klass + layout->off_klass_java_mirror;
-        mirror_handle = *(void**)oop_handle_addr;
-        if (mirror_handle == NULL) return NULL;
-        return (const void*)((const uint8_t*)mirror_handle + layout->off_oophandle_obj);
-    }
-    return (const void*)((const uint8_t*)klass + layout->off_klass_java_mirror);
+    if (layout->java_spec_version < 9) return NULL;
+    if (layout->off_oophandle_obj < 0) return NULL;
+
+    oop_handle_addr = (const uint8_t*)klass + layout->off_klass_java_mirror;
+    storage_slot = __atomic_load_n((void* const*)((const uint8_t*)oop_handle_addr + layout->off_oophandle_obj), __ATOMIC_ACQUIRE);
+    return storage_slot;
 }
 
 static inline oop neko_resolve_mirror_oop_from_klass(const NekoVmLayout *layout, Klass *klass) {
-    const void *cell = neko_resolve_mirror_cell_from_klass(layout, klass);
-    if (cell == NULL) return NULL;
+    const void *cell;
+    const void *storage_slot;
+    if (layout == NULL || klass == NULL || layout->off_klass_java_mirror < 0) return NULL;
+
+    if (layout->java_spec_version >= 9) {
+        storage_slot = neko_resolve_mirror_storage_slot_from_klass(layout, klass);
+        if (storage_slot == NULL) return NULL;
+        return __atomic_load_n((void* const*)storage_slot, __ATOMIC_ACQUIRE);
+    }
+
+    cell = (const uint8_t*)klass + layout->off_klass_java_mirror;
     return (oop)neko_load_oop_from_cell(cell);
 }
 
