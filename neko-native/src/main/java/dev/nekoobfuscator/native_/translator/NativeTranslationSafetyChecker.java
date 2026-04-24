@@ -73,7 +73,8 @@ public final class NativeTranslationSafetyChecker {
                 case Opcodes.NEWARRAY -> {
                 }
                 case Opcodes.ANEWARRAY,
-                     Opcodes.MULTIANEWARRAY -> addReason(reasons, opcodeName(opcode) + " deferred beyond Wave 2");
+                     Opcodes.MULTIANEWARRAY -> {
+                }
                 case Opcodes.GETFIELD -> {
                 }
                 case Opcodes.GETSTATIC -> {
@@ -118,7 +119,7 @@ public final class NativeTranslationSafetyChecker {
                      Opcodes.ARRAYLENGTH -> {
                 }
                 case Opcodes.MONITORENTER,
-                     Opcodes.MONITOREXIT -> addReason(reasons, opcodeName(opcode) + " deferred beyond Wave 2");
+                     Opcodes.MONITOREXIT -> addReason(reasons, opcodeName(opcode) + " deferred to W11-M5f (strict no-JNI monitor runtime not ready)");
                 case Opcodes.INSTANCEOF -> {
                 }
                 case Opcodes.CHECKCAST -> {

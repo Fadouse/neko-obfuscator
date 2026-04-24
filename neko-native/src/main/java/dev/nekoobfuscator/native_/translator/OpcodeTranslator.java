@@ -1041,8 +1041,11 @@ public final class OpcodeTranslator {
         for (int i = insn.dims - 1; i >= 0; i--) {
             sb.append("__dims[").append(i).append("] = POP_I(); ");
         }
-        sb.append("PUSH_O(neko_multi_new_array(env, ").append(insn.dims).append(", __dims, \"")
-            .append(cStringLiteral(insn.desc)).append("\")); }");
+        sb.append("jobject __arr = neko_multi_new_array(env, ").append(insn.dims).append(", __dims, \"")
+            .append(cStringLiteral(insn.desc)).append("\"); ")
+            .append("if (neko_pending_exception(thread) != NULL) goto __neko_exception_exit; ")
+            .append("if (__arr == NULL) { (void)neko_throw_cached(env, g_neko_throw_oom); goto __neko_exception_exit; } ")
+            .append("PUSH_O(__arr); }");
         return sb.toString();
     }
 
