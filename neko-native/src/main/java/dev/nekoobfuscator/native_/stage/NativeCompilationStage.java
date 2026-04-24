@@ -14,15 +14,12 @@ import dev.nekoobfuscator.native_.translator.NativeTranslator.TranslationResult;
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.ClassWriter;
 import org.objectweb.asm.Opcodes;
-import org.objectweb.asm.Type;
 import org.objectweb.asm.tree.AnnotationNode;
 import org.objectweb.asm.tree.ClassNode;
 import org.objectweb.asm.tree.InsnList;
 import org.objectweb.asm.tree.InsnNode;
-import org.objectweb.asm.tree.LdcInsnNode;
 import org.objectweb.asm.tree.MethodInsnNode;
 import org.objectweb.asm.tree.MethodNode;
-import org.objectweb.asm.tree.TypeInsnNode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -44,8 +41,6 @@ public final class NativeCompilationStage {
     private static final String NATIVE_TRANSLATE_DESC = "Ldev/nekoobfuscator/api/annotation/NativeTranslate;";
     private static final String NATIVE_LOADER_OWNER = "dev/nekoobfuscator/runtime/NekoNativeLoader";
     private static final String NATIVE_LOAD_DESC = "()V";
-    private static final String LINKAGE_ERROR_OWNER = "java/lang/LinkageError";
-    private static final String LINKAGE_ERROR_MESSAGE = "please check your native library load correctly";
 
     private final ObfuscationConfig.NativeConfig cfg;
     private final long masterSeed;
@@ -300,7 +295,7 @@ public final class NativeCompilationStage {
                 if (methodNode == null) {
                     continue;
                 }
-                rewriteTranslatedMethod(methodNode);
+                preserveTranslatedMethodFallback(methodNode);
             }
 
             ensureClinitLoadsNative(parsedClass.classNode());
@@ -308,33 +303,8 @@ public final class NativeCompilationStage {
         return modifiedClasses;
     }
 
-    private void rewriteTranslatedMethod(MethodNode methodNode) {
-        methodNode.instructions.clear();
-        methodNode.instructions.add(new TypeInsnNode(Opcodes.NEW, LINKAGE_ERROR_OWNER));
-        methodNode.instructions.add(new InsnNode(Opcodes.DUP));
-        methodNode.instructions.add(new LdcInsnNode(LINKAGE_ERROR_MESSAGE));
-        methodNode.instructions.add(new MethodInsnNode(Opcodes.INVOKESPECIAL, LINKAGE_ERROR_OWNER, "<init>", "(Ljava/lang/String;)V", false));
-        methodNode.instructions.add(new InsnNode(Opcodes.ATHROW));
-
-        if (methodNode.tryCatchBlocks != null) {
-            methodNode.tryCatchBlocks.clear();
-        }
-        if (methodNode.localVariables != null) {
-            methodNode.localVariables.clear();
-        }
-        methodNode.visibleLocalVariableAnnotations = null;
-        methodNode.invisibleLocalVariableAnnotations = null;
+    private void preserveTranslatedMethodFallback(MethodNode methodNode) {
         methodNode.access &= ~Opcodes.ACC_NATIVE;
-        methodNode.maxStack = 3;
-        methodNode.maxLocals = parameterSlotCount(methodNode.access, methodNode.desc);
-    }
-
-    private int parameterSlotCount(int access, String descriptor) {
-        int slots = (access & Opcodes.ACC_STATIC) == 0 ? 1 : 0;
-        for (Type argumentType : Type.getArgumentTypes(descriptor)) {
-            slots += argumentType.getSize();
-        }
-        return slots;
     }
 
     private MethodNode findMethod(ClassNode classNode, String name, String desc) {
