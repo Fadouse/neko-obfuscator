@@ -802,37 +802,11 @@ static void* neko_resolve_first_symbol(const char* const* names, size_t count) {
 }
 
 static void neko_resolve_strict_optional_symbols(void) {
-    static const char *const allocate_instance_names[] = {
-        "_ZN13InstanceKlass17allocate_instanceEP6Thread",
-        "_ZN13InstanceKlass17allocate_instanceEP10JavaThread",
-        "_ZN13InstanceKlass17allocate_instanceEP7Thread*",
-        "_ZN13InstanceKlass17allocate_instanceEP10JavaThread*"
-    };
-    static const char *const java_thread_current_names[] = {
-        "_ZN10JavaThread7currentEv",
-        "_ZN6Thread7currentEv"
-    };
-    g_neko_vm_layout.allocate_instance_fn = neko_resolve_first_symbol(
-        allocate_instance_names,
-        sizeof(allocate_instance_names) / sizeof(allocate_instance_names[0])
-    );
-    if (g_neko_vm_layout.allocate_instance_fn != NULL) {
-#ifdef NEKO_DEBUG_ENABLED
-        if (neko_debug_enabled()) {
-            neko_native_debug_log("dlsym_allocate_instance=%p", g_neko_vm_layout.allocate_instance_fn);
-        }
-#endif
-    } else {
-#ifdef NEKO_DEBUG_ENABLED
-        if (neko_debug_enabled()) {
-            neko_native_debug_log("dlsym_allocate_instance=FAILED");
-        }
-#endif
-    }
-    g_neko_vm_layout.java_thread_current_fn = neko_resolve_first_symbol(
-        java_thread_current_names,
-        sizeof(java_thread_current_names) / sizeof(java_thread_current_names[0])
-    );
+    /* DD-5 Oracle 9: no synthetic exception allocation uses HotSpot private
+     * allocate_instance symbols. Those symbols are not exported on supported
+     * OpenJDK 21/22 builds and are not portable across the target matrix.
+     * Keep this block empty unless a future feature adds a separately-approved,
+     * optional ABI-risk resolver. */
 }
 
 static jboolean neko_resolve_vm_symbols(void) {
@@ -1942,10 +1916,7 @@ static jboolean neko_self_check_string_root_chain(NekoChunkedHandleListChunk *he
     JNIEnv *env = neko_current_env();
     if (head == NULL || root_count == 0u || env == NULL) return JNI_FALSE;
     probe = neko_new_string_utf(env, "neko-w1-root-check");
-    if (probe == NULL || neko_exception_check(env)) {
-        if (neko_exception_check(env)) {
-            neko_exception_clear(env);
-        }
+    if (probe == NULL) {
         return JNI_FALSE;
     }
     probe_oop = neko_handle_oop(probe);
@@ -2084,6 +2055,98 @@ static inline void* neko_method_holder_klass(void *method_star) {
         return neko_decode_klass_pointer(*(u4*)((uint8_t*)constant_pool + g_neko_vm_layout.off_constant_pool_holder));
     }
     return *(void**)((uint8_t*)constant_pool + g_neko_vm_layout.off_constant_pool_holder);
+}
+
+static jthrowable neko_make_global_throwable(JNIEnv *env,
+                                             const char *class_name,
+                                             const char *message) {
+    jclass cls = NULL;
+    jmethodID init = NULL;
+    jstring text = NULL;
+    jobject local = NULL;
+    jobject global = NULL;
+
+    if (env == NULL || class_name == NULL) return NULL;
+
+    cls = (*env)->FindClass(env, class_name);
+    if (cls == NULL) goto cleanup;
+
+    if (message != NULL) {
+        jvalue args[1];
+        init = (*env)->GetMethodID(env, cls, "<init>", "(Ljava/lang/String;)V");
+        if (init == NULL) goto cleanup;
+        text = (*env)->NewStringUTF(env, message);
+        if (text == NULL) goto cleanup;
+        args[0].l = text;
+        local = (*env)->NewObjectA(env, cls, init, args);
+    } else {
+        init = (*env)->GetMethodID(env, cls, "<init>", "()V");
+        if (init == NULL) goto cleanup;
+        local = (*env)->NewObjectA(env, cls, init, NULL);
+    }
+
+    if (local == NULL) goto cleanup;
+    global = (*env)->NewGlobalRef(env, local);
+
+cleanup:
+    if (local != NULL) (*env)->DeleteLocalRef(env, local);
+    if (text != NULL) (*env)->DeleteLocalRef(env, text);
+    if (cls != NULL) (*env)->DeleteLocalRef(env, cls);
+    return (jthrowable)global;
+}
+
+static jboolean neko_init_throwable_cache(JNIEnv *env) {
+    if (env == NULL) return JNI_FALSE;
+
+    g_neko_throw_npe = neko_make_global_throwable(env, "java/lang/NullPointerException", NULL);
+    g_neko_throw_aioobe = neko_make_global_throwable(env, "java/lang/ArrayIndexOutOfBoundsException", NULL);
+    g_neko_throw_cce = neko_make_global_throwable(env, "java/lang/ClassCastException", NULL);
+    g_neko_throw_ae = neko_make_global_throwable(env, "java/lang/ArithmeticException", "/ by zero");
+    g_neko_throw_le = neko_make_global_throwable(env, "java/lang/LinkageError", NULL);
+    g_neko_throw_oom = neko_make_global_throwable(env, "java/lang/OutOfMemoryError", NULL);
+    g_neko_throw_imse = neko_make_global_throwable(env, "java/lang/IllegalMonitorStateException", NULL);
+    g_neko_throw_ase = neko_make_global_throwable(env, "java/lang/ArrayStoreException", NULL);
+    g_neko_throw_nase = neko_make_global_throwable(env, "java/lang/NegativeArraySizeException", NULL);
+    g_neko_throw_bme = neko_make_global_throwable(env, "java/lang/BootstrapMethodError", NULL);
+    g_neko_throw_loader_linkage = neko_make_global_throwable(
+        env,
+        "java/lang/LinkageError",
+        "please check your native library load correctly"
+    );
+
+    return g_neko_throw_npe != NULL
+        && g_neko_throw_aioobe != NULL
+        && g_neko_throw_cce != NULL
+        && g_neko_throw_ae != NULL
+        && g_neko_throw_le != NULL
+        && g_neko_throw_oom != NULL
+        && g_neko_throw_imse != NULL
+        && g_neko_throw_ase != NULL
+        && g_neko_throw_nase != NULL
+        && g_neko_throw_bme != NULL
+        && g_neko_throw_loader_linkage != NULL
+        ? JNI_TRUE : JNI_FALSE;
+}
+
+static jint neko_throw_cached(JNIEnv *env, jthrowable cached) {
+    if (env == NULL || cached == NULL) return JNI_ERR;
+    return (*env)->Throw(env, cached);
+}
+
+static inline jthrowable neko_cached_throwable_for_kind(uint32_t kind) {
+    switch (kind) {
+        case NEKO_THROW_NPE: return g_neko_throw_npe;
+        case NEKO_THROW_AIOOBE: return g_neko_throw_aioobe;
+        case NEKO_THROW_CCE: return g_neko_throw_cce;
+        case NEKO_THROW_AE: return g_neko_throw_ae;
+        case NEKO_THROW_LE: return g_neko_throw_le;
+        case NEKO_THROW_OOM: return g_neko_throw_oom;
+        case NEKO_THROW_IMSE: return g_neko_throw_imse;
+        case NEKO_THROW_ASE: return g_neko_throw_ase;
+        case NEKO_THROW_NASE: return g_neko_throw_nase;
+        case NEKO_THROW_BME: return g_neko_throw_bme;
+        default: return g_neko_throw_le;
+    }
 }
 
 """;

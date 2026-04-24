@@ -455,6 +455,37 @@ public final class CCodeGenerator {
                 void* java_thread_current_fn;
             } NekoVmLayout;
             extern NekoVmLayout g_neko_vm_layout;
+            static jthrowable g_neko_throw_npe = NULL;
+            static jthrowable g_neko_throw_aioobe = NULL;
+            static jthrowable g_neko_throw_cce = NULL;
+            static jthrowable g_neko_throw_ae = NULL;
+            static jthrowable g_neko_throw_le = NULL;
+            static jthrowable g_neko_throw_oom = NULL;
+            static jthrowable g_neko_throw_imse = NULL;
+            static jthrowable g_neko_throw_ase = NULL;
+            static jthrowable g_neko_throw_nase = NULL;
+            static jthrowable g_neko_throw_bme = NULL;
+            static jthrowable g_neko_throw_loader_linkage = NULL;
+            #define NEKO_THROW_NPE    1u
+            #define NEKO_THROW_AIOOBE 2u
+            #define NEKO_THROW_CCE    3u
+            #define NEKO_THROW_AE     4u
+            #define NEKO_THROW_LE     5u
+            #define NEKO_THROW_OOM    6u
+            #define NEKO_THROW_IMSE   7u
+            #define NEKO_THROW_ASE    8u
+            #define NEKO_THROW_NASE   9u
+            #define NEKO_THROW_BME    10u
+            #define NEKO_THROW_AND_RETURN(env_expr, throwable_expr, ret_expr) \
+                do { \
+                    (void)neko_throw_cached((env_expr), (throwable_expr)); \
+                    return ret_expr; \
+                } while (0)
+            #define NEKO_THROW_AND_RETURN_VOID(env_expr, throwable_expr) \
+                do { \
+                    (void)neko_throw_cached((env_expr), (throwable_expr)); \
+                    return; \
+                } while (0)
             typedef struct Klass Klass;
             typedef void* oop;
             static jclass neko_load_class_noinit_with_loader(JNIEnv *env, const char *internalName, jobject loader);
@@ -468,6 +499,8 @@ public final class CCodeGenerator {
             static inline void neko_store_heap_oop_at_unpublished(void* base, int32_t offset, void* raw_oop);
             static inline void* neko_load_heap_oop_from_published(void* base, int32_t offset);
             static inline int32_t neko_object_array_element_offset(void* array_klass, int32_t index);
+            static jint neko_throw_cached(JNIEnv *env, jthrowable cached);
+            static jboolean neko_init_throwable_cache(JNIEnv *env);
             static void neko_bootstrap_owner_discovery(void);
             static inline oop neko_resolve_mirror_oop_from_klass(const NekoVmLayout *layout, Klass *klass);
             static void* neko_find_boot_class_loader_data(void);

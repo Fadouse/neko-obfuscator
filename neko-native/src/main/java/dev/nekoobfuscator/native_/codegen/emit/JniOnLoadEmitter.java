@@ -15,6 +15,17 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *reserved) {
         neko_error_log("GetEnv(JNI_VERSION_1_6) failed, falling back to throw body");
         return JNI_VERSION_1_6;
     }
+    if (!neko_init_throwable_cache(env)) {
+        neko_error_log("failed to initialize bootstrap throwable cache");
+        return JNI_ERR;
+    }
+    neko_native_debug_log(
+        "throwable_cache_ok=%d npe=%p le=%p loader_le=%p",
+        (g_neko_throw_npe != NULL && g_neko_throw_le != NULL && g_neko_throw_loader_linkage != NULL) ? 1 : 0,
+        g_neko_throw_npe,
+        g_neko_throw_le,
+        g_neko_throw_loader_linkage
+    );
     if (!neko_resolve_vm_symbols()) {
         return JNI_VERSION_1_6;
     }
