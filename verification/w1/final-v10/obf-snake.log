@@ -1,0 +1,56 @@
+[NekoObfuscator] Starting...
+[NekoObfuscator] Registered 10 transform passes
+13:50:41.149 [main] INFO dev.nekoobfuscator.core.pipeline.ObfuscationPipeline -- Reading input JAR: test-jars/SnakeGame.jar
+13:50:41.155 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: DataOfSquare
+13:50:41.155 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: KeyboardListener
+13:50:41.155 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: Main
+13:50:41.155 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: SquarePanel
+13:50:41.156 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: ThreadsController
+13:50:41.156 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: Tuple
+13:50:41.157 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: Window
+13:50:41.157 [main] INFO dev.nekoobfuscator.core.jar.JarInput -- Loaded 7 classes and 0 resources
+13:50:41.157 [main] INFO dev.nekoobfuscator.core.pipeline.ObfuscationPipeline -- Loaded 7 classes, 0 resources
+13:50:41.157 [main] INFO dev.nekoobfuscator.core.pipeline.ObfuscationPipeline -- Class hierarchy: 15 entries
+13:50:41.164 [main] INFO dev.nekoobfuscator.core.pipeline.ObfuscationPipeline -- Master seed: 0x3039
+13:50:41.164 [main] INFO dev.nekoobfuscator.core.pipeline.ObfuscationPipeline -- Scheduled 0 transform passes
+13:50:41.165 [main] DEBUG dev.nekoobfuscator.core.pipeline.ObfuscationPipeline -- Injected runtime class: dev/nekoobfuscator/runtime/NekoNativeLoader
+13:50:41.165 [main] INFO dev.nekoobfuscator.core.pipeline.ObfuscationPipeline -- Running native compilation stage
+13:50:41.177 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for DataOfSquare#<init>(I)V: constructors remain in bytecode form; reference PUTFIELD deferred to M5h (GC write barriers); reference GETSTATIC deferred pending oop static field support; INVOKE with reference arguments deferred pending JNI-free receiver spill hardening; INVOKE with reference return deferred to Wave 4 (oop return adapter)
+13:50:41.177 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for DataOfSquare#lightMeUp(I)V: INVOKE with reference return deferred to Wave 4 (oop return adapter); INVOKE with reference arguments deferred pending JNI-free receiver spill hardening
+13:50:41.177 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for KeyboardListener#<init>()V: constructors remain in bytecode form
+13:50:41.177 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for KeyboardListener#keyPressed(Ljava/awt/event/KeyEvent;)V: INVOKEVIRTUAL deferred pending Wave 3 vtable dispatch hardening
+13:50:41.177 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for Main#<init>()V: constructors remain in bytecode form
+13:50:41.177 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for Main#main([Ljava/lang/String;)V: INVOKE with reference arguments deferred pending JNI-free receiver spill hardening; INVOKEVIRTUAL deferred pending Wave 3 vtable dispatch hardening
+13:50:41.177 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for SquarePanel#<init>(Ljava/awt/Color;)V: constructors remain in bytecode form; INVOKE with reference arguments deferred pending JNI-free receiver spill hardening
+13:50:41.177 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for SquarePanel#ChangeColor(Ljava/awt/Color;)V: INVOKE with reference arguments deferred pending JNI-free receiver spill hardening; INVOKEVIRTUAL deferred pending Wave 3 vtable dispatch hardening
+13:50:41.177 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for ThreadsController#<init>(LTuple;)V: constructors remain in bytecode form; reference PUTFIELD deferred to M5h (GC write barriers); reference GETSTATIC deferred pending oop static field support; INVOKEVIRTUAL deferred pending Wave 3 vtable dispatch hardening; INVOKE with reference arguments deferred pending JNI-free receiver spill hardening
+13:50:41.177 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for ThreadsController#run()V: INVOKEVIRTUAL deferred pending Wave 3 vtable dispatch hardening
+13:50:41.177 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for ThreadsController#pauser()V: INVOKEVIRTUAL deferred pending Wave 3 vtable dispatch hardening
+13:50:41.178 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for ThreadsController#checkCollision()V: INVOKEVIRTUAL deferred pending Wave 3 vtable dispatch hardening; INVOKE with reference return deferred to Wave 4 (oop return adapter); reference GETSTATIC deferred pending oop static field support; INVOKE with reference arguments deferred pending JNI-free receiver spill hardening; reference PUTFIELD deferred to M5h (GC write barriers)
+13:50:41.178 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for ThreadsController#stopTheGame()V: reference GETSTATIC deferred pending oop static field support; INVOKE with reference arguments deferred pending JNI-free receiver spill hardening; INVOKEVIRTUAL deferred pending Wave 3 vtable dispatch hardening
+13:50:41.178 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for ThreadsController#spawnFood(LTuple;)V: INVOKE with reference return deferred to Wave 4 (oop return adapter); INVOKEVIRTUAL deferred pending Wave 3 vtable dispatch hardening
+13:50:41.178 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for ThreadsController#getValAleaNotInSnake()LTuple;: reference return requires direct ALOAD/ACONST_NULL producer; INVOKEVIRTUAL deferred pending Wave 3 vtable dispatch hardening; INVOKE with reference return deferred to Wave 4 (oop return adapter)
+13:50:41.178 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for ThreadsController#moveInterne(I)V: INVOKEVIRTUAL deferred pending Wave 3 vtable dispatch hardening; INVOKE with reference arguments deferred pending JNI-free receiver spill hardening
+13:50:41.178 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for ThreadsController#moveExterne()V: INVOKE with reference return deferred to Wave 4 (oop return adapter); INVOKEINTERFACE deferred pending Wave 3 itable dispatch hardening; INVOKEVIRTUAL deferred pending Wave 3 vtable dispatch hardening
+13:50:41.178 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for ThreadsController#deleteTail()V: INVOKEVIRTUAL deferred pending Wave 3 vtable dispatch hardening; INVOKE with reference return deferred to Wave 4 (oop return adapter)
+13:50:41.178 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for Tuple#<init>(II)V: constructors remain in bytecode form
+13:50:41.178 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for Window#<init>()V: constructors remain in bytecode form; reference PUTSTATIC deferred to M5h (GC write barriers); INVOKE with reference arguments deferred pending JNI-free receiver spill hardening; reference GETSTATIC deferred pending oop static field support; INVOKE with reference return deferred to Wave 4 (oop return adapter); INVOKEVIRTUAL deferred pending Wave 3 vtable dispatch hardening
+13:50:41.178 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for Window#<clinit>()V: class initializers are not translated
+13:50:41.197 [main] INFO dev.nekoobfuscator.native_.codegen.NativeBuildEngine -- zig cc: compiling 1 .c + 1 .S files for target x86_64-linux-gnu
+13:50:41.197 [main] INFO dev.nekoobfuscator.native_.codegen.NativeBuildEngine -- Building native for LINUX_X64: zig cc -shared -Oz -std=c11 -Wall -Wextra -target x86_64-linux-gnu -I /usr/lib/jvm/java-21-openjdk/include -DNEKO_DEBUG_ENABLED=1 -I /usr/lib/jvm/java-21-openjdk/include/linux -o /tmp/neko_native_9129043403800187744/libneko_linux_x64.so /tmp/neko_native_sources_3845665764123342243/neko_native.c /tmp/neko_native_sources_3845665764123342243/neko_stubs.S
+13:50:41.592 [main] INFO dev.nekoobfuscator.native_.codegen.NativeBuildEngine -- Built libneko_linux_x64.so (46968 bytes)
+13:50:41.593 [main] INFO dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Native stage rejected 21 method(s)
+13:50:41.594 [main] INFO dev.nekoobfuscator.core.pipeline.ObfuscationPipeline -- Native stage: translated=5 rejected=21
+13:50:41.594 [main] INFO dev.nekoobfuscator.core.pipeline.ObfuscationPipeline -- Writing output JAR: verification/w1/final-v10/SnakeGame-native-debug.jar
+13:50:41.596 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: DataOfSquare
+13:50:41.596 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: KeyboardListener
+13:50:41.596 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: Main
+13:50:41.596 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: SquarePanel
+13:50:41.597 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: ThreadsController
+13:50:41.597 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: Tuple
+13:50:41.597 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: Window
+13:50:41.598 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: dev/nekoobfuscator/runtime/NekoNativeLoader
+13:50:41.599 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote resource: neko/native/libneko_linux_x64.so
+13:50:41.600 [main] INFO dev.nekoobfuscator.core.jar.JarOutput -- Wrote 8 classes and 1 resources to verification/w1/final-v10/SnakeGame-native-debug.jar
+13:50:41.600 [main] INFO dev.nekoobfuscator.core.pipeline.ObfuscationPipeline -- Obfuscation completed in 451ms
+[NekoObfuscator] Done in 511ms

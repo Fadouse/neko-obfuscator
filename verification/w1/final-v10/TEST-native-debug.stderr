@@ -1,0 +1,40 @@
+Obfuscator Test Program
+Author: huzpsb
+Version: 1.0r
+Link: https://github.com/huzpsb/JavaObfuscatorTest
+-------------Test #1: Basics-------------
+Test 1.1: Inheritance [nk] n onload enter
+[nk] n throwable_cache_ok=1 npe=0x7faab416a2e2 le=0x7faab416a302 loader_le=0x7faab416a332
+[nk] lj 24/24[nk] o instance_klass_static_field_size_offset=284 s=A[nk] o instance_klass_static_oop_field_count_offset=300 s=A[nk] mf off=48 s=B[nk] o thread_tlab_top_offset=440 s=B[nk] o thread_tlab_start_offset=432 s=B[nk] o thread_tlab_pf_top_offset=448 s=B[nk] o thread_tlab_end_offset=456 s=B[nk] o thread_exception_oop_offset=1280 s=A[nk] o thread_exception_pc_offset=1288 s=A[nk] o java_thread_anchor_offset=928 s=A[nk] o java_thread_jni_environment_offset=960 s=B[nk] n class_klass_offset_scan=16
+[nk] o instance_klass_java_mirror_offset=112 s=B[nk] o thread_thread_state_offset=1100 s=A[nk] o java_thread_last_Java_sp_offset=928 s=B[nk] o java_thread_last_Java_fp_offset=944 s=B[nk] o java_thread_last_Java_pc_offset=936 s=B[nk] o oophandle_obj_offset=0 s=A[nk] vm j=21[nk] n strict_vm_layout_ok=1 next_link=144 cld_klasses=56 cld_handles=48 klass_mirror=112
+[nk] cap enter[nk] n boot_cld=0x7faab4143e90 first_klass=0x7faa30058fa0 klass_count=1006 klass_name_off=24 sym_len_off=4 sym_body_off=6
+[nk] n boot_well_known_scan_ok=1 string=0x7faa2f00e878 byte=0x7faa2f002318 char=0x7faa2f001d30 loader=0x7faa30001000
+[nk] cap ok str=0x7faa2f00e878 arr_b=0x7faa2f002318 arr_c=0x7faa2f001d30[nk] n loader_mark ready=1 klass=0x7faa30001000 mirror=0x54b029678 off=116
+[nk] ol mark_loader_loaded ok str=0x7faa2f00e878[nk] n w1 os=3 ks=0 tl=yes ex=yes
+[nk] n w4r tso=1100 ao=928+0 mo=112 hoo=0 tf=yes
+[nk] ol resolve_string_intern_layout ok hash_off=12[nk] n boot_cld_root_chain_ok=1
+[nk] ol prewarm ok backend=1[nk] dx owner_miss idx=0 name=pack/tests/basics/cross/Abst1[nk] dx owner_miss idx=1 name=pack/tests/basics/cross/Top[nk] dx owner_miss idx=2 name=pack/tests/basics/inner/Exec[nk] mm pack/tests/basics/overwirte/Sub.face(I)Ljava/lang/String; 0x7faa2b401608[nk] fp MethodFlags j=21[nk] pp pack/tests/basics/overwirte/Sub.face(I)Ljava/lang/String; s=2[nk] dx owner_miss idx=4 name=pack/tests/basics/sub/flo[nk] dx owner_miss idx=5 name=pack/tests/bench/Calc[nk] dx owner_miss idx=6 name=pack/tests/bench/Calc[nk] dx owner_miss idx=7 name=pack/tests/reflects/counter/Countee[nk] dx owner_miss idx=8 name=pack/tests/reflects/counter/Countee[nk] dx owner_miss idx=9 name=pack/tests/reflects/counter/Countee[nk] dx owner_miss idx=10 name=pack/tests/reflects/counter/Countee[nk] dx owner_miss idx=11 name=pack/tests/reflects/field/FObject[nk] dm 1/12[nk] dp 1/12[nk] n w2 fs=8 ls=2 lc=0
+[nk] n w3 is=0 sb=0
+[nk] n neko_ldc_string_site_oop=idx=0 ptr=0x54b38d398
+PASS
+Test 1.2: Cross [nk] n neko_ldc_string_site_oop=idx=0 ptr=0x54b38d398
+PASS
+Test 1.3: Throw PASS
+Test 1.4: Accuracy PASS
+Test 1.5: SubClass ERROR
+Test 1.6: Pool PASS
+Test 1.7: InnerClass ERROR
+-------------Test #2: Reflects-------------
+Test 2.1: Counter PASS
+Test 2.2: Chinese 通过LMAO    
+Test 2.3: Resource PASS
+Test 2.4: Field ERROR
+Test 2.5: Loader PASS
+Test 2.6: ReTrace PASS
+Test 2.7: Annotation PASS
+Test 2.8: Sec ERROR
+-------------Test #3: Efficiency-------------
+Exception in thread "main" java.lang.LinkageError: please check your native library load correctly
+	at pack.tests.bench.Calc.call(Calc.java)
+	at pack.tests.bench.Calc.runAll(Calc.java:9)
+	at pack.Main.main(Main.java:126)

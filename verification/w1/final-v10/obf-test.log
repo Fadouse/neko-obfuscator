@@ -1,0 +1,176 @@
+[NekoObfuscator] Starting...
+[NekoObfuscator] Registered 10 transform passes
+13:50:35.580 [main] INFO dev.nekoobfuscator.core.pipeline.ObfuscationPipeline -- Reading input JAR: test-jars/TEST.jar
+13:50:35.585 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: pack/Clazz
+13:50:35.586 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: pack/Main
+13:50:35.586 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: pack/tests/basics/accu/Digi
+13:50:35.586 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: pack/tests/basics/cross/Abst1
+13:50:35.586 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: pack/tests/basics/cross/Inte
+13:50:35.586 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: pack/tests/basics/cross/Top
+13:50:35.586 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: pack/tests/basics/ctrl/Ctrl
+13:50:35.587 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: pack/tests/basics/inner/Exec$Inner
+13:50:35.587 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: pack/tests/basics/inner/Exec
+13:50:35.587 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: pack/tests/basics/inner/Test
+13:50:35.587 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: pack/tests/basics/overwirte/Face
+13:50:35.587 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: pack/tests/basics/overwirte/Sub
+13:50:35.587 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: pack/tests/basics/overwirte/Super
+13:50:35.587 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: pack/tests/basics/runable/Exec
+13:50:35.587 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: pack/tests/basics/runable/Pool
+13:50:35.587 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: pack/tests/basics/runable/Task
+13:50:35.587 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: pack/tests/basics/sub/flo
+13:50:35.587 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: pack/tests/basics/sub/med
+13:50:35.587 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: pack/tests/basics/sub/SolAdd
+13:50:35.587 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: pack/tests/basics/sub/Solver
+13:50:35.587 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: pack/tests/bench/Calc
+13:50:35.588 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: pack/tests/reflects/annot/anno
+13:50:35.588 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: pack/tests/reflects/annot/annoe
+13:50:35.588 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: pack/tests/reflects/annot/annot
+13:50:35.588 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: pack/tests/reflects/counter/Count
+13:50:35.588 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: pack/tests/reflects/counter/Countee
+13:50:35.588 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: pack/tests/reflects/field/FObject
+13:50:35.588 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: pack/tests/reflects/field/FTest
+13:50:35.588 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: pack/tests/reflects/loader/Loader
+13:50:35.588 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: pack/tests/reflects/loader/LRun
+13:50:35.588 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: pack/tests/reflects/loader/LTest
+13:50:35.589 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: pack/tests/reflects/res/Accesor
+13:50:35.589 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: pack/tests/reflects/retrace/Tracee
+13:50:35.589 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: pack/tests/reflects/retrace/Tracer
+13:50:35.589 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: pack/tests/security/SecExec
+13:50:35.589 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: pack/tests/security/SecTest
+13:50:35.589 [main] DEBUG dev.nekoobfuscator.core.jar.JarInput -- Loaded class: pack/tests/security/Sman
+13:50:35.589 [main] INFO dev.nekoobfuscator.core.jar.JarInput -- Loaded 37 classes and 4 resources
+13:50:35.589 [main] INFO dev.nekoobfuscator.core.pipeline.ObfuscationPipeline -- Loaded 37 classes, 4 resources
+13:50:35.589 [main] INFO dev.nekoobfuscator.core.pipeline.ObfuscationPipeline -- Class hierarchy: 45 entries
+13:50:35.595 [main] INFO dev.nekoobfuscator.core.pipeline.ObfuscationPipeline -- Master seed: 0x3039
+13:50:35.595 [main] INFO dev.nekoobfuscator.core.pipeline.ObfuscationPipeline -- Scheduled 0 transform passes
+13:50:35.595 [main] DEBUG dev.nekoobfuscator.core.pipeline.ObfuscationPipeline -- Injected runtime class: dev/nekoobfuscator/runtime/NekoNativeLoader
+13:50:35.595 [main] INFO dev.nekoobfuscator.core.pipeline.ObfuscationPipeline -- Running native compilation stage
+13:50:35.607 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/Clazz#<init>()V: constructors remain in bytecode form
+13:50:35.607 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/Main#<init>()V: constructors remain in bytecode form
+13:50:35.607 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/Main#main([Ljava/lang/String;)V: reference GETSTATIC deferred pending oop static field support; INVOKE with reference arguments deferred pending JNI-free receiver spill hardening; INVOKEVIRTUAL deferred pending Wave 3 vtable dispatch hardening
+13:50:35.607 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/basics/accu/Digi#<init>()V: constructors remain in bytecode form
+13:50:35.607 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/basics/accu/Digi#run()V: reference GETSTATIC deferred pending oop static field support; INVOKE with reference arguments deferred pending JNI-free receiver spill hardening
+13:50:35.608 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/basics/cross/Abst1#<init>()V: constructors remain in bytecode form
+13:50:35.608 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/basics/cross/Abst1#add(II)I: abstract methods have no translatable bytecode body
+13:50:35.608 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/basics/cross/Inte#mul(II)I: abstract methods have no translatable bytecode body
+13:50:35.608 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/basics/cross/Top#<init>()V: constructors remain in bytecode form
+13:50:35.608 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/basics/cross/Top#run()V: INVOKEVIRTUAL deferred pending Wave 3 vtable dispatch hardening; reference GETSTATIC deferred pending oop static field support; INVOKE with reference arguments deferred pending JNI-free receiver spill hardening
+13:50:35.608 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/basics/ctrl/Ctrl#<init>()V: constructors remain in bytecode form; reference PUTFIELD deferred to M5h (GC write barriers)
+13:50:35.608 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/basics/ctrl/Ctrl#runt()V: INVOKE with reference arguments deferred pending JNI-free receiver spill hardening
+13:50:35.608 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/basics/ctrl/Ctrl#runf()V: INVOKEVIRTUAL deferred pending Wave 3 vtable dispatch hardening; reference PUTFIELD deferred to M5h (GC write barriers)
+13:50:35.608 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/basics/ctrl/Ctrl#run()V: INVOKEVIRTUAL deferred pending Wave 3 vtable dispatch hardening; reference GETSTATIC deferred pending oop static field support; INVOKE with reference arguments deferred pending JNI-free receiver spill hardening
+13:50:35.608 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/basics/inner/Exec$Inner#<init>(Lpack/tests/basics/inner/Exec;I)V: constructors remain in bytecode form; reference PUTFIELD deferred to M5h (GC write barriers)
+13:50:35.608 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/basics/inner/Exec$Inner#doAdd()V: INVOKEVIRTUAL deferred pending Wave 3 vtable dispatch hardening
+13:50:35.608 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/basics/inner/Exec#<init>()V: constructors remain in bytecode form
+13:50:35.608 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/basics/inner/Test#<init>()V: constructors remain in bytecode form
+13:50:35.608 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/basics/inner/Test#run()V: INVOKE with reference return deferred to Wave 4 (oop return adapter); INVOKE with reference arguments deferred pending JNI-free receiver spill hardening; INVOKEVIRTUAL deferred pending Wave 3 vtable dispatch hardening; reference GETSTATIC deferred pending oop static field support
+13:50:35.608 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/basics/overwirte/Face#face(I)Ljava/lang/String;: abstract methods have no translatable bytecode body; reference return requires bytecode body
+13:50:35.608 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/basics/overwirte/Sub#<init>()V: constructors remain in bytecode form
+13:50:35.608 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/basics/overwirte/Sub#run()V: reference GETSTATIC deferred pending oop static field support; INVOKE with reference return deferred to Wave 4 (oop return adapter); INVOKE with reference arguments deferred pending JNI-free receiver spill hardening
+13:50:35.608 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/basics/overwirte/Super#<init>()V: constructors remain in bytecode form
+13:50:35.608 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/basics/overwirte/Super#run()V: reference GETSTATIC deferred pending oop static field support; INVOKE with reference arguments deferred pending JNI-free receiver spill hardening
+13:50:35.608 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/basics/runable/Exec#<init>(I)V: constructors remain in bytecode form
+13:50:35.609 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/basics/runable/Exec#<clinit>()V: class initializers are not translated
+13:50:35.609 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/basics/runable/Pool#<init>()V: constructors remain in bytecode form
+13:50:35.609 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/basics/runable/Pool#<clinit>()V: class initializers are not translated; reference GETSTATIC deferred pending oop static field support; INVOKE with reference arguments deferred pending JNI-free receiver spill hardening; reference PUTSTATIC deferred to M5h (GC write barriers)
+13:50:35.609 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/basics/runable/Task#<init>()V: constructors remain in bytecode form
+13:50:35.609 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/basics/runable/Task#run()V: reference GETSTATIC deferred pending oop static field support; INVOKE with reference return deferred to Wave 4 (oop return adapter); INVOKEDYNAMIC deferred to M5f; INVOKE with reference arguments deferred pending JNI-free receiver spill hardening
+13:50:35.609 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/basics/runable/Task#lambda$run$0(Lpack/tests/basics/runable/Exec;)V: INVOKEVIRTUAL deferred pending Wave 3 vtable dispatch hardening
+13:50:35.609 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/basics/sub/flo#<init>()V: constructors remain in bytecode form
+13:50:35.609 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/basics/sub/med#<init>(II)V: constructors remain in bytecode form; INVOKEVIRTUAL deferred pending Wave 3 vtable dispatch hardening
+13:50:35.609 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/basics/sub/SolAdd#<init>()V: constructors remain in bytecode form
+13:50:35.609 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/basics/sub/Solver#<init>()V: constructors remain in bytecode form; reference GETSTATIC deferred pending oop static field support; INVOKE with reference arguments deferred pending JNI-free receiver spill hardening
+13:50:35.609 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/bench/Calc#<init>()V: constructors remain in bytecode form
+13:50:35.609 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/bench/Calc#runAll()V: reference GETSTATIC deferred pending oop static field support; INVOKE with reference return deferred to Wave 4 (oop return adapter); INVOKE with reference arguments deferred pending JNI-free receiver spill hardening
+13:50:35.609 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/bench/Calc#runStr()V: INVOKEVIRTUAL deferred pending Wave 3 vtable dispatch hardening; INVOKE with reference return deferred to Wave 4 (oop return adapter)
+13:50:35.609 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/bench/Calc#<clinit>()V: class initializers are not translated
+13:50:35.609 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/reflects/annot/anno#val()Ljava/lang/String;: abstract methods have no translatable bytecode body; reference return requires bytecode body
+13:50:35.609 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/reflects/annot/anno#val2()Ljava/lang/String;: abstract methods have no translatable bytecode body; reference return requires bytecode body
+13:50:35.609 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/reflects/annot/annoe#<init>()V: constructors remain in bytecode form
+13:50:35.609 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/reflects/annot/annoe#dox()V: INVOKE with reference return deferred to Wave 4 (oop return adapter); INVOKEVIRTUAL deferred pending Wave 3 vtable dispatch hardening; reference GETSTATIC deferred pending oop static field support; INVOKE with reference arguments deferred pending JNI-free receiver spill hardening
+13:50:35.609 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/reflects/annot/annoe#dov()V: reference GETSTATIC deferred pending oop static field support; INVOKE with reference arguments deferred pending JNI-free receiver spill hardening
+13:50:35.609 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/reflects/annot/annot#<init>()V: constructors remain in bytecode form
+13:50:35.609 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/reflects/annot/annot#run()V: INVOKE with reference return deferred to Wave 4 (oop return adapter); INVOKEVIRTUAL deferred pending Wave 3 vtable dispatch hardening; INVOKE with reference arguments deferred pending JNI-free receiver spill hardening; ANEWARRAY deferred beyond Wave 2
+13:50:35.610 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/reflects/counter/Count#<init>()V: constructors remain in bytecode form
+13:50:35.610 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/reflects/counter/Count#run()V: INVOKE with reference return deferred to Wave 4 (oop return adapter); reference GETSTATIC deferred pending oop static field support; INVOKE with reference arguments deferred pending JNI-free receiver spill hardening
+13:50:35.610 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/reflects/counter/Countee#<init>()V: constructors remain in bytecode form
+13:50:35.610 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/reflects/field/FObject#<init>(I)V: constructors remain in bytecode form
+13:50:35.610 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/reflects/field/FTest#<init>()V: constructors remain in bytecode form
+13:50:35.610 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/reflects/field/FTest#run()V: ANEWARRAY deferred beyond Wave 2; reference GETSTATIC deferred pending oop static field support; INVOKE with reference return deferred to Wave 4 (oop return adapter); INVOKEVIRTUAL deferred pending Wave 3 vtable dispatch hardening; INVOKE with reference arguments deferred pending JNI-free receiver spill hardening
+13:50:35.610 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/reflects/loader/Loader#<init>()V: constructors remain in bytecode form
+13:50:35.610 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/reflects/loader/Loader#readAllBytes(Ljava/io/InputStream;)[B: reference return requires direct ALOAD/ACONST_NULL producer; INVOKE with reference arguments deferred pending JNI-free receiver spill hardening; INVOKE with reference return deferred to Wave 4 (oop return adapter)
+13:50:35.610 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/reflects/loader/Loader#getResourceAsStream(Ljava/lang/String;)Ljava/io/InputStream;: reference return requires direct ALOAD/ACONST_NULL producer; INVOKE with reference arguments deferred pending JNI-free receiver spill hardening; INVOKE with reference return deferred to Wave 4 (oop return adapter)
+13:50:35.610 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/reflects/loader/Loader#findClass(Ljava/lang/String;)Ljava/lang/Class;: reference return requires direct ALOAD/ACONST_NULL producer; INVOKE with reference return deferred to Wave 4 (oop return adapter)
+13:50:35.610 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/reflects/loader/LRun#<init>()V: constructors remain in bytecode form
+13:50:35.610 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/reflects/loader/LRun#run()V: INVOKE with reference return deferred to Wave 4 (oop return adapter); ANEWARRAY deferred beyond Wave 2
+13:50:35.610 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/reflects/loader/LTest#<init>()V: constructors remain in bytecode form
+13:50:35.611 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/reflects/loader/LTest#readAllBytes(Ljava/io/InputStream;)[B: reference return requires direct ALOAD/ACONST_NULL producer; INVOKE with reference arguments deferred pending JNI-free receiver spill hardening; INVOKE with reference return deferred to Wave 4 (oop return adapter)
+13:50:35.611 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/reflects/loader/LTest#run()V: reference GETSTATIC deferred pending oop static field support; INVOKE with reference return deferred to Wave 4 (oop return adapter); INVOKE with reference arguments deferred pending JNI-free receiver spill hardening
+13:50:35.611 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/reflects/res/Accesor#<init>()V: constructors remain in bytecode form
+13:50:35.611 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/reflects/res/Accesor#run()V: INVOKE with reference return deferred to Wave 4 (oop return adapter); INVOKEVIRTUAL deferred pending Wave 3 vtable dispatch hardening; reference GETSTATIC deferred pending oop static field support; INVOKE with reference arguments deferred pending JNI-free receiver spill hardening
+13:50:35.611 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/reflects/retrace/Tracee#<init>()V: constructors remain in bytecode form
+13:50:35.611 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/reflects/retrace/Tracee#doTrace(I)V: INVOKE with reference return deferred to Wave 4 (oop return adapter); ANEWARRAY deferred beyond Wave 2; reference GETSTATIC deferred pending oop static field support
+13:50:35.611 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/reflects/retrace/Tracee#<clinit>()V: class initializers are not translated
+13:50:35.611 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/reflects/retrace/Tracer#<init>()V: constructors remain in bytecode form
+13:50:35.611 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/reflects/retrace/Tracer#run()V: INVOKEVIRTUAL deferred pending Wave 3 vtable dispatch hardening; reference GETSTATIC deferred pending oop static field support; INVOKE with reference arguments deferred pending JNI-free receiver spill hardening
+13:50:35.611 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/security/SecExec#<init>()V: constructors remain in bytecode form
+13:50:35.611 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/security/SecTest#<init>()V: constructors remain in bytecode form
+13:50:35.611 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/security/SecTest#run()V: INVOKE with reference arguments deferred pending JNI-free receiver spill hardening; reference GETSTATIC deferred pending oop static field support; ANEWARRAY deferred beyond Wave 2; INVOKE with reference return deferred to Wave 4 (oop return adapter); INVOKEVIRTUAL deferred pending Wave 3 vtable dispatch hardening
+13:50:35.611 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/security/Sman#<init>()V: constructors remain in bytecode form
+13:50:35.611 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/security/Sman#checkPermission(Ljava/security/Permission;)V: INVOKE with reference return deferred to Wave 4 (oop return adapter); INVOKE with reference arguments deferred pending JNI-free receiver spill hardening
+13:50:35.611 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/basics/runable/Exec#doAdd()V: INVOKE target not in neko manifest (translated→translated only)
+13:50:35.611 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/basics/sub/SolAdd#get()I: INVOKE target not in neko manifest (translated→translated only)
+13:50:35.612 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/reflects/retrace/Tracee#toTrace(I)V: INVOKE target not in neko manifest (translated→translated only)
+13:50:35.612 [main] WARN dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Rejected native translation for pack/tests/security/SecExec#doShutdown()V: INVOKE target not in neko manifest (translated→translated only)
+13:50:35.634 [main] INFO dev.nekoobfuscator.native_.codegen.NativeBuildEngine -- zig cc: compiling 1 .c + 1 .S files for target x86_64-linux-gnu
+13:50:35.634 [main] INFO dev.nekoobfuscator.native_.codegen.NativeBuildEngine -- Building native for LINUX_X64: zig cc -shared -Oz -std=c11 -Wall -Wextra -target x86_64-linux-gnu -I /usr/lib/jvm/java-21-openjdk/include -DNEKO_DEBUG_ENABLED=1 -I /usr/lib/jvm/java-21-openjdk/include/linux -o /tmp/neko_native_4805776886758121804/libneko_linux_x64.so /tmp/neko_native_sources_11752656054381859871/neko_native.c /tmp/neko_native_sources_11752656054381859871/neko_stubs.S
+13:50:36.104 [main] INFO dev.nekoobfuscator.native_.codegen.NativeBuildEngine -- Built libneko_linux_x64.so (59272 bytes)
+13:50:36.105 [main] INFO dev.nekoobfuscator.native_.stage.NativeCompilationStage -- Native stage rejected 77 method(s)
+13:50:36.107 [main] INFO dev.nekoobfuscator.core.pipeline.ObfuscationPipeline -- Native stage: translated=12 rejected=77
+13:50:36.108 [main] INFO dev.nekoobfuscator.core.pipeline.ObfuscationPipeline -- Writing output JAR: verification/w1/final-v10/TEST-native-debug.jar
+13:50:36.109 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: pack/Clazz
+13:50:36.110 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: pack/Main
+13:50:36.110 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: pack/tests/basics/accu/Digi
+13:50:36.110 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: pack/tests/basics/cross/Abst1
+13:50:36.110 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: pack/tests/basics/cross/Inte
+13:50:36.110 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: pack/tests/basics/cross/Top
+13:50:36.111 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: pack/tests/basics/ctrl/Ctrl
+13:50:36.111 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: pack/tests/basics/inner/Exec$Inner
+13:50:36.111 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: pack/tests/basics/inner/Exec
+13:50:36.111 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: pack/tests/basics/inner/Test
+13:50:36.111 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: pack/tests/basics/overwirte/Face
+13:50:36.111 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: pack/tests/basics/overwirte/Sub
+13:50:36.111 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: pack/tests/basics/overwirte/Super
+13:50:36.112 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: pack/tests/basics/runable/Exec
+13:50:36.112 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: pack/tests/basics/runable/Pool
+13:50:36.112 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: pack/tests/basics/runable/Task
+13:50:36.112 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: pack/tests/basics/sub/flo
+13:50:36.112 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: pack/tests/basics/sub/med
+13:50:36.112 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: pack/tests/basics/sub/SolAdd
+13:50:36.112 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: pack/tests/basics/sub/Solver
+13:50:36.112 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: pack/tests/bench/Calc
+13:50:36.113 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: pack/tests/reflects/annot/anno
+13:50:36.113 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: pack/tests/reflects/annot/annoe
+13:50:36.113 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: pack/tests/reflects/annot/annot
+13:50:36.113 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: pack/tests/reflects/counter/Count
+13:50:36.113 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: pack/tests/reflects/counter/Countee
+13:50:36.113 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: pack/tests/reflects/field/FObject
+13:50:36.113 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: pack/tests/reflects/field/FTest
+13:50:36.114 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: pack/tests/reflects/loader/Loader
+13:50:36.114 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: pack/tests/reflects/loader/LRun
+13:50:36.114 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: pack/tests/reflects/loader/LTest
+13:50:36.114 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: pack/tests/reflects/res/Accesor
+13:50:36.114 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: pack/tests/reflects/retrace/Tracee
+13:50:36.114 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: pack/tests/reflects/retrace/Tracer
+13:50:36.114 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: pack/tests/security/SecExec
+13:50:36.114 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: pack/tests/security/SecTest
+13:50:36.115 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: pack/tests/security/Sman
+13:50:36.115 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote class: dev/nekoobfuscator/runtime/NekoNativeLoader
+13:50:36.115 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote resource: pack/tests/reflects/loader/TEST
+13:50:36.115 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote resource: pack/tests/reflects/res/file
+13:50:36.115 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote resource: pack/tests/reflects/res/file2
+13:50:36.115 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote resource: pack/tests/reflects/res/file3
+13:50:36.117 [main] DEBUG dev.nekoobfuscator.core.jar.JarOutput -- Wrote resource: neko/native/libneko_linux_x64.so
+13:50:36.117 [main] INFO dev.nekoobfuscator.core.jar.JarOutput -- Wrote 38 classes and 5 resources to verification/w1/final-v10/TEST-native-debug.jar
+13:50:36.117 [main] INFO dev.nekoobfuscator.core.pipeline.ObfuscationPipeline -- Obfuscation completed in 538ms
+[NekoObfuscator] Done in 591ms
