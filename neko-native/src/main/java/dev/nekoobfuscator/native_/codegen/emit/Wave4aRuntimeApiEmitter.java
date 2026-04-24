@@ -226,7 +226,7 @@ __attribute__((visibility("default"))) oop neko_rt_oop_from_handle(NekoHandle h)
 """);
         sb.append("""
 
-static inline void* neko_resolve_mirror_locator_from_klass(const NekoVmLayout *layout, Klass *klass) {
+static inline const void* neko_resolve_mirror_cell_from_klass(const NekoVmLayout *layout, Klass *klass) {
     void *oop_handle_addr;
     void *mirror_handle;
     if (layout == NULL || klass == NULL || layout->off_klass_java_mirror < 0) return NULL;
@@ -235,18 +235,15 @@ static inline void* neko_resolve_mirror_locator_from_klass(const NekoVmLayout *l
         oop_handle_addr = (uint8_t*)klass + layout->off_klass_java_mirror;
         mirror_handle = *(void**)oop_handle_addr;
         if (mirror_handle == NULL) return NULL;
-        return *(void***)((uint8_t*)mirror_handle + layout->off_oophandle_obj);
+        return (const void*)((const uint8_t*)mirror_handle + layout->off_oophandle_obj);
     }
-    return (void*)((uint8_t*)klass + layout->off_klass_java_mirror);
+    return (const void*)((const uint8_t*)klass + layout->off_klass_java_mirror);
 }
 
 static inline oop neko_resolve_mirror_oop_from_klass(const NekoVmLayout *layout, Klass *klass) {
-    void *locator = neko_resolve_mirror_locator_from_klass(layout, klass);
-    if (locator == NULL) return NULL;
-    if (layout->java_spec_version >= 9) {
-        return *(oop*)locator;
-    }
-    return *(oop*)locator;
+    const void *cell = neko_resolve_mirror_cell_from_klass(layout, klass);
+    if (cell == NULL) return NULL;
+    return (oop)neko_load_oop_from_cell(cell);
 }
 
 __attribute__((visibility("default"))) oop neko_rt_mirror_from_klass_nosafepoint(Klass *k) {

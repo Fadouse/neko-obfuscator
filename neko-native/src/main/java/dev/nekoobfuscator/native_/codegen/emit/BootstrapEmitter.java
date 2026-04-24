@@ -1325,17 +1325,10 @@ static Klass* neko_find_klass_by_name_in_cld_graph(const char *internal_name, ui
  * We double-dereference: mirror_oop = *(oop*)(*(void**)(klass + off_klass_java_mirror))
  * Then scan mirror_oop for a native-word-sized pointer matching known_klass. */
 static void neko_derive_class_klass_offset_from_mirror(void *known_klass) {
-    void **mirror_handle_slot;
-    void *mirror_handle;
     void *mirror_oop;
     if (known_klass == NULL || g_neko_vm_layout.off_class_klass >= 0) return;
     if (g_neko_vm_layout.off_klass_java_mirror < 0) return;
-    /* Step 1: read the OopHandle pointer from the Klass native struct. */
-    mirror_handle_slot = (void**)((uint8_t*)known_klass + g_neko_vm_layout.off_klass_java_mirror);
-    mirror_handle = *mirror_handle_slot;
-    if (mirror_handle == NULL) return;
-    /* Step 2: dereference the OopHandle to get the mirror oop. */
-    mirror_oop = *(void**)mirror_handle;
+    mirror_oop = neko_resolve_mirror_oop_from_klass(&g_neko_vm_layout, (Klass*)known_klass);
     if (mirror_oop == NULL) return;
     /* Step 3: scan the mirror oop (Java object) for a native pointer == known_klass.
      * _klass is stored at a fixed offset, typically 8-128 bytes from object base. */
