@@ -775,8 +775,8 @@ public final class OpcodeTranslator {
         String typedValue = castStaticI32Value(type, "__cur");
         return "int32_t __cur = neko_getstatic_i32(__site); "
             + "{ void *m = neko_static_mirror(__site); int32_t *addr = neko_static_i32_addr(__site); "
-            + "NEKO_TRACE(2, \"[nk] sfg c=%d sig=\\\"%s\\\" site=%p slot=%p raw=%p mir=%p off=%ld addr=%p val=%d\\n\", "
-            + currentManifestMethodIndex + ", \"" + cStringLiteral(currentMethodDescriptor) + "\", (void*)__site, (void*)__site->static_base_slot, (void*)*(__site->static_base_slot), m, (long)__site->field_offset_cookie, (void*)addr, __cur); } "
+            + "NEKO_TRACE(2, \"[nk] sfg c=%d sig=\\\"%s\\\" site=%p mir=%p off=%ld addr=%p val=%d\\n\", "
+            + currentManifestMethodIndex + ", \"" + cStringLiteral(currentMethodDescriptor) + "\", (void*)__site, m, (long)__site->field_offset_cookie, (void*)addr, __cur); } "
             + pushForType(type, typedValue) + ' ';
     }
 
@@ -784,8 +784,8 @@ public final class OpcodeTranslator {
         String valueExpr = castStaticI32Value(type, "val");
         return "int32_t __nv = " + valueExpr + "; "
             + "{ void *m = neko_static_mirror(__site); int32_t *addr = neko_static_i32_addr(__site); int32_t oldv = *addr; "
-            + "NEKO_TRACE(2, \"[nk] sfp c=%d sig=\\\"%s\\\" site=%p slot=%p raw=%p mir=%p off=%ld addr=%p old=%d new=%d\\n\", "
-            + currentManifestMethodIndex + ", \"" + cStringLiteral(currentMethodDescriptor) + "\", (void*)__site, (void*)__site->static_base_slot, (void*)*(__site->static_base_slot), m, (long)__site->field_offset_cookie, (void*)addr, oldv, __nv); "
+            + "NEKO_TRACE(2, \"[nk] sfp c=%d sig=\\\"%s\\\" site=%p mir=%p off=%ld addr=%p old=%d new=%d\\n\", "
+            + currentManifestMethodIndex + ", \"" + cStringLiteral(currentMethodDescriptor) + "\", (void*)__site, m, (long)__site->field_offset_cookie, (void*)addr, oldv, __nv); "
             + "neko_putstatic_i32(__site, __nv); "
             + "NEKO_TRACE(2, \"[nk] sfd c=%d sig=\\\"%s\\\" addr=%p now=%d\\n\", " + currentManifestMethodIndex + ", \"" + cStringLiteral(currentMethodDescriptor) + "\", (void*)addr, *addr); "
             + "{ uint8_t *p = (uint8_t*)addr - 8; NEKO_TRACE(2, \"[nk] sfbx %02x %02x %02x %02x %02x %02x %02x %02x | %02x %02x %02x %02x %02x %02x %02x %02x\\n\", p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7], p[8], p[9], p[10], p[11], p[12], p[13], p[14], p[15]); } } ";

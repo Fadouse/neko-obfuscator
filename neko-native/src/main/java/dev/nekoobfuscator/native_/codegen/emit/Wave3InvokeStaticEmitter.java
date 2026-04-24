@@ -46,9 +46,6 @@ public final class Wave3InvokeStaticEmitter {
         }
         for (Map.Entry<String, Integer> entry : ctx.fieldSlotIndex().entrySet()) {
             sb.append("static jfieldID g_fid_").append(entry.getValue()).append(" = NULL;   // ").append(entry.getKey()).append("\n");
-            sb.append("static jlong g_off_").append(entry.getValue()).append(" = -1;\n");
-            sb.append("static jlong g_static_off_").append(entry.getValue()).append(" = -1;\n");
-            sb.append("static jobject g_static_base_").append(entry.getValue()).append(" = NULL;\n");
         }
         for (int i = 0; i < ctx.stringCacheCount(); i++) {
             sb.append("static jstring g_str_").append(i).append(" = NULL;\n");
@@ -81,24 +78,6 @@ static void neko_raise_bound_resolution_error(JNIEnv *env, const char *errorClas
 
 static void neko_bind_log_failure(JNIEnv *env, const char *errorClass, const char *message) {
     neko_raise_bound_resolution_error(env, errorClass, message);
-}
-
-static void neko_bind_owner_class_slot(JNIEnv *env, jclass *slot, jclass self_class, const char *owner) {
-    jobject globalRef;
-    char message[256];
-    if (env == NULL || slot == NULL || *slot != NULL) return;
-    if (self_class == NULL) {
-        snprintf(message, sizeof(message), "Bind-time owner class missing: %s", owner == NULL ? "<null>" : owner);
-        neko_bind_log_failure(env, "java/lang/NoClassDefFoundError", message);
-        return;
-    }
-    globalRef = neko_new_global_ref(env, self_class);
-    if (globalRef == NULL) {
-        snprintf(message, sizeof(message), "Bind-time owner class global-ref failed: %s", owner == NULL ? "<null>" : owner);
-        neko_bind_log_failure(env, "java/lang/NoClassDefFoundError", message);
-        return;
-    }
-    *slot = (jclass)globalRef;
 }
 
 static void neko_bind_class_slot(JNIEnv *env, jclass *slot, const char *owner) {
@@ -249,9 +228,8 @@ static void neko_log_wave3_ready(void) {
             OwnerResolution resolution = ctx.ownerResolutions().get(owner);
             sb.append("static void neko_bind_owner_").append(ownerId).append("(JNIEnv *env, jclass self_class) {\n");
             sb.append("    if (env == NULL || g_owner_bound_").append(ownerId).append(") return;\n");
+            sb.append("    (void)self_class;\n");
             sb.append("    g_owner_bound_").append(ownerId).append(" = JNI_TRUE;\n");
-            sb.append("    neko_bind_owner_class_slot(env, &").append(generator.classSlotName(owner)).append(", self_class, \"")
-                .append(c(owner)).append("\");\n");
             for (String classOwner : resolution.classes()) {
                 if (owner.equals(classOwner)) {
                     continue;
@@ -349,10 +327,6 @@ static void neko_log_wave3_ready(void) {
 
     private String icacheMetaSymbol(IcacheMetaRef meta) {
         return "neko_icache_meta_" + meta.ownerId() + '_' + meta.methodId() + '_' + meta.siteIndex();
-    }
-
-    private boolean isPrimitiveFieldDescriptor(String desc) {
-        return desc != null && desc.length() == 1 && "ZBCSIJFD".indexOf(desc.charAt(0)) >= 0;
     }
 
     private String jvalueAccessor(Type type) {
