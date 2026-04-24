@@ -51,6 +51,16 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *reserved) {
     neko_log_wave3_ready();
     return JNI_VERSION_1_6;
 }
+
+JNIEXPORT void JNICALL JNI_OnUnload(JavaVM *vm, void *reserved) {
+    JNIEnv *env = NULL;
+    jint env_status;
+    (void)reserved;
+    if (vm == NULL) return;
+    env_status = (*vm)->GetEnv(vm, (void**)&env, JNI_VERSION_1_6);
+    if (env_status != JNI_OK || env == NULL) return;
+    neko_manifest_teardown(env);
+}
 """;
     }
 }

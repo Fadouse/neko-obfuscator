@@ -282,6 +282,51 @@ static void neko_store_oop_to_cell(void *cell, void *raw_oop);
 static void neko_log_wave2_ready(void);
 static jboolean neko_parse_vm_layout_strict(JNIEnv *env);
 static jboolean neko_capture_wellknown_klasses(void);
+static jclass g_neko_wave2_class_cls;
+static jclass g_neko_wave2_field_cls;
+static jclass g_neko_wave2_unsafe_cls;
+static jobject g_neko_wave2_unsafe_singleton;
+
+#if defined(_WIN32)
+#define NEKO_GLOBAL_DELETE(slot) do { if ((slot) != NULL) { neko_delete_global_ref(env, (jobject)(slot)); (slot) = NULL; } } while (0)
+#define NEKO_CLOSE_LIBJVM_IF_OWNED() ((void)0)
+#elif defined(__APPLE__)
+#define NEKO_GLOBAL_DELETE(slot) do { if ((slot) != NULL) { neko_delete_global_ref(env, (jobject)(slot)); (slot) = NULL; } } while (0)
+#define NEKO_CLOSE_LIBJVM_IF_OWNED() do { if (g_neko_libjvm_handle != NULL && g_neko_libjvm_handle != RTLD_DEFAULT) { dlclose(g_neko_libjvm_handle); g_neko_libjvm_handle = NULL; } } while (0)
+#else
+#define NEKO_GLOBAL_DELETE(slot) do { if ((slot) != NULL) { neko_delete_global_ref(env, (jobject)(slot)); (slot) = NULL; } } while (0)
+#define NEKO_CLOSE_LIBJVM_IF_OWNED() do { if (g_neko_libjvm_handle != NULL) { dlclose(g_neko_libjvm_handle); g_neko_libjvm_handle = NULL; } } while (0)
+#endif
+
+static void neko_manifest_teardown(JNIEnv *env) {
+    NekoChunkedHandleListChunk *chunk = g_neko_string_root_chunk_head;
+    if (env == NULL) return;
+    g_neko_string_root_chunk_head = NULL;
+    while (chunk != NULL) {
+        NekoChunkedHandleListChunk *next = chunk->next;
+        free(chunk);
+        chunk = next;
+    }
+    NEKO_GLOBAL_DELETE(g_neko_throw_npe);
+    NEKO_GLOBAL_DELETE(g_neko_throw_aioobe);
+    NEKO_GLOBAL_DELETE(g_neko_throw_cce);
+    NEKO_GLOBAL_DELETE(g_neko_throw_ae);
+    NEKO_GLOBAL_DELETE(g_neko_throw_le);
+    NEKO_GLOBAL_DELETE(g_neko_throw_oom);
+    NEKO_GLOBAL_DELETE(g_neko_throw_imse);
+    NEKO_GLOBAL_DELETE(g_neko_throw_ase);
+    NEKO_GLOBAL_DELETE(g_neko_throw_nase);
+    NEKO_GLOBAL_DELETE(g_neko_throw_bme);
+    NEKO_GLOBAL_DELETE(g_neko_throw_loader_linkage);
+    NEKO_GLOBAL_DELETE(g_neko_wave2_class_cls);
+    NEKO_GLOBAL_DELETE(g_neko_wave2_field_cls);
+    NEKO_GLOBAL_DELETE(g_neko_wave2_unsafe_cls);
+    NEKO_GLOBAL_DELETE(g_neko_wave2_unsafe_singleton);
+    NEKO_CLOSE_LIBJVM_IF_OWNED();
+}
+
+#undef NEKO_CLOSE_LIBJVM_IF_OWNED
+#undef NEKO_GLOBAL_DELETE
 
 static void neko_derive_thread_tlab_top_offset(void) {
     ptrdiff_t start_source = -1;
