@@ -456,6 +456,7 @@ public final class CCodeGenerator {
                 jboolean has_narrow_klass_base;
                 jboolean has_narrow_klass_shift;
                 jboolean wave4a_disabled;
+                jboolean compact_object_headers;
                 jboolean use_compact_object_headers;
                 /* Wave 4b-4a strict-nojni STRING intern infrastructure */
                 size_t constant_pool_size;

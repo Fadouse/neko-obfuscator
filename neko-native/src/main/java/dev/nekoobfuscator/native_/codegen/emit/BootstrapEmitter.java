@@ -705,6 +705,7 @@ static void neko_reset_vm_layout(void) {
     g_neko_vm_layout.java_thread_jni_environment_strategy = 'D';
     g_neko_vm_layout.oophandle_obj_strategy = 'D';
     g_neko_vm_layout.wave4a_disabled = JNI_TRUE;
+    g_neko_vm_layout.compact_object_headers = JNI_FALSE;
     g_neko_vm_layout.use_compact_object_headers = g_neko_use_compact_object_headers;
     g_neko_wave4a_unavailable_reason = "uninitialized";
     g_neko_flag_patch_path_logged = 0;
@@ -1065,6 +1066,7 @@ static jboolean neko_parse_vm_layout(JNIEnv *env) {
     const char *missing;
     neko_reset_vm_layout();
     neko_resolve_optional_vm_flags();
+    g_neko_vm_layout.compact_object_headers = g_neko_use_compact_object_headers;
     g_neko_vm_layout.use_compact_object_headers = g_neko_use_compact_object_headers;
     vmstructs = (const uint8_t*)neko_symbol_pointer(g_neko_vm_symbols.gHotSpotVMStructs);
     vmtypes = (const uint8_t*)neko_symbol_pointer(g_neko_vm_symbols.gHotSpotVMTypes);
@@ -1208,6 +1210,9 @@ static jboolean neko_parse_vm_layout(JNIEnv *env) {
             } else if ((neko_streq(type_name, "Universe") || neko_streq(type_name, "CompressedKlassPointers")) && neko_streq(field_name, "_narrow_klass._shift")) {
                 g_neko_vm_layout.narrow_klass_shift = *(int*)address;
                 g_neko_vm_layout.has_narrow_klass_shift = JNI_TRUE;
+            } else if (neko_streq(type_name, "Universe") && neko_streq(field_name, "_compact_object_headers_enabled")) {
+                g_neko_vm_layout.compact_object_headers = *(const uint8_t*)address != 0u ? JNI_TRUE : JNI_FALSE;
+                g_neko_vm_layout.use_compact_object_headers = g_neko_vm_layout.compact_object_headers;
             }
         }
         (void)type_string;
@@ -1243,6 +1248,7 @@ static jboolean neko_parse_vm_layout(JNIEnv *env) {
     if (g_neko_vm_layout.off_klass_java_mirror < 0 && g_neko_vm_layout.off_instance_klass_java_mirror >= 0) {
         g_neko_vm_layout.off_klass_java_mirror = g_neko_vm_layout.off_instance_klass_java_mirror;
     }
+    NEKO_TRACE(0, "[nk] compact_object_headers=%d", (int)g_neko_vm_layout.compact_object_headers);
     neko_log_instance_klass_static_field_offsets();
     neko_derive_method_flags_status_offset();
     neko_derive_thread_tlab_top_offset();
