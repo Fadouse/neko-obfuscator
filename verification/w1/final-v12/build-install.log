@@ -1,0 +1,38 @@
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/8.10/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build 
+> Task :neko-core:processResources NO-SOURCE
+> Task :neko-native:processResources NO-SOURCE
+> Task :neko-config:processResources NO-SOURCE
+> Task :neko-cli:processResources NO-SOURCE
+> Task :neko-transforms:processResources NO-SOURCE
+> Task :neko-native:check
+> Task :neko-api:compileJava UP-TO-DATE
+> Task :neko-runtime:compileJava UP-TO-DATE
+> Task :neko-api:processResources NO-SOURCE
+> Task :neko-runtime:processResources NO-SOURCE
+> Task :neko-api:classes UP-TO-DATE
+> Task :neko-runtime:classes UP-TO-DATE
+> Task :neko-api:jar UP-TO-DATE
+> Task :neko-runtime:jar UP-TO-DATE
+> Task :neko-config:compileJava UP-TO-DATE
+> Task :neko-core:compileJava UP-TO-DATE
+> Task :neko-config:classes UP-TO-DATE
+> Task :neko-core:classes UP-TO-DATE
+> Task :neko-core:jar UP-TO-DATE
+> Task :neko-config:jar UP-TO-DATE
+> Task :neko-transforms:compileJava UP-TO-DATE
+> Task :neko-transforms:classes UP-TO-DATE
+> Task :neko-transforms:jar UP-TO-DATE
+> Task :neko-native:compileJava
+> Task :neko-native:classes
+> Task :neko-native:jar
+> Task :neko-native:assemble
+> Task :neko-native:build
+> Task :neko-cli:compileJava UP-TO-DATE
+> Task :neko-cli:classes UP-TO-DATE
+> Task :neko-cli:jar UP-TO-DATE
+> Task :neko-cli:startScripts
+> Task :neko-cli:installDist
+
+BUILD SUCCESSFUL in 3s
+16 actionable tasks: 4 executed, 12 up-to-date
