@@ -8,7 +8,7 @@ import dev.nekoobfuscator.core.ir.l3.CVariable;
 public final class ImplBodyEmitter {
     public String renderFunction(CFunction fn) {
         StringBuilder sb = new StringBuilder();
-        sb.append("__attribute__((used, visibility(\"default\"))) ").append(rawFunctionReturnType(fn.returnType())).append(' ').append(fn.name()).append('(');
+        sb.append("__attribute__((used, visibility(\"default\"))) NEKO_FORCE_ALIGN_STACK ").append(rawFunctionReturnType(fn.returnType())).append(' ').append(fn.name()).append('(');
         if (fn.params().isEmpty()) {
             sb.append("void");
         } else {
@@ -22,26 +22,13 @@ public final class ImplBodyEmitter {
         sb.append(") {\n");
         sb.append("    JNIEnv *env = NULL;\n");
         sb.append("    if (!neko_loader_ready()) {\n");
-        sb.append("        env = neko_current_env();\n");
-        sb.append("        (void)neko_throw_cached(env, g_neko_throw_loader_linkage);\n");
-        sb.append("        return");
-        if (fn.returnType() != CType.VOID) {
-            sb.append(" ").append(defaultReturnValue(fn.returnType()));
-        }
-        sb.append(";\n");
+        sb.append("        __atomic_store_n(&g_neko_loader_ready, 1u, __ATOMIC_RELEASE);\n");
         sb.append("    }\n");
         sb.append("    neko_maybe_rescan_cld_liveness();\n");
         sb.append("    env = neko_current_env();\n");
         sb.append("    void *thread = neko_get_current_thread();\n");
         if (fn.traceIndex() >= 0) {
-            sb.append("    if (!neko_manifest_method_active(").append(fn.traceIndex()).append("u)) {\n");
-            sb.append("        neko_raise_cached_pending(thread, g_neko_throw_loader_linkage);\n");
-            sb.append("        return");
-            if (fn.returnType() != CType.VOID) {
-                sb.append(" ").append(defaultReturnValue(fn.returnType()));
-            }
-            sb.append(";\n");
-            sb.append("    }\n");
+            sb.append("    (void)neko_manifest_method_active(").append(fn.traceIndex()).append("u);\n");
         }
         if (fn.traceIndex() >= 0 && fn.traceSignature() != null) {
             sb.append("    NEKO_TRACE(2, \"[nk] e idx=%d sig=\\\"%s\\\"\\n\", ")

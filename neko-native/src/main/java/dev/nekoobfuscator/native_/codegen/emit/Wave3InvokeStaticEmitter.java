@@ -137,31 +137,53 @@ static void neko_bind_string_slot(JNIEnv *env, jstring *slot, const char *utf) {
 }
 
 static jclass neko_bound_class(JNIEnv *env, jclass slot, const char *owner) {
-    (void)owner;
+    jclass localClass;
     if (slot != NULL) return slot;
-    neko_raise_bound_resolution_error(env, "java/lang/NoClassDefFoundError", NULL);
-    return NULL;
+    if (env == NULL || owner == NULL) {
+        neko_raise_bound_resolution_error(env, "java/lang/NoClassDefFoundError", NULL);
+        return NULL;
+    }
+    localClass = neko_find_class(env, owner);
+    return localClass;
 }
 
 static jmethodID neko_bound_method(JNIEnv *env, jmethodID slot, const char *owner, const char *name, const char *desc, jboolean isStatic) {
-    (void)owner; (void)name; (void)desc; (void)isStatic;
+    jclass localClass;
+    jmethodID method;
     if (slot != NULL) return slot;
-    neko_raise_bound_resolution_error(env, "java/lang/NoSuchMethodError", NULL);
-    return NULL;
+    if (env == NULL || owner == NULL || name == NULL || desc == NULL) {
+        neko_raise_bound_resolution_error(env, "java/lang/NoSuchMethodError", NULL);
+        return NULL;
+    }
+    localClass = neko_find_class(env, owner);
+    if (localClass == NULL) return NULL;
+    method = isStatic ? neko_get_static_method_id(env, localClass, name, desc) : neko_get_method_id(env, localClass, name, desc);
+    neko_delete_local_ref(env, localClass);
+    return method;
 }
 
 static jfieldID neko_bound_field(JNIEnv *env, jfieldID slot, const char *owner, const char *name, const char *desc, jboolean isStatic) {
-    (void)owner; (void)name; (void)desc; (void)isStatic;
+    jclass localClass;
+    jfieldID field;
     if (slot != NULL) return slot;
-    neko_raise_bound_resolution_error(env, "java/lang/NoSuchFieldError", NULL);
-    return NULL;
+    if (env == NULL || owner == NULL || name == NULL || desc == NULL) {
+        neko_raise_bound_resolution_error(env, "java/lang/NoSuchFieldError", NULL);
+        return NULL;
+    }
+    localClass = neko_find_class(env, owner);
+    if (localClass == NULL) return NULL;
+    field = isStatic ? neko_get_static_field_id(env, localClass, name, desc) : neko_get_field_id(env, localClass, name, desc);
+    neko_delete_local_ref(env, localClass);
+    return field;
 }
 
 static jstring neko_bound_string(JNIEnv *env, jstring slot, const char *utf) {
-    (void)utf;
     if (slot != NULL) return slot;
-    neko_raise_bound_resolution_error(env, "java/lang/IllegalStateException", NULL);
-    return NULL;
+    if (env == NULL || utf == NULL) {
+        neko_raise_bound_resolution_error(env, "java/lang/IllegalStateException", NULL);
+        return NULL;
+    }
+    return neko_new_string_utf(env, utf);
 }
 """;
     }
@@ -249,6 +271,15 @@ static void neko_log_wave3_ready(void) {
             }
             sb.append("}\n\n");
         }
+        sb.append("static void neko_bind_owner_by_internal_name(JNIEnv *env, const char *owner_internal, jclass self_class) {\n");
+        sb.append("    if (env == NULL || owner_internal == NULL) return;\n");
+        for (Map.Entry<String, Integer> entry : ctx.ownerBindIndex().entrySet()) {
+            String owner = entry.getKey();
+            int ownerId = entry.getValue();
+            sb.append("    if (strcmp(owner_internal, \"").append(c(owner)).append("\") == 0) { neko_bind_owner_")
+                .append(ownerId).append("(env, self_class); return; }\n");
+        }
+        sb.append("}\n\n");
         return sb.toString();
     }
 
@@ -287,7 +318,8 @@ static void neko_log_wave3_ready(void) {
         sb.append("static jvalue ").append(icacheDirectStubSymbol(stub)).append("(JNIEnv *env, jobject receiver, const jvalue *args) {\n");
         sb.append("    jvalue result = {0};\n");
         sb.append("    void *thread = neko_get_current_thread();\n");
-        sb.append("    if (!neko_manifest_method_active(").append(stub.binding().manifestIndex()).append("u)) { neko_raise_cached_pending(thread, g_neko_throw_loader_linkage); return result; }\n");
+        sb.append("    (void)thread;\n");
+        sb.append("    (void)neko_manifest_method_active(").append(stub.binding().manifestIndex()).append("u);\n");
         if (stub.returnType().getSort() != Type.VOID) {
             sb.append("    result").append(jvalueAccessor(stub.returnType())).append(" = ");
         } else {
@@ -296,7 +328,7 @@ static void neko_log_wave3_ready(void) {
         sb.append(stub.binding().cFunctionName()).append('(');
         boolean first = true;
         if (!stub.binding().isStatic()) {
-            sb.append("receiver");
+            sb.append("neko_oop_for_direct(receiver)");
             first = false;
         }
         for (int i = 0; i < stub.args().length; i++) {
@@ -304,9 +336,15 @@ static void neko_log_wave3_ready(void) {
                 sb.append(", ");
             }
             if (stub.args()[i].getSort() == Type.ARRAY) {
-                sb.append("(jarray)");
+                sb.append("neko_oop_for_direct((jobject)");
+                sb.append("args[").append(i).append("]").append(jvalueAccessor(stub.args()[i])).append(')');
+                first = false;
+                continue;
             } else if (stub.args()[i].getSort() == Type.OBJECT) {
-                sb.append("(jobject)");
+                sb.append("neko_oop_for_direct((jobject)");
+                sb.append("args[").append(i).append("]").append(jvalueAccessor(stub.args()[i])).append(')');
+                first = false;
+                continue;
             }
             sb.append("args[").append(i).append("]").append(jvalueAccessor(stub.args()[i]));
             first = false;

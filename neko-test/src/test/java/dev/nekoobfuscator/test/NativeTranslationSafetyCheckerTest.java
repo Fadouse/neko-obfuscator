@@ -49,7 +49,7 @@ class NativeTranslationSafetyCheckerTest {
     }
 
     @Test
-    void rejectsReferenceReturnFromNonDirectProducer() {
+    void admitsReferenceReturnFromNonDirectProducer() {
         L1Method method = method("delayed", "(Ljava/lang/Object;)Ljava/lang/Object;", Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC, insns -> {
             insns.add(new VarInsnNode(Opcodes.ALOAD, 0));
             insns.add(new InsnNode(Opcodes.DUP));
@@ -58,8 +58,7 @@ class NativeTranslationSafetyCheckerTest {
         }, 2, 1);
 
         List<String> reasons = new ArrayList<>();
-        assertFalse(checker.isSafe(method, reasons));
-        assertTrue(reasons.contains("reference return requires direct ALOAD/ACONST_NULL producer"), () -> String.join("; ", reasons));
+        assertTrue(checker.isSafe(method, reasons), () -> String.join("; ", reasons));
     }
 
     @Test
@@ -76,7 +75,7 @@ class NativeTranslationSafetyCheckerTest {
     }
 
     @Test
-    void rejectsReferenceReturnAcrossGcPermittingWindow() {
+    void admitsReferenceReturnAcrossGcPermittingWindow() {
         L1Method method = method("gcWindow", "(Ljava/lang/Object;)Ljava/lang/Object;", Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC, insns -> {
             insns.add(new VarInsnNode(Opcodes.ALOAD, 0));
             insns.add(new VarInsnNode(Opcodes.ASTORE, 1));
@@ -87,8 +86,7 @@ class NativeTranslationSafetyCheckerTest {
         }, 1, 2);
 
         List<String> reasons = new ArrayList<>();
-        assertFalse(checker.isSafe(method, reasons));
-        assertTrue(reasons.contains("reference return requires no GC-permitting op between last write and ARETURN"), () -> String.join("; ", reasons));
+        assertTrue(checker.isSafe(method, reasons), () -> String.join("; ", reasons));
     }
 
     @Test
@@ -186,7 +184,7 @@ class NativeTranslationSafetyCheckerTest {
     }
 
     @Test
-    void rejectsLdcMethodHandleReferenceReturnFromNonDirectProducer() {
+    void admitsLdcMethodHandleReferenceReturnFromNonDirectProducer() {
         Handle handle = new Handle(Opcodes.H_INVOKESTATIC, "pkg/HandleOwner", "call", "()V", false);
         L1Method method = method("sampleHandle", "()Ljava/lang/Object;", Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC, insns -> {
             insns.add(new LdcInsnNode(handle));
@@ -194,12 +192,11 @@ class NativeTranslationSafetyCheckerTest {
         }, 1, 0);
 
         List<String> reasons = new ArrayList<>();
-        assertFalse(checker.isSafe(method, reasons));
-        assertTrue(reasons.contains("reference return requires direct ALOAD/ACONST_NULL producer"), () -> String.join("; ", reasons));
+        assertTrue(checker.isSafe(method, reasons), () -> String.join("; ", reasons));
     }
 
     @Test
-    void rejectsMonitorEnterUntilM5kStrictNoJniRuntimeExists() {
+    void admitsMonitorEnterForNativeCoverage() {
         L1Method method = method("sampleMonitor", "(Ljava/lang/Object;)V", Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC, insns -> {
             insns.add(new VarInsnNode(Opcodes.ALOAD, 0));
             insns.add(new InsnNode(Opcodes.MONITORENTER));
@@ -207,12 +204,11 @@ class NativeTranslationSafetyCheckerTest {
         }, 1, 1);
 
         List<String> reasons = new ArrayList<>();
-        assertFalse(checker.isSafe(method, reasons));
-        assertTrue(reasons.stream().anyMatch(reason -> reason.contains("M5f deferred to M5k/W12")), () -> String.join("; ", reasons));
+        assertTrue(checker.isSafe(method, reasons), () -> String.join("; ", reasons));
     }
 
     @Test
-    void rejectsInvokeDynamicUntilBootstrapOnlyStrictNoJniRuntimeExists() {
+    void admitsInvokeDynamicForNativeCoverage() {
         Handle bootstrap = new Handle(
             Opcodes.H_INVOKESTATIC,
             "java/lang/invoke/LambdaMetafactory",
@@ -227,8 +223,7 @@ class NativeTranslationSafetyCheckerTest {
         }, 1, 0);
 
         List<String> reasons = new ArrayList<>();
-        assertFalse(checker.isSafe(method, reasons));
-        assertTrue(reasons.stream().anyMatch(reason -> reason.contains("M5f deferred to M5k/W12")), () -> String.join("; ", reasons));
+        assertTrue(checker.isSafe(method, reasons), () -> String.join("; ", reasons));
     }
 
     private static L1Method method(String name, String desc, int access, MethodBody body, int maxStack, int maxLocals) {

@@ -29,11 +29,11 @@ class NativeObfAdmissionGateTest {
     private static final String LINKAGE_ERROR_MESSAGE = "please check your native library load correctly";
     private static final Pattern NATIVE_STAGE_COUNTS = Pattern.compile("Native stage: translated=(\\d+) rejected=(\\d+)");
     private static final List<ExpectedAdmission> EXPECTED = List.of(
-        new ExpectedAdmission("TEST", "TEST.jar", 14, 75, 61),
-        new ExpectedAdmission("obfusjack", "obfusjack-test21.jar", 17, 84, 67),
-        new ExpectedAdmission("SnakeGame", "SnakeGame.jar", 12, 14, 2)
+        new ExpectedAdmission("TEST", "TEST.jar"),
+        new ExpectedAdmission("obfusjack", "obfusjack-test21.jar"),
+        new ExpectedAdmission("SnakeGame", "SnakeGame.jar")
     );
-    private static final Map<String, AdmissionCounts> MEASURED = new LinkedHashMap<>();
+    private static final Map<String, AdmissionMeasurement> MEASURED = new LinkedHashMap<>();
 
     @BeforeAll
     static void prepareFixtures() throws Exception {
@@ -54,11 +54,11 @@ class NativeObfAdmissionGateTest {
 
         StringJoiner rows = new StringJoiner(System.lineSeparator(), "", System.lineSeparator());
         for (ExpectedAdmission expected : EXPECTED) {
-            AdmissionCounts actual = MEASURED.get(expected.fixtureName());
+            AdmissionMeasurement actual = MEASURED.get(expected.fixtureName());
             rows.add(expected.jarName()
                 + " admitted=" + actual.admitted()
-                + " total=" + actual.total()
-                + " excluded=" + actual.excluded());
+                + " eligible=" + actual.eligible()
+                + " stageRejected=" + actual.stageRejected());
         }
 
         Path output = NativeObfuscationHelper.projectRoot().resolve("verification/w10/admission-counts.txt");
@@ -82,7 +82,7 @@ class NativeObfAdmissionGateTest {
     }
 
     private static void assertAdmission(ExpectedAdmission expected) throws Exception {
-        AdmissionCounts actual = MEASURED.computeIfAbsent(expected.fixtureName(), fixture -> {
+        AdmissionMeasurement actual = MEASURED.computeIfAbsent(expected.fixtureName(), fixture -> {
             try {
                 return measure(expected);
             } catch (Exception e) {
@@ -90,37 +90,34 @@ class NativeObfAdmissionGateTest {
             }
         });
 
-        assertEquals(expected.total(), actual.total(), () -> expected.jarName()
-            + " admission denominator changed; update the W10 hardcoded expectation only with an intentional plan change");
-        assertExactAdmission(expected, actual);
-        assertEquals(expected.excluded(), actual.excluded(), () -> expected.jarName()
-            + " exclusion count changed; admitted=" + actual.admitted()
-            + " total=" + actual.total()
-            + " excluded=" + actual.excluded());
+        assertEquals(actual.eligible(), actual.admitted(), () -> expected.jarName()
+            + " native admission must cover 100% of concrete bytecode-body methods excluding <init>/<clinit>, abstract, native, and no-code methods"
+            + "; admitted=" + actual.admitted()
+            + " eligible=" + actual.eligible()
+            + " stageRejected=" + actual.stageRejected());
+        assertEquals(0, actual.stageRejected(), () -> expected.jarName()
+            + " native stage must reject zero eligible methods"
+            + "; admitted=" + actual.admitted()
+            + " eligible=" + actual.eligible()
+            + " stageRejected=" + actual.stageRejected());
+        assertEquals(actual.eligible(), actual.translatedOutputBodies(), () -> expected.jarName()
+            + " translated output body count must match the dynamic admission denominator");
     }
 
-    private static void assertExactAdmission(ExpectedAdmission expected, AdmissionCounts actual) {
-        if (actual.admitted() < expected.admitted()) {
-            assertEquals(expected.admitted(), actual.admitted(), () -> expected.jarName()
-                + " admission regressed; W10 requires exactly " + expected.admitted()
-                + " admitted methods but measured " + actual.admitted());
-        }
-        if (actual.admitted() > expected.admitted()) {
-            assertEquals(expected.admitted(), actual.admitted(), () -> expected.jarName()
-                + " admission grew; update hardcoded expectation in W11 commit");
-        }
-        assertEquals(expected.admitted(), actual.admitted(), () -> expected.jarName() + " admission count changed");
-    }
-
-    private static AdmissionCounts measure(ExpectedAdmission expected) throws Exception {
+    private static AdmissionMeasurement measure(ExpectedAdmission expected) throws Exception {
         NativeObfuscationHelper.NativeArtifact artifact = NativeObfuscationHelper.artifact(expected.fixtureName());
         AdmissionCounts stageCounts = parseNativeStageCounts(artifact.obfuscationStdout());
         Map<String, MethodNode> originalMethods = allMethodsByKey(artifact.inputJar());
         Map<String, MethodNode> outputMethods = allMethodsByKey(artifact.outputJar());
 
+        int eligible = 0;
         int admitted = 0;
         List<String> missingMethods = new ArrayList<>();
         for (Map.Entry<String, MethodNode> entry : originalMethods.entrySet()) {
+            if (!isAdmissionTarget(entry.getValue())) {
+                continue;
+            }
+            eligible++;
             MethodNode outputMethod = outputMethods.get(entry.getKey());
             if (outputMethod == null) {
                 missingMethods.add(entry.getKey());
@@ -134,7 +131,7 @@ class NativeObfAdmissionGateTest {
         assertTrue(missingMethods.isEmpty(), () -> "Post-obfuscation jar is missing original admission target methods: " + missingMethods);
         assertEquals(stageCounts.admitted(), admitted, () -> expected.jarName()
             + " native stage translated count does not match translated output body count");
-        return stageCounts;
+        return new AdmissionMeasurement(stageCounts.admitted(), stageCounts.rejected(), eligible, admitted);
     }
 
     private static AdmissionCounts parseNativeStageCounts(Path stdout) throws Exception {
@@ -142,8 +139,8 @@ class NativeObfAdmissionGateTest {
         Matcher matcher = NATIVE_STAGE_COUNTS.matcher(output);
         assertTrue(matcher.find(), () -> "Missing native stage counts in " + stdout + "\n" + output);
         int admitted = Integer.parseInt(matcher.group(1));
-        int total = Integer.parseInt(matcher.group(2));
-        return new AdmissionCounts(admitted, total, total - admitted);
+        int rejected = Integer.parseInt(matcher.group(2));
+        return new AdmissionCounts(admitted, rejected);
     }
 
     private static Map<String, MethodNode> allMethodsByKey(Path jar) throws Exception {
@@ -158,6 +155,16 @@ class NativeObfAdmissionGateTest {
 
     private static String methodKey(ClassNode classNode, MethodNode method) {
         return classNode.name + '#' + method.name + method.desc;
+    }
+
+    private static boolean isAdmissionTarget(MethodNode method) {
+        if ("<init>".equals(method.name) || "<clinit>".equals(method.name)) {
+            return false;
+        }
+        if ((method.access & (Opcodes.ACC_ABSTRACT | Opcodes.ACC_NATIVE)) != 0) {
+            return false;
+        }
+        return method.instructions != null && !realInstructions(method).isEmpty();
     }
 
     private static boolean isTranslatedThrowBody(MethodNode method) {
@@ -197,7 +204,14 @@ class NativeObfAdmissionGateTest {
         return instructions;
     }
 
-    private record ExpectedAdmission(String fixtureName, String jarName, int admitted, int total, int excluded) {}
+    private record ExpectedAdmission(String fixtureName, String jarName) {}
 
-    private record AdmissionCounts(int admitted, int total, int excluded) {}
+    private record AdmissionCounts(int admitted, int rejected) {}
+
+    private record AdmissionMeasurement(
+        int admitted,
+        int stageRejected,
+        int eligible,
+        int translatedOutputBodies
+    ) {}
 }

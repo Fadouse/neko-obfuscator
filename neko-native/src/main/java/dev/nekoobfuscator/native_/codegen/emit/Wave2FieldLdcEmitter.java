@@ -80,7 +80,7 @@ public final class Wave2FieldLdcEmitter {
         sb.append("    args[0].l = reflected_field;\n");
         sb.append("    return (ptrdiff_t)neko_call_long_method_a(env, unsafe, is_static ? g_neko_wave2_unsafe_static_field_offset : g_neko_wave2_unsafe_object_field_offset, args);\n");
         sb.append("}\n\n");
-        sb.append("static ptrdiff_t neko_wave2_object_field_offset_by_name(JNIEnv *env, const char *owner_internal, const char *field_name) {\n");
+        sb.append("static ptrdiff_t neko_wave2_field_offset_by_name(JNIEnv *env, const char *owner_internal, const char *field_name, jboolean is_static) {\n");
         sb.append("    jclass owner = NULL;\n");
         sb.append("    jobject reflected = NULL;\n");
         sb.append("    ptrdiff_t offset = -1;\n");
@@ -89,11 +89,17 @@ public final class Wave2FieldLdcEmitter {
         sb.append("    if (owner == NULL) goto cleanup;\n");
         sb.append("    reflected = neko_wave2_declared_field(env, owner, field_name);\n");
         sb.append("    if (reflected == NULL) goto cleanup;\n");
-        sb.append("    offset = neko_wave2_reflected_field_offset(env, reflected, JNI_FALSE);\n");
+        sb.append("    offset = neko_wave2_reflected_field_offset(env, reflected, is_static);\n");
         sb.append("cleanup:\n");
         sb.append("    if (reflected != NULL) neko_delete_local_ref(env, reflected);\n");
         sb.append("    if (owner != NULL) neko_delete_local_ref(env, owner);\n");
         sb.append("    return offset;\n");
+        sb.append("}\n\n");
+        sb.append("static ptrdiff_t neko_wave2_object_field_offset_by_name(JNIEnv *env, const char *owner_internal, const char *field_name) {\n");
+        sb.append("    return neko_wave2_field_offset_by_name(env, owner_internal, field_name, JNI_FALSE);\n");
+        sb.append("}\n\n");
+        sb.append("static ptrdiff_t neko_wave2_static_field_offset_by_name(JNIEnv *env, const char *owner_internal, const char *field_name) {\n");
+        sb.append("    return neko_wave2_field_offset_by_name(env, owner_internal, field_name, JNI_TRUE);\n");
         sb.append("}\n\n");
         sb.append("static ptrdiff_t neko_wave2_array_metric(JNIEnv *env, const char *descriptor, jboolean want_base) {\n");
         sb.append("    jobject unsafe = neko_wave2_unsafe(env);\n");
@@ -142,6 +148,15 @@ public final class Wave2FieldLdcEmitter {
         sb.append("        return neko_decode_heap_oop(narrow);\n");
         sb.append("    }\n");
         sb.append("    return is_volatile ? __atomic_load_n((void**)((uint8_t*)base + offset), __ATOMIC_SEQ_CST) : *(void**)((uint8_t*)base + offset);\n");
+        sb.append("}\n\n");
+        sb.append("static inline void neko_store_heap_oop_at(void *base, ptrdiff_t offset, void *value, jboolean is_volatile) {\n");
+        sb.append("    if (base == NULL || offset < 0) return;\n");
+        sb.append("    if (neko_uses_compressed_oops()) {\n");
+        sb.append("        u4 narrow = neko_encode_heap_oop(value);\n");
+        sb.append("        if (is_volatile) __atomic_store_n((u4*)((uint8_t*)base + offset), narrow, __ATOMIC_SEQ_CST); else *(u4*)((uint8_t*)base + offset) = narrow;\n");
+        sb.append("        return;\n");
+        sb.append("    }\n");
+        sb.append("    if (is_volatile) __atomic_store_n((void**)((uint8_t*)base + offset), value, __ATOMIC_SEQ_CST); else *(void**)((uint8_t*)base + offset) = value;\n");
         sb.append("}\n\n");
         sb.append("typedef struct Klass Klass;\n");
         sb.append("typedef void* oop;\n");
@@ -225,9 +240,14 @@ public final class Wave2FieldLdcEmitter {
         sb.append("    uint32_t access_flags = 0u;\n");
         sb.append("    if (env == NULL || site == NULL || owner_klass == NULL || site->field_name == NULL || site->field_desc == NULL) return JNI_FALSE;\n");
         sb.append("    if (!neko_resolve_field_offset(owner_klass, site->field_name, (uint32_t)strlen(site->field_name), site->field_desc, (uint32_t)strlen(site->field_desc), site->is_static ? true : false, &resolved_offset)) {\n");
+        sb.append("        ptrdiff_t fallback_offset = site->is_static ? neko_wave2_static_field_offset_by_name(env, site->owner_internal, site->field_name) : -1;\n");
+        sb.append("        if (fallback_offset >= 0) {\n");
+        sb.append("            resolved_offset = (int32_t)fallback_offset;\n");
+        sb.append("        } else {\n");
         sb.append("        __atomic_store_n(&site->resolved_offset, NEKO_FIELD_SITE_FAILED, __ATOMIC_RELEASE);\n");
         sb.append("        neko_wave2_capture_pending(env, thread, \"java/lang/NoSuchFieldError\", site->field_name);\n");
         sb.append("        return JNI_FALSE;\n");
+        sb.append("        }\n");
         sb.append("    }\n");
         sb.append("    offset = (ptrdiff_t)resolved_offset;\n");
         sb.append("    if (site->is_static) {\n");
@@ -356,6 +376,9 @@ public final class Wave2FieldLdcEmitter {
         sb.append("}\n\n");
         sb.append("static inline void* neko_field_read_oop(void *base, const NekoManifestFieldSite *site) {\n");
         sb.append("    return neko_load_heap_oop_at(base, site == NULL ? -1 : site->resolved_offset, site != NULL && site->is_volatile ? JNI_TRUE : JNI_FALSE);\n");
+        sb.append("}\n\n");
+        sb.append("static inline void neko_field_write_oop(void *base, const NekoManifestFieldSite *site, void *value) {\n");
+        sb.append("    neko_store_heap_oop_at(base, site == NULL ? -1 : site->resolved_offset, value, site != NULL && site->is_volatile ? JNI_TRUE : JNI_FALSE);\n");
         sb.append("}\n\n");
         appendWave2PrimitiveFieldAccessors(sb, 'Z', "jboolean");
         appendWave2PrimitiveFieldAccessors(sb, 'B', "jbyte");
@@ -524,8 +547,8 @@ static void* neko_create_ldc_string_oop(NekoManifestLdcSite* site, uint32_t *cod
         }
     } else {
         for (int32_t i = 0; i < utf16_len; i++) {
-            array_base[2 * i] = (uint8_t)(utf16[i] >> 8);
-            array_base[2 * i + 1] = (uint8_t)(utf16[i] & 0xFFu);
+            array_base[2 * i] = (uint8_t)(utf16[i] & 0xFFu);
+            array_base[2 * i + 1] = (uint8_t)(utf16[i] >> 8);
         }
     }
     lh_str = *(uint32_t*)((uint8_t*)g_neko_vm_layout.klass_java_lang_String + g_neko_vm_layout.off_klass_layout_helper);
@@ -781,7 +804,7 @@ static void neko_resolve_ldc_string(NekoManifestLdcSite* site) {
         sb.append("    if (entry->root_cell == NULL) return NULL;\n");
         sb.append("    value = neko_load_oop_from_cell(entry->root_cell);\n");
         sb.append("    if (value == NULL && entry->root_cell != NULL) {\n");
-        sb.append("        void *new_str = neko_create_ldc_string_oop(site, entry, NULL, NULL, NULL);\n");
+        sb.append("        void *new_str = neko_create_ldc_string_oop(site, NULL, NULL, NULL, NULL);\n");
         sb.append("        if (new_str != NULL) {\n");
         sb.append("            if (__sync_bool_compare_and_swap((void**)entry->root_cell, NULL, new_str)) {\n");
         sb.append("                value = new_str;\n");

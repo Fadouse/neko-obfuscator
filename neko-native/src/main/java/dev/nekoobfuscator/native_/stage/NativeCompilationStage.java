@@ -43,7 +43,8 @@ public final class NativeCompilationStage {
     private static final Logger log = LoggerFactory.getLogger(NativeCompilationStage.class);
     private static final String NATIVE_TRANSLATE_DESC = "Ldev/nekoobfuscator/api/annotation/NativeTranslate;";
     private static final String NATIVE_LOADER_OWNER = "dev/nekoobfuscator/runtime/NekoNativeLoader";
-    private static final String NATIVE_LOAD_DESC = "()V";
+    private static final String NATIVE_LOAD_NAME = "loadForClass";
+    private static final String NATIVE_LOAD_DESC = "(Ljava/lang/Class;)V";
     private static final String LINKAGE_ERROR_OWNER = "java/lang/LinkageError";
     private static final String LINKAGE_ERROR_MESSAGE = "please check your native library load correctly";
 
@@ -216,6 +217,13 @@ public final class NativeCompilationStage {
         if (classInternalName.startsWith("dev/nekoobfuscator/runtime/")) {
             return false;
         }
+        if (method.isClassInit() || method.isConstructor()) {
+            return false;
+        }
+        int access = method.access();
+        if ((access & (Opcodes.ACC_ABSTRACT | Opcodes.ACC_NATIVE)) != 0 || !method.hasCode()) {
+            return false;
+        }
         if (cfg.includeAnnotated()) {
             if (classAnnotated || hasAnnotation(method.asmNode().visibleAnnotations) || hasAnnotation(method.asmNode().invisibleAnnotations)) {
                 return true;
@@ -350,7 +358,7 @@ public final class NativeCompilationStage {
         MethodNode clinit = findMethod(classNode, "<clinit>", "()V");
         if (clinit == null) {
             clinit = new MethodNode(Opcodes.ACC_STATIC, "<clinit>", "()V", null, null);
-            appendNativeBootstrap(clinit.instructions);
+            appendNativeBootstrap(clinit.instructions, classNode.name);
             clinit.instructions.add(new InsnNode(Opcodes.RETURN));
             clinit.maxStack = 1;
             clinit.maxLocals = 0;
@@ -362,13 +370,14 @@ public final class NativeCompilationStage {
             return;
         }
         InsnList loadCall = new InsnList();
-        appendNativeBootstrap(loadCall);
+        appendNativeBootstrap(loadCall, classNode.name);
         clinit.instructions.insert(loadCall);
         clinit.maxStack = Math.max(clinit.maxStack, 1);
     }
 
-    private void appendNativeBootstrap(InsnList instructions) {
-        instructions.add(new MethodInsnNode(Opcodes.INVOKESTATIC, NATIVE_LOADER_OWNER, "load", NATIVE_LOAD_DESC, false));
+    private void appendNativeBootstrap(InsnList instructions, String ownerInternalName) {
+        instructions.add(new LdcInsnNode(Type.getObjectType(ownerInternalName)));
+        instructions.add(new MethodInsnNode(Opcodes.INVOKESTATIC, NATIVE_LOADER_OWNER, NATIVE_LOAD_NAME, NATIVE_LOAD_DESC, false));
     }
 
     private boolean containsNativeLoad(MethodNode clinit) {
@@ -376,7 +385,7 @@ public final class NativeCompilationStage {
             if (insn instanceof MethodInsnNode methodInsn
                 && methodInsn.getOpcode() == Opcodes.INVOKESTATIC
                 && NATIVE_LOADER_OWNER.equals(methodInsn.owner)
-                && "load".equals(methodInsn.name)
+                && NATIVE_LOAD_NAME.equals(methodInsn.name)
                 && NATIVE_LOAD_DESC.equals(methodInsn.desc)) {
                 return true;
             }

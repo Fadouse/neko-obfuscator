@@ -31,6 +31,17 @@ static inline JNIEnv* neko_current_env(void) {
     return env;
 }
 
+static inline void neko_sleep_millis(jlong millis) {
+    struct timespec req;
+    struct timespec rem;
+    if (millis <= 0) return;
+    req.tv_sec = (time_t)(millis / 1000);
+    req.tv_nsec = (long)((millis % 1000) * 1000000L);
+    while (nanosleep(&req, &rem) != 0 && errno == EINTR) {
+        req = rem;
+    }
+}
+
 static inline void* neko_decode_heap_oop(u4 narrow) {
     if (narrow == 0u) return NULL;
     return (void*)(g_neko_vm_layout.narrow_oop_base + ((uintptr_t)narrow << g_neko_vm_layout.narrow_oop_shift));
@@ -70,22 +81,28 @@ static inline void* neko_pending_exception(void *thread) {
 
 static inline void neko_set_pending_exception(void *thread, void *oop) {
     if (thread == NULL || g_neko_vm_layout.off_thread_pending_exception < 0) return;
+    if (g_neko_vm_layout.off_thread_pending_exception == g_neko_vm_layout.off_java_thread_jni_environment) return;
     *(void**)((uint8_t*)thread + g_neko_vm_layout.off_thread_pending_exception) = oop;
-    if (g_neko_vm_layout.off_thread_exception_oop >= 0) {
+    if (g_neko_vm_layout.off_thread_exception_oop >= 0
+        && g_neko_vm_layout.off_thread_exception_oop != g_neko_vm_layout.off_java_thread_jni_environment) {
         *(void**)((uint8_t*)thread + g_neko_vm_layout.off_thread_exception_oop) = oop;
     }
-    if (g_neko_vm_layout.off_thread_exception_pc >= 0) {
+    if (g_neko_vm_layout.off_thread_exception_pc >= 0
+        && g_neko_vm_layout.off_thread_exception_pc != g_neko_vm_layout.off_java_thread_jni_environment) {
         *(void**)((uint8_t*)thread + g_neko_vm_layout.off_thread_exception_pc) = NULL;
     }
 }
 
 static inline void neko_clear_pending_exception(void *thread) {
     if (thread == NULL || g_neko_vm_layout.off_thread_pending_exception < 0) return;
+    if (g_neko_vm_layout.off_thread_pending_exception == g_neko_vm_layout.off_java_thread_jni_environment) return;
     *(void**)((uint8_t*)thread + g_neko_vm_layout.off_thread_pending_exception) = NULL;
-    if (g_neko_vm_layout.off_thread_exception_oop >= 0) {
+    if (g_neko_vm_layout.off_thread_exception_oop >= 0
+        && g_neko_vm_layout.off_thread_exception_oop != g_neko_vm_layout.off_java_thread_jni_environment) {
         *(void**)((uint8_t*)thread + g_neko_vm_layout.off_thread_exception_oop) = NULL;
     }
-    if (g_neko_vm_layout.off_thread_exception_pc >= 0) {
+    if (g_neko_vm_layout.off_thread_exception_pc >= 0
+        && g_neko_vm_layout.off_thread_exception_pc != g_neko_vm_layout.off_java_thread_jni_environment) {
         *(void**)((uint8_t*)thread + g_neko_vm_layout.off_thread_exception_pc) = NULL;
     }
 }
@@ -229,12 +246,172 @@ static inline jint neko_ensure_local_capacity(JNIEnv *env, jint capacity) { retu
 static inline void neko_delete_global_ref(JNIEnv *env, jobject obj) { NEKO_JNI_FN_PTR(env, 22, void, jobject)(env, obj); }
 static inline jobject neko_new_global_ref(JNIEnv *env, jobject obj) { return NEKO_JNI_FN_PTR(env, 21, jobject, jobject)(env, obj); }
 static inline void neko_delete_local_ref(JNIEnv *env, jobject obj) { NEKO_JNI_FN_PTR(env, 23, void, jobject)(env, obj); }
+static inline jthrowable neko_exception_occurred(JNIEnv *env) { return NEKO_JNI_FN_PTR(env, 15, jthrowable)(env); }
+static inline jint neko_push_local_frame(JNIEnv *env, jint capacity) { return NEKO_JNI_FN_PTR(env, 19, jint, jint)(env, capacity); }
+static inline jobject neko_pop_local_frame(JNIEnv *env, jobject result) { return NEKO_JNI_FN_PTR(env, 20, jobject, jobject)(env, result); }
+static inline JNIEnv* neko_current_env(void);
+
+typedef struct {
+    uintptr_t raw_oop;
+    jobject global_ref;
+} neko_ref_cache_entry;
+
+#define NEKO_REF_CACHE_CAPACITY (1u << 21)
+static neko_ref_cache_entry g_neko_ref_cache[NEKO_REF_CACHE_CAPACITY];
+
+static inline uint32_t neko_ref_cache_hash(uintptr_t raw) {
+    raw ^= raw >> 33;
+    raw *= (uintptr_t)0xff51afd7ed558ccdULL;
+    raw ^= raw >> 33;
+    return (uint32_t)raw;
+}
+
+static jobject neko_ref_cache_lookup(jobject raw_ref) {
+    uintptr_t raw = (uintptr_t)raw_ref;
+    uint32_t start;
+    if (raw == 0u) return NULL;
+    start = neko_ref_cache_hash(raw) & (NEKO_REF_CACHE_CAPACITY - 1u);
+    for (uint32_t i = 0; i < 64u; i++) {
+        uint32_t pos = (start + i) & (NEKO_REF_CACHE_CAPACITY - 1u);
+        uintptr_t key = __atomic_load_n(&g_neko_ref_cache[pos].raw_oop, __ATOMIC_ACQUIRE);
+        if (key == raw) return __atomic_load_n(&g_neko_ref_cache[pos].global_ref, __ATOMIC_ACQUIRE);
+        if (key == 0u) return NULL;
+    }
+    return NULL;
+}
+
+static void neko_ref_cache_store_owned_global(JNIEnv *env, jobject global, void *raw_oop) {
+    uintptr_t raw = (uintptr_t)raw_oop;
+    uint32_t start;
+    if (env == NULL || global == NULL || raw == 0u) {
+        if (env != NULL && global != NULL) neko_delete_global_ref(env, global);
+        return;
+    }
+    if (neko_ref_cache_lookup((jobject)raw) != NULL) {
+        neko_delete_global_ref(env, global);
+        return;
+    }
+    start = neko_ref_cache_hash(raw) & (NEKO_REF_CACHE_CAPACITY - 1u);
+    for (uint32_t i = 0; i < 64u; i++) {
+        uint32_t pos = (start + i) & (NEKO_REF_CACHE_CAPACITY - 1u);
+        uintptr_t key = __atomic_load_n(&g_neko_ref_cache[pos].raw_oop, __ATOMIC_ACQUIRE);
+        if (key == raw) {
+            neko_delete_global_ref(env, global);
+            return;
+        }
+        if (key == 0u) {
+            uintptr_t expected = 0u;
+            if (__atomic_compare_exchange_n(&g_neko_ref_cache[pos].raw_oop, &expected, raw, JNI_FALSE, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+                __atomic_store_n(&g_neko_ref_cache[pos].global_ref, global, __ATOMIC_RELEASE);
+                return;
+            }
+        }
+    }
+    neko_delete_global_ref(env, global);
+}
+
+static void neko_ref_cache_store_alias(void *raw_oop, jobject global) {
+    uintptr_t raw = (uintptr_t)raw_oop;
+    uint32_t start;
+    if (global == NULL || raw == 0u) return;
+    if (neko_ref_cache_lookup((jobject)raw) != NULL) return;
+    start = neko_ref_cache_hash(raw) & (NEKO_REF_CACHE_CAPACITY - 1u);
+    for (uint32_t i = 0; i < 64u; i++) {
+        uint32_t pos = (start + i) & (NEKO_REF_CACHE_CAPACITY - 1u);
+        uintptr_t key = __atomic_load_n(&g_neko_ref_cache[pos].raw_oop, __ATOMIC_ACQUIRE);
+        if (key == raw) return;
+        if (key == 0u) {
+            uintptr_t expected = 0u;
+            if (__atomic_compare_exchange_n(&g_neko_ref_cache[pos].raw_oop, &expected, raw, JNI_FALSE, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+                __atomic_store_n(&g_neko_ref_cache[pos].global_ref, global, __ATOMIC_RELEASE);
+                return;
+            }
+        }
+    }
+}
+
+static void neko_ref_cache_store(JNIEnv *env, jobject ref, void *raw_oop) {
+    jobject global;
+    if (env == NULL || ref == NULL || raw_oop == NULL) return;
+    if (neko_ref_cache_lookup((jobject)raw_oop) != NULL) return;
+    global = neko_new_global_ref(env, ref);
+    if (global == NULL) return;
+    neko_ref_cache_store_owned_global(env, global, raw_oop);
+}
+
+static inline void* neko_decode_oop_from_jni_handle(jobject ref) {
+    uintptr_t cell;
+    if (ref == NULL) return NULL;
+    cell = (uintptr_t)ref;
+    if (g_neko_vm_layout.java_spec_version >= 21 && (cell & 0x3u) == 0x2u) cell -= 2u;
+    return __atomic_load_n((void* const*)cell, __ATOMIC_ACQUIRE);
+}
+
+static inline void* neko_oop_from_jni_ref(jobject ref) {
+    JNIEnv *env;
+    jobject global = NULL;
+    jobject stable_ref;
+    void *oop;
+    if (ref == NULL) return NULL;
+    env = neko_current_env();
+    if (env != NULL) global = neko_new_global_ref(env, ref);
+    stable_ref = global != NULL ? global : ref;
+    oop = neko_decode_oop_from_jni_handle(stable_ref);
+    if (global != NULL) {
+        neko_ref_cache_store_owned_global(env, global, oop);
+    } else if (env == NULL) {
+        neko_ref_cache_store(env, ref, oop);
+    }
+    return oop;
+}
+static inline jboolean neko_probably_raw_oop_ref(jobject ref) {
+    uintptr_t value = (uintptr_t)ref;
+    return value != 0u && value < (uintptr_t)0x0000800000000000ULL ? JNI_TRUE : JNI_FALSE;
+}
+static inline jobject neko_jni_ref_for_call(jobject ref, oop *slot) {
+    jobject cached;
+    if (ref == NULL || slot == NULL) return ref;
+    if (!neko_probably_raw_oop_ref(ref)) return ref;
+    cached = neko_ref_cache_lookup(ref);
+    if (cached != NULL) {
+        void *current = neko_decode_oop_from_jni_handle(cached);
+        neko_ref_cache_store_alias(current, cached);
+        return cached;
+    }
+    *slot = (oop)ref;
+    return (jobject)slot;
+}
+static inline jobject neko_oop_for_direct(jobject ref) {
+    jobject cached;
+    if (ref == NULL) return NULL;
+    if (neko_probably_raw_oop_ref(ref)) {
+        cached = neko_ref_cache_lookup(ref);
+        if (cached != NULL) {
+            void *current = neko_decode_oop_from_jni_handle(cached);
+            neko_ref_cache_store_alias(current, cached);
+            return (jobject)current;
+        }
+        return ref;
+    }
+    return (jobject)neko_oop_from_jni_ref(ref);
+}
+static inline void neko_sync_jni_exception(JNIEnv *env) {
+    void *thread;
+    jthrowable pending;
+    void *oop;
+    if (env == NULL) return;
+    pending = neko_exception_occurred(env);
+    if (pending == NULL) return;
+    thread = neko_get_current_thread();
+    oop = neko_oop_from_jni_ref((jobject)pending);
+    if (thread != NULL && neko_pending_exception(thread) == NULL && oop != NULL) neko_set_pending_exception(thread, oop);
+}
 static inline jboolean neko_is_same_object(JNIEnv *env, jobject a, jobject b) { return NEKO_JNI_FN_PTR(env, 24, jboolean, jobject, jobject)(env, a, b); }
 static inline jobject neko_new_weak_global_ref(JNIEnv *env, jobject obj) { return NEKO_JNI_FN_PTR(env, 226, jobject, jobject)(env, obj); }
 static inline void neko_delete_weak_global_ref(JNIEnv *env, jobject obj) { NEKO_JNI_FN_PTR(env, 227, void, jobject)(env, obj); }
 static inline jobject neko_alloc_object(JNIEnv *env, jclass cls) { return NEKO_JNI_FN_PTR(env, 27, jobject, jclass)(env, cls); }
 static inline jobject neko_new_object_a(JNIEnv *env, jclass cls, jmethodID mid, const jvalue *args) { return NEKO_JNI_FN_PTR(env, 30, jobject, jclass, jmethodID, const jvalue*)(env, cls, mid, args); }
-static inline jobject neko_call_object_method_a(JNIEnv *env, jobject obj, jmethodID mid, const jvalue *args) { return NEKO_JNI_FN_PTR(env, 36, jobject, jobject, jmethodID, const jvalue*)(env, obj, mid, args); }
+static inline jobject neko_call_object_method_a(JNIEnv *env, jobject obj, jmethodID mid, const jvalue *args) { jobject r = NEKO_JNI_FN_PTR(env, 36, jobject, jobject, jmethodID, const jvalue*)(env, obj, mid, args); neko_sync_jni_exception(env); return r; }
 static inline jboolean neko_call_boolean_method_a(JNIEnv *env, jobject obj, jmethodID mid, const jvalue *args) { return NEKO_JNI_FN_PTR(env, 39, jboolean, jobject, jmethodID, const jvalue*)(env, obj, mid, args); }
 static inline jbyte neko_call_byte_method_a(JNIEnv *env, jobject obj, jmethodID mid, const jvalue *args) { return NEKO_JNI_FN_PTR(env, 42, jbyte, jobject, jmethodID, const jvalue*)(env, obj, mid, args); }
 static inline jchar neko_call_char_method_a(JNIEnv *env, jobject obj, jmethodID mid, const jvalue *args) { return NEKO_JNI_FN_PTR(env, 45, jchar, jobject, jmethodID, const jvalue*)(env, obj, mid, args); }
@@ -243,8 +420,8 @@ static inline jint neko_call_int_method_a(JNIEnv *env, jobject obj, jmethodID mi
 static inline jlong neko_call_long_method_a(JNIEnv *env, jobject obj, jmethodID mid, const jvalue *args) { return NEKO_JNI_FN_PTR(env, 54, jlong, jobject, jmethodID, const jvalue*)(env, obj, mid, args); }
 static inline jfloat neko_call_float_method_a(JNIEnv *env, jobject obj, jmethodID mid, const jvalue *args) { return NEKO_JNI_FN_PTR(env, 57, jfloat, jobject, jmethodID, const jvalue*)(env, obj, mid, args); }
 static inline jdouble neko_call_double_method_a(JNIEnv *env, jobject obj, jmethodID mid, const jvalue *args) { return NEKO_JNI_FN_PTR(env, 60, jdouble, jobject, jmethodID, const jvalue*)(env, obj, mid, args); }
-static inline void neko_call_void_method_a(JNIEnv *env, jobject obj, jmethodID mid, const jvalue *args) { NEKO_JNI_FN_PTR(env, 63, void, jobject, jmethodID, const jvalue*)(env, obj, mid, args); }
-static inline jobject neko_call_nonvirtual_object_method_a(JNIEnv *env, jobject obj, jclass cls, jmethodID mid, const jvalue *args) { return NEKO_JNI_FN_PTR(env, 66, jobject, jobject, jclass, jmethodID, const jvalue*)(env, obj, cls, mid, args); }
+static inline void neko_call_void_method_a(JNIEnv *env, jobject obj, jmethodID mid, const jvalue *args) { NEKO_JNI_FN_PTR(env, 63, void, jobject, jmethodID, const jvalue*)(env, obj, mid, args); neko_sync_jni_exception(env); }
+static inline jobject neko_call_nonvirtual_object_method_a(JNIEnv *env, jobject obj, jclass cls, jmethodID mid, const jvalue *args) { jobject r = NEKO_JNI_FN_PTR(env, 66, jobject, jobject, jclass, jmethodID, const jvalue*)(env, obj, cls, mid, args); neko_sync_jni_exception(env); return r; }
 static inline jboolean neko_call_nonvirtual_boolean_method_a(JNIEnv *env, jobject obj, jclass cls, jmethodID mid, const jvalue *args) { return NEKO_JNI_FN_PTR(env, 69, jboolean, jobject, jclass, jmethodID, const jvalue*)(env, obj, cls, mid, args); }
 static inline jbyte neko_call_nonvirtual_byte_method_a(JNIEnv *env, jobject obj, jclass cls, jmethodID mid, const jvalue *args) { return NEKO_JNI_FN_PTR(env, 72, jbyte, jobject, jclass, jmethodID, const jvalue*)(env, obj, cls, mid, args); }
 static inline jchar neko_call_nonvirtual_char_method_a(JNIEnv *env, jobject obj, jclass cls, jmethodID mid, const jvalue *args) { return NEKO_JNI_FN_PTR(env, 75, jchar, jobject, jclass, jmethodID, const jvalue*)(env, obj, cls, mid, args); }
@@ -253,7 +430,7 @@ static inline jint neko_call_nonvirtual_int_method_a(JNIEnv *env, jobject obj, j
 static inline jlong neko_call_nonvirtual_long_method_a(JNIEnv *env, jobject obj, jclass cls, jmethodID mid, const jvalue *args) { return NEKO_JNI_FN_PTR(env, 84, jlong, jobject, jclass, jmethodID, const jvalue*)(env, obj, cls, mid, args); }
 static inline jfloat neko_call_nonvirtual_float_method_a(JNIEnv *env, jobject obj, jclass cls, jmethodID mid, const jvalue *args) { return NEKO_JNI_FN_PTR(env, 87, jfloat, jobject, jclass, jmethodID, const jvalue*)(env, obj, cls, mid, args); }
 static inline jdouble neko_call_nonvirtual_double_method_a(JNIEnv *env, jobject obj, jclass cls, jmethodID mid, const jvalue *args) { return NEKO_JNI_FN_PTR(env, 90, jdouble, jobject, jclass, jmethodID, const jvalue*)(env, obj, cls, mid, args); }
-static inline void neko_call_nonvirtual_void_method_a(JNIEnv *env, jobject obj, jclass cls, jmethodID mid, const jvalue *args) { NEKO_JNI_FN_PTR(env, 93, void, jobject, jclass, jmethodID, const jvalue*)(env, obj, cls, mid, args); }
+static inline void neko_call_nonvirtual_void_method_a(JNIEnv *env, jobject obj, jclass cls, jmethodID mid, const jvalue *args) { NEKO_JNI_FN_PTR(env, 93, void, jobject, jclass, jmethodID, const jvalue*)(env, obj, cls, mid, args); neko_sync_jni_exception(env); }
 static inline jobject neko_get_object_field(JNIEnv *env, jobject obj, jfieldID fid) { return NEKO_JNI_FN_PTR(env, 95, jobject, jobject, jfieldID)(env, obj, fid); }
 static inline jboolean neko_get_boolean_field(JNIEnv *env, jobject obj, jfieldID fid) { return NEKO_JNI_FN_PTR(env, 96, jboolean, jobject, jfieldID)(env, obj, fid); }
 static inline jbyte neko_get_byte_field(JNIEnv *env, jobject obj, jfieldID fid) { return NEKO_JNI_FN_PTR(env, 97, jbyte, jobject, jfieldID)(env, obj, fid); }
@@ -272,7 +449,7 @@ static inline void neko_set_int_field(JNIEnv *env, jobject obj, jfieldID fid, ji
 static inline void neko_set_long_field(JNIEnv *env, jobject obj, jfieldID fid, jlong val) { NEKO_JNI_FN_PTR(env, 110, void, jobject, jfieldID, jlong)(env, obj, fid, val); }
 static inline void neko_set_float_field(JNIEnv *env, jobject obj, jfieldID fid, jfloat val) { NEKO_JNI_FN_PTR(env, 111, void, jobject, jfieldID, jfloat)(env, obj, fid, val); }
 static inline void neko_set_double_field(JNIEnv *env, jobject obj, jfieldID fid, jdouble val) { NEKO_JNI_FN_PTR(env, 112, void, jobject, jfieldID, jdouble)(env, obj, fid, val); }
-static inline jobject neko_call_static_object_method_a(JNIEnv *env, jclass cls, jmethodID mid, const jvalue *args) { return NEKO_JNI_FN_PTR(env, 116, jobject, jclass, jmethodID, const jvalue*)(env, cls, mid, args); }
+static inline jobject neko_call_static_object_method_a(JNIEnv *env, jclass cls, jmethodID mid, const jvalue *args) { jobject r = NEKO_JNI_FN_PTR(env, 116, jobject, jclass, jmethodID, const jvalue*)(env, cls, mid, args); neko_sync_jni_exception(env); return r; }
 static inline jboolean neko_call_static_boolean_method_a(JNIEnv *env, jclass cls, jmethodID mid, const jvalue *args) { return NEKO_JNI_FN_PTR(env, 119, jboolean, jclass, jmethodID, const jvalue*)(env, cls, mid, args); }
 static inline jbyte neko_call_static_byte_method_a(JNIEnv *env, jclass cls, jmethodID mid, const jvalue *args) { return NEKO_JNI_FN_PTR(env, 122, jbyte, jclass, jmethodID, const jvalue*)(env, cls, mid, args); }
 static inline jchar neko_call_static_char_method_a(JNIEnv *env, jclass cls, jmethodID mid, const jvalue *args) { return NEKO_JNI_FN_PTR(env, 125, jchar, jclass, jmethodID, const jvalue*)(env, cls, mid, args); }
@@ -281,7 +458,7 @@ static inline jint neko_call_static_int_method_a(JNIEnv *env, jclass cls, jmetho
 static inline jlong neko_call_static_long_method_a(JNIEnv *env, jclass cls, jmethodID mid, const jvalue *args) { return NEKO_JNI_FN_PTR(env, 134, jlong, jclass, jmethodID, const jvalue*)(env, cls, mid, args); }
 static inline jfloat neko_call_static_float_method_a(JNIEnv *env, jclass cls, jmethodID mid, const jvalue *args) { return NEKO_JNI_FN_PTR(env, 137, jfloat, jclass, jmethodID, const jvalue*)(env, cls, mid, args); }
 static inline jdouble neko_call_static_double_method_a(JNIEnv *env, jclass cls, jmethodID mid, const jvalue *args) { return NEKO_JNI_FN_PTR(env, 140, jdouble, jclass, jmethodID, const jvalue*)(env, cls, mid, args); }
-static inline void neko_call_static_void_method_a(JNIEnv *env, jclass cls, jmethodID mid, const jvalue *args) { NEKO_JNI_FN_PTR(env, 143, void, jclass, jmethodID, const jvalue*)(env, cls, mid, args); }
+static inline void neko_call_static_void_method_a(JNIEnv *env, jclass cls, jmethodID mid, const jvalue *args) { NEKO_JNI_FN_PTR(env, 143, void, jclass, jmethodID, const jvalue*)(env, cls, mid, args); neko_sync_jni_exception(env); }
 static inline jobject neko_get_static_object_field(JNIEnv *env, jclass cls, jfieldID fid) { return NEKO_JNI_FN_PTR(env, 145, jobject, jclass, jfieldID)(env, cls, fid); }
 static inline jboolean neko_get_static_boolean_field(JNIEnv *env, jclass cls, jfieldID fid) { return NEKO_JNI_FN_PTR(env, 146, jboolean, jclass, jfieldID)(env, cls, fid); }
 static inline jbyte neko_get_static_byte_field(JNIEnv *env, jclass cls, jfieldID fid) { return NEKO_JNI_FN_PTR(env, 147, jbyte, jclass, jfieldID)(env, cls, fid); }
@@ -316,6 +493,97 @@ static inline jintArray neko_new_int_array(JNIEnv *env, jsize len) { return NEKO
 static inline jlongArray neko_new_long_array(JNIEnv *env, jsize len) { return NEKO_JNI_FN_PTR(env, 180, jlongArray, jsize)(env, len); }
 static inline jfloatArray neko_new_float_array(JNIEnv *env, jsize len) { return NEKO_JNI_FN_PTR(env, 181, jfloatArray, jsize)(env, len); }
 static inline jdoubleArray neko_new_double_array(JNIEnv *env, jsize len) { return NEKO_JNI_FN_PTR(env, 182, jdoubleArray, jsize)(env, len); }
+
+typedef struct {
+    const char *owner;
+    const char *method;
+} neko_native_frame;
+
+#define NEKO_NATIVE_FRAME_STACK_MAX 256
+static _Thread_local neko_native_frame g_neko_native_frames[NEKO_NATIVE_FRAME_STACK_MAX];
+static _Thread_local uint8_t g_neko_native_local_frame_pushed[NEKO_NATIVE_FRAME_STACK_MAX];
+static _Thread_local int g_neko_native_frame_depth = 0;
+
+static inline void neko_native_frame_push(const char *owner, const char *method) {
+    int depth = g_neko_native_frame_depth;
+    JNIEnv *env;
+    uint8_t local_frame_pushed = 0u;
+    if (depth < 0) depth = 0;
+    if (depth < NEKO_NATIVE_FRAME_STACK_MAX) {
+        env = neko_current_env();
+        if (env != NULL && neko_push_local_frame(env, 8192) == 0) {
+            local_frame_pushed = 1u;
+        }
+        g_neko_native_frames[depth].owner = owner;
+        g_neko_native_frames[depth].method = method;
+        g_neko_native_local_frame_pushed[depth] = local_frame_pushed;
+    }
+    g_neko_native_frame_depth = depth + 1;
+}
+
+static inline void neko_native_frame_pop(void) {
+    if (g_neko_native_frame_depth > 0) {
+        int depth = g_neko_native_frame_depth - 1;
+        if (depth >= 0 && depth < NEKO_NATIVE_FRAME_STACK_MAX) {
+            if (g_neko_native_local_frame_pushed[depth] != 0u) {
+                JNIEnv *env = neko_current_env();
+                if (env != NULL) (void)neko_pop_local_frame(env, NULL);
+            }
+            g_neko_native_local_frame_pushed[depth] = 0u;
+        }
+        g_neko_native_frame_depth = depth;
+    }
+}
+
+static jstring neko_native_frame_owner_string(JNIEnv *env, const char *owner) {
+    char dotted[512];
+    size_t i;
+    if (owner == NULL) return neko_new_string_utf(env, "");
+    for (i = 0; owner[i] != '\\0' && i + 1u < sizeof(dotted); i++) {
+        dotted[i] = owner[i] == '/' ? '.' : owner[i];
+    }
+    dotted[i] = '\\0';
+    return neko_new_string_utf(env, dotted);
+}
+
+static jobjectArray neko_native_stack_trace_array(JNIEnv *env) {
+    static jclass g_ste_cls = NULL;
+    static jmethodID g_ste_ctor = NULL;
+    int depth;
+    int count;
+    jclass ste_cls;
+    jmethodID ctor;
+    jobjectArray array;
+    if (env == NULL) return NULL;
+    ste_cls = NEKO_ENSURE_CLASS(g_ste_cls, env, "java/lang/StackTraceElement");
+    if (ste_cls == NULL) return NULL;
+    ctor = NEKO_ENSURE_METHOD_ID(g_ste_ctor, env, ste_cls, "<init>", "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;I)V");
+    if (ctor == NULL) return NULL;
+    depth = g_neko_native_frame_depth;
+    if (depth < 0) depth = 0;
+    count = depth > NEKO_NATIVE_FRAME_STACK_MAX ? NEKO_NATIVE_FRAME_STACK_MAX : depth;
+    array = neko_new_object_array(env, count, ste_cls, NULL);
+    if (array == NULL) return NULL;
+    for (int i = 0; i < count; i++) {
+        int frame_index = depth - 1 - i;
+        const char *owner = frame_index >= 0 && frame_index < NEKO_NATIVE_FRAME_STACK_MAX ? g_neko_native_frames[frame_index].owner : NULL;
+        const char *method = frame_index >= 0 && frame_index < NEKO_NATIVE_FRAME_STACK_MAX ? g_neko_native_frames[frame_index].method : NULL;
+        jvalue args[4];
+        jobject element;
+        args[0].l = neko_native_frame_owner_string(env, owner);
+        args[1].l = neko_new_string_utf(env, method == NULL ? "" : method);
+        args[2].l = NULL;
+        args[3].i = -1;
+        element = neko_new_object_a(env, ste_cls, ctor, args);
+        neko_sync_jni_exception(env);
+        if (element == NULL || neko_exception_occurred(env) != NULL) return array;
+        neko_set_object_array_element(env, array, i, element);
+        neko_sync_jni_exception(env);
+        if (neko_exception_occurred(env) != NULL) return array;
+    }
+    return array;
+}
+
 static inline void neko_get_boolean_array_region(JNIEnv *env, jbooleanArray arr, jsize start, jsize len, jboolean *buf) { NEKO_JNI_FN_PTR(env, 199, void, jbooleanArray, jsize, jsize, jboolean*)(env, arr, start, len, buf); }
 static inline void neko_get_byte_array_region(JNIEnv *env, jbyteArray arr, jsize start, jsize len, jbyte *buf) { NEKO_JNI_FN_PTR(env, 200, void, jbyteArray, jsize, jsize, jbyte*)(env, arr, start, len, buf); }
 static inline void neko_get_char_array_region(JNIEnv *env, jcharArray arr, jsize start, jsize len, jchar *buf) { NEKO_JNI_FN_PTR(env, 201, void, jcharArray, jsize, jsize, jchar*)(env, arr, start, len, buf); }
@@ -688,42 +956,55 @@ static jobject neko_call_mh(JNIEnv *env, jobject mh, jobjectArray args) {
 
 static jstring neko_string_null(JNIEnv *env) {
     static jstring g_str_null = NULL;
-    return NEKO_ENSURE_STRING(g_str_null, env, "null");
+    return (jstring)neko_oop_from_jni_ref((jobject)NEKO_ENSURE_STRING(g_str_null, env, "null"));
 }
 
 static jstring neko_string_concat2(JNIEnv *env, jobject left, jobject right) {
     static jclass g_str_cls = NULL;
     static jmethodID g_str_value_of = NULL;
     static jmethodID g_str_concat = NULL;
+    oop left_slot = NULL;
+    oop right_slot = NULL;
+    jobject left_ref;
+    jobject right_ref;
+    jobject concat_result;
     jclass cls = NEKO_ENSURE_CLASS(g_str_cls, env, "java/lang/String");
     jmethodID valueOf = NEKO_ENSURE_STATIC_METHOD_ID(g_str_value_of, env, cls, "valueOf", "(Ljava/lang/Object;)Ljava/lang/String;");
     jmethodID concat = NEKO_ENSURE_METHOD_ID(g_str_concat, env, cls, "concat", "(Ljava/lang/String;)Ljava/lang/String;");
     jvalue valueOfArgs[1];
-    valueOfArgs[0].l = left;
+    left_ref = neko_jni_ref_for_call(left, &left_slot);
+    right_ref = neko_jni_ref_for_call(right, &right_slot);
+    valueOfArgs[0].l = left_ref;
     jstring lhs = (jstring)neko_call_static_object_method_a(env, cls, valueOf, valueOfArgs);
-    valueOfArgs[0].l = right;
+    neko_sync_jni_exception(env);
+    valueOfArgs[0].l = right_ref;
     jstring rhs = (jstring)neko_call_static_object_method_a(env, cls, valueOf, valueOfArgs);
+    neko_sync_jni_exception(env);
     jvalue concatArgs[1];
     concatArgs[0].l = rhs;
-    return (jstring)neko_call_object_method_a(env, lhs, concat, concatArgs);
+    concat_result = neko_call_object_method_a(env, lhs, concat, concatArgs);
+    neko_sync_jni_exception(env);
+    return (jstring)neko_oop_from_jni_ref(concat_result);
 }
 
 static jstring neko_string_concat_string(JNIEnv *env, jobject left, jstring right) {
     static jclass g_str_cls2 = NULL;
     static jmethodID g_str_value_of2 = NULL;
     static jmethodID g_str_concat2 = NULL;
+    oop left_slot = NULL;
+    oop right_slot = NULL;
+    jobject right_ref;
+    jobject concat_result;
     jclass cls = NEKO_ENSURE_CLASS(g_str_cls2, env, "java/lang/String");
-    jmethodID valueOf = NEKO_ENSURE_STATIC_METHOD_ID(g_str_value_of2, env, cls, "valueOf", "(Ljava/lang/Object;)Ljava/lang/String;");
+    (void)g_str_value_of2;
     jmethodID concat = NEKO_ENSURE_METHOD_ID(g_str_concat2, env, cls, "concat", "(Ljava/lang/String;)Ljava/lang/String;");
-    jstring lhs;
-    if (left == NULL) {
-        lhs = neko_string_null(env);
-    } else {
-        lhs = (jstring)left;
-    }
+    jstring lhs = (jstring)neko_jni_ref_for_call(left == NULL ? (jobject)neko_string_null(env) : left, &left_slot);
     jvalue concatArgs[1];
-    concatArgs[0].l = right == NULL ? neko_string_null(env) : right;
-    return (jstring)neko_call_object_method_a(env, lhs, concat, concatArgs);
+    right_ref = neko_jni_ref_for_call(right == NULL ? (jobject)neko_string_null(env) : (jobject)right, &right_slot);
+    concatArgs[0].l = right_ref;
+    concat_result = neko_call_object_method_a(env, lhs, concat, concatArgs);
+    neko_sync_jni_exception(env);
+    return (jstring)neko_oop_from_jni_ref(concat_result);
 }
 
 static jobject neko_resolve_indy(JNIEnv *env, jlong site_id, const char *caller_owner, const char *indy_name, const char *indy_desc, const char *bsm_owner, const char *bsm_name, const char *bsm_desc, jobjectArray static_args) {
@@ -859,12 +1140,31 @@ NEKO_FAST_INLINE void* neko_handle_oop(jobject handle) {
     return slot == NULL ? NULL : *slot;
 }
 
-NEKO_FAST_INLINE jint neko_fast_array_length(JNIEnv *env, jarray arr) {
-    return (jint)neko_get_array_length(env, arr);
+NEKO_FAST_INLINE void* neko_current_oop_for_fast_access(jobject ref) {
+    jobject cached;
+    if (ref == NULL) return NULL;
+    if (neko_probably_raw_oop_ref(ref)) {
+        cached = neko_ref_cache_lookup(ref);
+        if (cached != NULL) {
+            void *current = neko_handle_oop(cached);
+            neko_ref_cache_store_alias(current, cached);
+            return current;
+        }
+        return (void*)ref;
+    }
+    return neko_handle_oop(ref);
 }
 
-NEKO_FAST_INLINE jint neko_raw_array_length(void *array_oop) {
+NEKO_FAST_INLINE jint neko_fast_array_length(JNIEnv *env, jarray arr) {
+    oop arrSlot = NULL;
+    jarray arrRef = (jarray)neko_jni_ref_for_call((jobject)arr, &arrSlot);
+    return (jint)neko_get_array_length(env, arrRef);
+}
+
+NEKO_FAST_INLINE jint neko_raw_array_length(void *array_oop_ref) {
+    void *array_oop;
     jint base_offset;
+    array_oop = neko_current_oop_for_fast_access((jobject)array_oop_ref);
     if (array_oop == NULL || !g_hotspot.initialized) return 0;
     base_offset = g_hotspot.primitive_array_base_offsets[NEKO_PRIM_I];
     if (base_offset < (jint)sizeof(jint)) return 0;
@@ -872,16 +1172,14 @@ NEKO_FAST_INLINE jint neko_raw_array_length(void *array_oop) {
 }
 
 NEKO_FAST_INLINE jboolean neko_receiver_key_supported(void) {
-    return g_hotspot.initialized
-        && g_hotspot.use_compact_object_headers == JNI_FALSE
-        && (g_hotspot.fast_bits & NEKO_FAST_RECEIVER_KEY) != 0;
+    return JNI_FALSE;
 }
 
 NEKO_FAST_INLINE uintptr_t neko_receiver_key(jobject obj) {
     char *oop;
     char *klassAddr;
     if (obj == NULL || !neko_receiver_key_supported()) return (uintptr_t)0;
-    oop = (char*)neko_handle_oop(obj);
+    oop = (char*)neko_current_oop_for_fast_access(obj);
     if (oop == NULL || g_hotspot.klass_offset_bytes <= 0) return (uintptr_t)0;
     klassAddr = oop + g_hotspot.klass_offset_bytes;
     if (g_hotspot.use_compressed_klass_ptrs) {
@@ -895,7 +1193,7 @@ NEKO_FAST_INLINE void* neko_receiver_klass(jobject obj) {
     char *klassAddr;
     uintptr_t narrow;
     if (obj == NULL || !neko_receiver_key_supported()) return NULL;
-    oop = (char*)neko_handle_oop(obj);
+    oop = (char*)neko_current_oop_for_fast_access(obj);
     if (oop == NULL || g_hotspot.klass_offset_bytes <= 0) return NULL;
     klassAddr = oop + g_hotspot.klass_offset_bytes;
     if (g_hotspot.use_compressed_klass_ptrs) {
@@ -980,8 +1278,9 @@ static jvalue neko_icache_call_virtual(JNIEnv *env, jobject receiver, jmethodID 
         case 'J': result.j = neko_call_long_method_a(env, receiver, mid, args); break;
         case 'F': result.f = neko_call_float_method_a(env, receiver, mid, args); break;
         case 'D': result.d = neko_call_double_method_a(env, receiver, mid, args); break;
-        default: result.l = neko_call_object_method_a(env, receiver, mid, args); break;
+        default: { jobject obj = neko_call_object_method_a(env, receiver, mid, args); neko_sync_jni_exception(env); result.l = (jobject)neko_oop_from_jni_ref(obj); break; }
     }
+    neko_sync_jni_exception(env);
     return result;
 }
 
@@ -997,8 +1296,9 @@ static jvalue neko_icache_call_nonvirtual(JNIEnv *env, jobject receiver, jclass 
         case 'J': result.j = neko_call_nonvirtual_long_method_a(env, receiver, klass, mid, args); break;
         case 'F': result.f = neko_call_nonvirtual_float_method_a(env, receiver, klass, mid, args); break;
         case 'D': result.d = neko_call_nonvirtual_double_method_a(env, receiver, klass, mid, args); break;
-        default: result.l = neko_call_nonvirtual_object_method_a(env, receiver, klass, mid, args); break;
+        default: { jobject obj = neko_call_nonvirtual_object_method_a(env, receiver, klass, mid, args); neko_sync_jni_exception(env); result.l = (jobject)neko_oop_from_jni_ref(obj); break; }
     }
+    neko_sync_jni_exception(env);
     return result;
 }
 
@@ -1035,6 +1335,31 @@ NEKO_FAST_INLINE jboolean neko_icache_note_miss(JNIEnv *env, neko_icache_site *s
     return JNI_TRUE;
 }
 
+static const jvalue* neko_prepare_jni_args_for_call(const char *desc, const jvalue *args, jvalue *prepared, oop *slots, int max_slots) {
+    const char *p;
+    int arg_index = 0;
+    int slot_index = 0;
+    if (desc == NULL || args == NULL || prepared == NULL || slots == NULL || max_slots <= 0) return args;
+    p = desc;
+    if (*p != '(') return args;
+    p++;
+    while (*p != '\\0' && *p != ')' && arg_index < max_slots) {
+        char kind = *p;
+        prepared[arg_index] = args[arg_index];
+        if (kind == 'L') {
+            while (*p != '\\0' && *p != ';') p++;
+            if (slot_index < max_slots) prepared[arg_index].l = neko_jni_ref_for_call(args[arg_index].l, &slots[slot_index++]);
+        } else if (kind == '[') {
+            while (*p == '[') p++;
+            if (*p == 'L') while (*p != '\\0' && *p != ';') p++;
+            if (slot_index < max_slots) prepared[arg_index].l = neko_jni_ref_for_call(args[arg_index].l, &slots[slot_index++]);
+        }
+        if (*p != '\\0') p++;
+        arg_index++;
+    }
+    return prepared;
+}
+
 static jvalue neko_icache_dispatch(
     JNIEnv *env,
     neko_icache_site *site,
@@ -1044,9 +1369,24 @@ static jvalue neko_icache_dispatch(
     const jvalue *args
 ) {
     jvalue result = {0};
+    oop receiver_slot = NULL;
+    oop arg_slots[16] = {0};
+    jvalue prepared_args[16];
+    jobject call_receiver;
+    const jvalue *call_args;
     uintptr_t receiverKey;
     if (env == NULL || receiver == NULL || fallback_mid == NULL) return result;
+    call_receiver = neko_jni_ref_for_call(receiver, &receiver_slot);
+    call_args = neko_prepare_jni_args_for_call(meta != NULL ? meta->desc : NULL, args, prepared_args, arg_slots, 16);
     neko_maybe_rescan_cld_liveness();
+    if (meta != NULL && meta->translated_class_slot != NULL && meta->translated_stub != NULL) {
+        jclass translatedClass = *meta->translated_class_slot;
+        void *translatedKlass = translatedClass != NULL ? neko_class_klass_pointer(translatedClass) : NULL;
+        void *receiverKlass = translatedKlass != NULL ? neko_receiver_klass(receiver) : NULL;
+        if (receiverKlass != NULL && receiverKlass == translatedKlass) {
+            return meta->translated_stub(env, receiver, args);
+        }
+    }
     if (site != NULL && neko_receiver_key_supported()) {
         receiverKey = neko_receiver_key(receiver);
         if (receiverKey != 0 && site->target_kind != NEKO_ICACHE_MEGA) {
@@ -1055,11 +1395,11 @@ static jvalue neko_icache_dispatch(
                     return ((neko_icache_direct_stub)site->target)(env, receiver, args);
                 }
                 if (site->target_kind == NEKO_ICACHE_NONVIRT_MID && site->cached_class != NULL && site->target != NULL) {
-                    return neko_icache_call_nonvirtual(env, receiver, site->cached_class, (jmethodID)site->target, args, meta != NULL ? meta->desc : NULL);
+                    return neko_icache_call_nonvirtual(env, call_receiver, site->cached_class, (jmethodID)site->target, call_args, meta != NULL ? meta->desc : NULL);
                 }
             }
             if (!neko_icache_note_miss(env, site)) {
-                jclass exactClass = neko_get_object_class(env, receiver);
+                jclass exactClass = neko_get_object_class(env, call_receiver);
                 if (exactClass != NULL) {
                     jclass translatedClass = (meta != NULL && meta->translated_class_slot != NULL) ? *meta->translated_class_slot : NULL;
                     if (translatedClass != NULL && meta != NULL && meta->translated_stub != NULL && neko_is_same_object(env, exactClass, translatedClass)) {
@@ -1074,7 +1414,7 @@ static jvalue neko_icache_dispatch(
                         if (cachedExactClass != NULL) {
                             neko_icache_store_nonvirt(env, site, receiverKey, cachedExactClass, exactMid);
                         }
-                        result = neko_icache_call_nonvirtual(env, receiver, cachedExactClass != NULL ? cachedExactClass : exactClass, exactMid, args, meta != NULL ? meta->desc : NULL);
+                        result = neko_icache_call_nonvirtual(env, call_receiver, cachedExactClass != NULL ? cachedExactClass : exactClass, exactMid, call_args, meta != NULL ? meta->desc : NULL);
                         neko_delete_local_ref(env, exactClass);
                         return result;
                     }
@@ -1083,7 +1423,18 @@ static jvalue neko_icache_dispatch(
             }
         }
     }
-    return neko_icache_call_virtual(env, receiver, fallback_mid, args, meta != NULL ? meta->desc : NULL);
+    if (meta != NULL && meta->translated_class_slot != NULL && meta->translated_stub != NULL) {
+        jclass translatedClass = *meta->translated_class_slot;
+        if (translatedClass != NULL) {
+            jclass exactClass = neko_get_object_class(env, call_receiver);
+            if (exactClass != NULL && neko_is_same_object(env, exactClass, translatedClass)) {
+                neko_delete_local_ref(env, exactClass);
+                return meta->translated_stub(env, receiver, args);
+            }
+            if (exactClass != NULL) neko_delete_local_ref(env, exactClass);
+        }
+    }
+    return neko_icache_call_virtual(env, call_receiver, fallback_mid, call_args, meta != NULL ? meta->desc : NULL);
 }
 
 """);
@@ -1153,7 +1504,9 @@ static jvalue neko_icache_dispatch(
             .append("        }\n")
             .append("    }\n")
             .append("    { ").append(cType).append(" value = (").append(cType).append(")0;\n")
-            .append("        neko_get_").append(wrapperStem).append("_array_region(env, (").append(cTypeForArray(prefix)).append(")arr, idx, 1, &value);\n")
+            .append("        oop arrSlot = NULL;\n")
+            .append("        ").append(cTypeForArray(prefix)).append(" arrRef = (").append(cTypeForArray(prefix)).append(")neko_jni_ref_for_call((jobject)arr, &arrSlot);\n")
+            .append("        neko_get_").append(wrapperStem).append("_array_region(env, arrRef, idx, 1, &value);\n")
             .append("        return value;\n")
             .append("    }\n")
             .append("}\n\n")
@@ -1168,7 +1521,9 @@ static jvalue neko_icache_dispatch(
             .append("            return;\n")
             .append("        }\n")
             .append("    }\n")
-            .append("    neko_set_").append(wrapperStem).append("_array_region(env, (").append(cTypeForArray(prefix)).append(")arr, idx, 1, &value);\n")
+            .append("    oop arrSlot = NULL;\n")
+            .append("    ").append(cTypeForArray(prefix)).append(" arrRef = (").append(cTypeForArray(prefix)).append(")neko_jni_ref_for_call((jobject)arr, &arrSlot);\n")
+            .append("    neko_set_").append(wrapperStem).append("_array_region(env, arrRef, idx, 1, &value);\n")
             .append("}\n\n");
     }
 

@@ -254,6 +254,7 @@ static void neko_log_offset_strategy(const char *label, ptrdiff_t offset, char s
 }
 
 static void neko_derive_wave2_layout_offsets(JNIEnv *env);
+static void neko_bind_owner_by_internal_name(JNIEnv *env, const char *owner_internal, jclass self_class);
 static void neko_resolve_prepared_class_field_sites(JNIEnv *env, jclass klass, const char *owner_internal, void *owner_klass);
 static jboolean neko_prewarm_ldc_sites(JNIEnv *env);
 static void neko_publish_prepared_ldc_class_site(JNIEnv *env, jclass klass, const char *signature, void *prepared_klass);
@@ -1493,6 +1494,10 @@ static void neko_invalidate_manifest_method_index(uint32_t index, jboolean redef
 static jboolean neko_manifest_method_active(uint32_t index) {
     void *method_star;
     if (index >= g_neko_manifest_method_count) return JNI_FALSE;
+    if (__atomic_load_n(&g_neko_manifest_patch_states[index], __ATOMIC_ACQUIRE) != NEKO_PATCH_STATE_APPLIED
+        || __atomic_load_n(&g_neko_manifest_method_stars[index], __ATOMIC_ACQUIRE) == NULL) {
+        neko_bootstrap_owner_discovery();
+    }
     if (__atomic_load_n(&g_neko_manifest_patch_states[index], __ATOMIC_ACQUIRE) != NEKO_PATCH_STATE_APPLIED) return JNI_FALSE;
     method_star = __atomic_load_n(&g_neko_manifest_method_stars[index], __ATOMIC_ACQUIRE);
     if (method_star == NULL) return JNI_FALSE;
@@ -2051,6 +2056,44 @@ static void neko_bootstrap_owner_discovery(void) {
         }
         if (!matched) {
             NEKO_TRACE(1, "[nk] dx method_miss idx=%u %s.%s%s", i, entry->owner_internal, entry->method_name, entry->method_desc);
+        }
+    }
+    (void)neko_refresh_cld_snapshot_and_detect_unload();
+}
+
+static void neko_bootstrap_class_discovery(JNIEnv *env, jclass klass) {
+    Klass *owner_klass;
+    void *methods;
+    int32_t method_count;
+    if (env == NULL || klass == NULL) {
+        neko_bootstrap_owner_discovery();
+        return;
+    }
+    owner_klass = (Klass*)neko_class_klass_pointer(klass);
+    if (owner_klass == NULL) {
+        neko_bootstrap_owner_discovery();
+        return;
+    }
+    methods = neko_instance_klass_methods_array(owner_klass);
+    method_count = neko_array_length(methods);
+    for (uint32_t i = 0; i < g_neko_manifest_method_count; i++) {
+        const NekoManifestMethod *entry = &g_neko_manifest_methods[i];
+        size_t owner_len;
+        size_t name_len;
+        size_t desc_len;
+        if (entry->owner_internal == NULL || entry->method_name == NULL || entry->method_desc == NULL) continue;
+        owner_len = strlen(entry->owner_internal);
+        if (owner_len >= 65536u) continue;
+        if (neko_find_klass_by_name_in_cld_graph(entry->owner_internal, (uint16_t)owner_len) != owner_klass) continue;
+        neko_bind_owner_by_internal_name(env, entry->owner_internal, klass);
+        name_len = strlen(entry->method_name);
+        desc_len = strlen(entry->method_desc);
+        if (name_len >= 65536u || desc_len >= 65536u) continue;
+        for (int32_t method_index = 0; method_index < method_count; method_index++) {
+            void *method_star = neko_method_array_at(methods, method_index);
+            if (!neko_method_matches_manifest_entry(method_star, entry, (uint16_t)name_len, (uint16_t)desc_len)) continue;
+            neko_record_manifest_match(i, method_star);
+            break;
         }
     }
     (void)neko_refresh_cld_snapshot_and_detect_unload();

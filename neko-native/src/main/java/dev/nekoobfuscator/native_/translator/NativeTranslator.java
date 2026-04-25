@@ -121,6 +121,7 @@ public final class NativeTranslator {
         Map<Integer, List<TryHandler>> activeHandlers = buildActiveHandlers(method, labelMap, pcMap);
 
         emitParamToLocals(fn, method, argTypes);
+        fn.addStatement(new CStatement.RawC("neko_native_frame_push(\"" + c(selection.owner().name()) + "\", \"" + c(selection.method().name()) + "\");"));
         opcodes.beginMethod(selection.owner().name(), selection.method().name(), selection.method().descriptor(), selection.method().isStatic());
 
         for (AbstractInsnNode insn = node.instructions.getFirst(); insn != null; insn = insn.getNext()) {
@@ -132,30 +133,54 @@ public final class NativeTranslator {
                 continue;
             }
             StringConcatPattern concatPattern = renderedStringConcatPattern(insn);
+            boolean potentiallyExcepting = isRealInsn(insn) && isPotentiallyExcepting(insn);
+            Integer pc = pcMap.get(insn);
+            List<TryHandler> handlers = potentiallyExcepting ? activeHandlers.getOrDefault(pc, List.of()) : List.of();
+            String protectedDispatchLabel = !handlers.isEmpty() ? "__neko_exception_dispatch_" + pc : null;
+            String protectedAfterLabel = !handlers.isEmpty() ? "__neko_exception_after_" + pc : null;
+
             if (insn instanceof JumpInsnNode jumpInsn) {
-                fn.addStatement(opcodes.translateJump(jumpInsn, labelMap.get(jumpInsn.label)));
+                addTranslatedStatement(fn, opcodes.translateJump(jumpInsn, labelMap.get(jumpInsn.label)), protectedDispatchLabel);
             } else if (insn instanceof TableSwitchInsnNode tableSwitchInsn) {
-                fn.addStatement(new CStatement.RawC(renderTableSwitch(tableSwitchInsn, labelMap)));
+                addTranslatedStatement(fn, new CStatement.RawC(renderTableSwitch(tableSwitchInsn, labelMap)), protectedDispatchLabel);
             } else if (insn instanceof LookupSwitchInsnNode lookupSwitchInsn) {
-                fn.addStatement(new CStatement.RawC(renderLookupSwitch(lookupSwitchInsn, labelMap)));
+                addTranslatedStatement(fn, new CStatement.RawC(renderLookupSwitch(lookupSwitchInsn, labelMap)), protectedDispatchLabel);
             } else if (concatPattern != null) {
-                fn.addStatement(new CStatement.RawC(concatPattern.code));
+                addTranslatedStatement(fn, new CStatement.RawC(concatPattern.code), protectedDispatchLabel);
                 insn = concatPattern.lastInsn;
             } else {
                 for (CStatement statement : opcodes.translate(insn)) {
-                    fn.addStatement(statement);
+                    addTranslatedStatement(fn, statement, protectedDispatchLabel);
                 }
             }
 
-            if (isRealInsn(insn) && isPotentiallyExcepting(insn)) {
-                List<TryHandler> handlers = activeHandlers.getOrDefault(pcMap.get(insn), List.of());
-                fn.addStatement(new CStatement.RawC(renderExceptionDispatch(handlers)));
+            if (potentiallyExcepting) {
+                if (protectedDispatchLabel != null) {
+                    fn.addStatement(new CStatement.RawC("if (neko_pending_exception(thread) != NULL) goto " + protectedDispatchLabel + "; goto " + protectedAfterLabel + ";"));
+                    fn.addStatement(new CStatement.Label(protectedDispatchLabel));
+                    fn.addStatement(new CStatement.RawC(renderProtectedExceptionDispatch(handlers)));
+                    fn.addStatement(new CStatement.Label(protectedAfterLabel));
+                } else {
+                    fn.addStatement(new CStatement.RawC(renderExceptionDispatch(handlers)));
+                }
             }
         }
 
         fn.addStatement(new CStatement.Label("__neko_exception_exit"));
         emitDefaultReturn(fn, cReturnType);
         return fn;
+    }
+
+    private void addTranslatedStatement(CFunction fn, CStatement statement, String exceptionDispatchLabel) {
+        if (exceptionDispatchLabel != null && statement instanceof CStatement.RawC raw) {
+            fn.addStatement(new CStatement.RawC(raw.code().replace("goto __neko_exception_exit;", "goto " + exceptionDispatchLabel + ";")));
+            return;
+        }
+        fn.addStatement(statement);
+    }
+
+    private String renderProtectedExceptionDispatch(List<TryHandler> handlers) {
+        return "if (neko_pending_exception(thread) == NULL) goto __neko_exception_exit; " + renderExceptionDispatch(handlers);
     }
 
     private Map<LabelNode, String> buildLabelMap(MethodNode node) {
@@ -209,11 +234,15 @@ public final class NativeTranslator {
     private void emitParamToLocals(CFunction fn, L1Method method, Type[] argTypes) {
         int localIndex = 0;
         if (!method.isStatic()) {
-            fn.addStatement(new CStatement.RawC("locals[0].o = _this;"));
+            fn.addStatement(new CStatement.RawC("locals[0].o = neko_oop_for_direct((jobject)_this);"));
             localIndex = 1;
         }
         for (int i = 0; i < argTypes.length; i++) {
-            fn.addStatement(new CStatement.RawC("locals[" + localIndex + "]." + slotField(argTypes[i]) + " = p" + i + ";"));
+            if (argTypes[i].getSort() == Type.OBJECT || argTypes[i].getSort() == Type.ARRAY) {
+                fn.addStatement(new CStatement.RawC("locals[" + localIndex + "].o = neko_oop_for_direct((jobject)p" + i + ");"));
+            } else {
+                fn.addStatement(new CStatement.RawC("locals[" + localIndex + "]." + slotField(argTypes[i]) + " = p" + i + ";"));
+            }
             localIndex += argTypes[i].getSize();
         }
     }
@@ -277,6 +306,9 @@ public final class NativeTranslator {
     }
 
     private StringConcatPattern renderedStringConcatPattern(AbstractInsnNode start) {
+        if (!isStringBuilderConcatPeepholeEnabled()) {
+            return null;
+        }
         if (!(start instanceof org.objectweb.asm.tree.TypeInsnNode newInsn)
             || start.getOpcode() != Opcodes.NEW
             || !"java/lang/StringBuilder".equals(newInsn.desc)) {
@@ -328,8 +360,8 @@ public final class NativeTranslator {
         if (second instanceof LdcInsnNode ldcInsn && ldcInsn.cst instanceof String s) {
             String literalVar = "__neko_concat_lit_" + Integer.toUnsignedString(s.hashCode(), 16);
             code = "{ static jstring " + literalVar + " = NULL; if (" + literalVar + " == NULL) { " + literalVar
-                + " = (jstring)neko_new_global_ref(env, neko_new_string_utf(env, \"" + c(s) + "\")); } PUSH_O(neko_string_concat_string(env, "
-                + firstExpr + ", " + literalVar + ")); }";
+                + " = (jstring)neko_new_global_ref(env, neko_new_string_utf(env, \"" + c(s) + "\")); (void)neko_oop_from_jni_ref((jobject)" + literalVar + "); } PUSH_O(neko_string_concat_string(env, "
+                + firstExpr + ", (jstring)neko_oop_from_jni_ref((jobject)" + literalVar + "))); }";
         } else {
             String secondExpr = stringProducerExpression(second);
             if (secondExpr == null) {
@@ -338,6 +370,10 @@ public final class NativeTranslator {
             code = "{ PUSH_O(neko_string_concat2(env, " + firstExpr + ", " + secondExpr + ")); }";
         }
         return new StringConcatPattern(code, toString);
+    }
+
+    private boolean isStringBuilderConcatPeepholeEnabled() {
+        return false;
     }
 
     private AbstractInsnNode nextRealInsn(AbstractInsnNode insn) {
@@ -354,7 +390,7 @@ public final class NativeTranslator {
             return "locals[" + varInsn.var + "].o";
         }
         if (insn instanceof LdcInsnNode ldcInsn && ldcInsn.cst instanceof String s) {
-            return "neko_new_string_utf(env, \"" + c(s) + "\")";
+            return "neko_oop_from_jni_ref((jobject)neko_new_string_utf(env, \"" + c(s) + "\"))";
         }
         return null;
     }
@@ -386,13 +422,13 @@ public final class NativeTranslator {
             sb.append("goto __neko_exception_exit; }");
             return sb.toString();
         }
-        sb.append("void *__exc = neko_pending_exception(thread); neko_clear_pending_exception(thread); ");
+        sb.append("void *__exc = neko_pending_exception(thread); neko_clear_pending_exception(thread); oop __exc_slot = NULL; jobject __exc_ref = neko_jni_ref_for_call((jobject)__exc, &__exc_slot); ");
         for (TryHandler handler : handlers) {
             if (handler.exceptionType == null) {
                 sb.append("sp = 0; PUSH_O(__exc); goto ").append(handler.handlerLabel).append("; ");
             } else {
                 sb.append("{ jclass __hcls = neko_find_class(env, \"").append(c(handler.exceptionType)).append("\"); ");
-                sb.append("if (__hcls != NULL && neko_is_instance_of(env, __exc, __hcls)) { sp = 0; PUSH_O(__exc); goto ").append(handler.handlerLabel).append("; } }");
+                sb.append("if (__hcls != NULL && neko_is_instance_of(env, __exc_ref, __hcls)) { sp = 0; PUSH_O(__exc); goto ").append(handler.handlerLabel).append("; } }");
             }
         }
         sb.append("neko_set_pending_exception(thread, __exc); goto __neko_exception_exit; }");
@@ -445,6 +481,7 @@ public final class NativeTranslator {
     }
 
     private void emitDefaultReturn(CFunction function, CType returnType) {
+        function.addStatement(new CStatement.RawC("neko_native_frame_pop();"));
         switch (returnType) {
             case VOID -> function.addStatement(new CStatement.ReturnVoid());
             case JLONG -> function.addStatement(new CStatement.RawC("return 0;"));

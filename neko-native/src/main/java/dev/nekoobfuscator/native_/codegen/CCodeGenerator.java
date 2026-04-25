@@ -286,7 +286,9 @@ public final class CCodeGenerator {
         sb.append("#include <stdlib.h>\n");
         sb.append("#include <string.h>\n");
         sb.append("#include <stdarg.h>\n");
-        sb.append("#include <math.h>\n\n");
+        sb.append("#include <math.h>\n");
+        sb.append("#include <time.h>\n");
+        sb.append("#include <errno.h>\n\n");
         sb.append("#if defined(_WIN32)\n");
         sb.append("#include <windows.h>\n");
         sb.append("#include <psapi.h>\n");
@@ -331,6 +333,12 @@ public final class CCodeGenerator {
             #define NEKO_TRACE(level, ...) do { if (neko_debug_level >= (level)) fprintf(stderr, __VA_ARGS__); } while(0)
             #else
             #define NEKO_TRACE(level, ...) ((void)0)
+            #endif
+
+            #if defined(__i386__) || defined(__x86_64__)
+            #define NEKO_FORCE_ALIGN_STACK __attribute__((force_align_arg_pointer))
+            #else
+            #define NEKO_FORCE_ALIGN_STACK
             #endif
 
             typedef struct NekoVmLayout {
@@ -546,6 +554,7 @@ public final class CCodeGenerator {
             static jint neko_throw_cached(JNIEnv *env, jthrowable cached);
             static jboolean neko_init_throwable_cache(JNIEnv *env);
             static void neko_bootstrap_owner_discovery(void);
+            static void neko_bootstrap_class_discovery(JNIEnv *env, jclass klass);
             static void neko_maybe_rescan_cld_liveness(void);
             static inline oop neko_resolve_mirror_oop_from_klass(const NekoVmLayout *layout, Klass *klass);
             static void* neko_find_boot_class_loader_data(void);

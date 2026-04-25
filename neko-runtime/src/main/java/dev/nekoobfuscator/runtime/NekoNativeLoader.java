@@ -13,12 +13,20 @@ public final class NekoNativeLoader {
     private NekoNativeLoader() {
     }
 
+    private static native void refresh(Class<?> owner);
+
     public static void load() {
+        loadForClass(null);
+    }
+
+    public static void loadForClass(Class<?> owner) {
         if (loaded) {
+            refresh(owner);
             return;
         }
         synchronized (LOCK) {
             if (loaded) {
+                refresh(owner);
                 return;
             }
             String platform = detectPlatform();
@@ -29,6 +37,7 @@ public final class NekoNativeLoader {
                 Path tmp = extractResource(resourcePath, ext);
                 System.load(tmp.toAbsolutePath().toString());
                 loaded = true;
+                refresh(owner);
             } catch (IOException e) {
                 throw new UnsatisfiedLinkError("Failed to load native library: " + e.getMessage());
             }
