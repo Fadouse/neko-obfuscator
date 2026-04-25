@@ -1,0 +1,12 @@
+-- defined external symbols (T = global text) --
+-- defined locals containing 'jni' or 'env' (function pointer use sites) --
+-- objdump disasm grep for callq via env funcptr --
+-- strings count of JNI helpers in debug --
+  GetEnv: 1
+  Throw: 0
+  FindClass: 0
+  GetMethodID: 0
+  NewStringUTF: 0
+  NewObjectA: 0
+  NewGlobalRef: 0
+  DeleteLocalRef: 0

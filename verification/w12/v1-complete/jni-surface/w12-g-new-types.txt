@@ -1,0 +1,13 @@
+neko-native/src/main/java/dev/nekoobfuscator/native_/codegen/CCodeGenerator.java
+neko-native/src/main/java/dev/nekoobfuscator/native_/codegen/emit/AssemblyStubEmitter.java
+neko-native/src/main/java/dev/nekoobfuscator/native_/codegen/emit/BootstrapEmitter.java
+neko-native/src/main/java/dev/nekoobfuscator/native_/codegen/emit/ImplBodyEmitter.java
+neko-native/src/main/java/dev/nekoobfuscator/native_/codegen/emit/JniOnLoadEmitter.java
+neko-native/src/main/java/dev/nekoobfuscator/native_/codegen/emit/ManifestEmitter.java
+neko-native/src/main/java/dev/nekoobfuscator/native_/codegen/emit/Wave1RuntimeEmitter.java
+neko-native/src/main/java/dev/nekoobfuscator/native_/codegen/emit/Wave2FieldLdcEmitter.java
+neko-native/src/main/java/dev/nekoobfuscator/native_/codegen/emit/Wave3InvokeStaticEmitter.java
+neko-native/src/main/java/dev/nekoobfuscator/native_/codegen/emit/Wave4aRuntimeApiEmitter.java
+neko-native/src/main/java/dev/nekoobfuscator/native_/translator/NativeTranslationSafetyChecker.java
+neko-native/src/main/java/dev/nekoobfuscator/native_/translator/NativeTranslator.java
+neko-native/src/main/java/dev/nekoobfuscator/native_/translator/OpcodeTranslator.java

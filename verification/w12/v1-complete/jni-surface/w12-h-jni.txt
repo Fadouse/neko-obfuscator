@@ -1,0 +1,17 @@
+-- defined JNI_OnLoad/Unload --
+-- undefined JNI ref count by symbol --
+-- strings of JNI function names (Oracle 9 allowlist) --
+  GetEnv: 1
+  Throw: 0
+  FindClass: 0
+  GetMethodID: 0
+  NewStringUTF: 0
+  NewObjectA: 0
+  NewGlobalRef: 0
+  DeleteLocalRef: 0
+  GetObjectField: 0
+  SetObjectField: 0
+  MonitorEnter: 0
+  MonitorExit: 0
+  CallObjectMethod: 0
+  CallVoidMethod: 0
