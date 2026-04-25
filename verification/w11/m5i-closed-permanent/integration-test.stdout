@@ -1,0 +1,16 @@
+Command: ./gradlew :neko-test:test --tests dev.nekoobfuscator.test.NativeObfuscationIntegrationTest --no-daemon
+Exit: 0
+
+Gradle summary:
+- BUILD SUCCESSFUL in 5s
+- 19 actionable tasks: 2 executed, 17 up-to-date
+- Test class report: 11 tests, 7 skipped, 0 failures, 0 errors, 100% successful
+
+Admission-count proof (from NativeObfAdmissionGateTest adjunct and verification/w10/admission-counts.txt):
+- TEST.jar admitted=14 total=75 excluded=61
+- obfusjack-test21.jar admitted=17 total=84 excluded=67
+- SnakeGame.jar admitted=12 total=14 excluded=2
+
+Admission adjunct command: ./gradlew :neko-test:test --tests dev.nekoobfuscator.test.NativeObfAdmissionGateTest --no-daemon
+Admission adjunct exit: 0
+Admission adjunct summary: BUILD SUCCESSFUL in 5s; 3 tests completed.

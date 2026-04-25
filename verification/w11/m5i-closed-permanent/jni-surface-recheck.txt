@@ -1,0 +1,17 @@
+## TEST
+jar: verification/w12/v1-complete/release/TEST-native-release.jar
+libs: neko/native/libneko_linux_x64.so
+verification/w11/m5i-closed-permanent/extracted/TEST/libneko_linux_x64.so: (*env)-> matches=0
+verification/w11/m5i-closed-permanent/extracted/TEST/libneko_linux_x64.so: (*vm)-> matches=0
+
+## obfusjack
+jar: verification/w12/v1-complete/release/obfusjack-native-release.jar
+libs: neko/native/libneko_linux_x64.so
+verification/w11/m5i-closed-permanent/extracted/obfusjack/libneko_linux_x64.so: (*env)-> matches=0
+verification/w11/m5i-closed-permanent/extracted/obfusjack/libneko_linux_x64.so: (*vm)-> matches=0
+
+## SnakeGame
+jar: verification/w12/v1-complete/release/SnakeGame-native-release.jar
+libs: neko/native/libneko_linux_x64.so
+verification/w11/m5i-closed-permanent/extracted/SnakeGame/libneko_linux_x64.so: (*env)-> matches=0
+verification/w11/m5i-closed-permanent/extracted/SnakeGame/libneko_linux_x64.so: (*vm)-> matches=0
