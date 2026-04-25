@@ -24,8 +24,8 @@ class NativeObfStackTraceTest {
     private static final Pattern NATIVE_STAGE_COUNTS = Pattern.compile("Native stage: translated=(\\d+) rejected=(\\d+)");
 
     @Test
-    @Disabled("W11-M5i deferred: translated cached pending exceptions still crash before Throwable.getStackTrace() can observe frames")
     @Timeout(5)
+    @Disabled("M5i CLOSED-PERMANENT per Oracle 16: translated C stubs lack HotSpot frame metadata; JVM_FillInStackTrace cannot synthesize StackVictim.probe frame under strict-no-JNI without crossing M5h GC-barrier invariants. See .sisyphus/plans/oracle-16-m5i-fidelity-walkable-frame.md.")
     void translatedCachedExceptionsPreserveJavaStackFrames() throws Exception {
         Path workDir = NativeObfuscationHelper.nativeWorkDir().resolve("stack-trace");
         Files.createDirectories(workDir);
