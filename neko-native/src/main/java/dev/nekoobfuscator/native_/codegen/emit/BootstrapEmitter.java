@@ -50,6 +50,8 @@ NekoVmSymbols g_neko_vm_symbols = {0};
 NekoVmLayout g_neko_vm_layout = {0};
 
 static JavaVM *g_neko_java_vm = NULL;
+typedef void (JNICALL *neko_JVM_FillInStackTrace_fn)(JNIEnv *env, jobject throwable);
+static neko_JVM_FillInStackTrace_fn g_neko_JVM_FillInStackTrace = NULL;
 static uint32_t g_neko_manifest_match_count = 0u;
 static volatile uint8_t g_neko_loader_ready = 0u;
 static int g_neko_flag_patch_path_logged = 0;
@@ -850,6 +852,12 @@ static void neko_resolve_strict_optional_symbols(void) {
      * optional ABI-risk resolver. */
 }
 
+static void neko_resolve_stacktrace_symbols(void) {
+    g_neko_JVM_FillInStackTrace =
+        (neko_JVM_FillInStackTrace_fn)neko_resolve_libjvm_symbol("JVM_FillInStackTrace");
+    NEKO_TRACE(0, "[nk] JVM_FillInStackTrace=%p", (void*)g_neko_JVM_FillInStackTrace);
+}
+
 static jboolean neko_resolve_vm_symbols(void) {
     uint32_t resolved = 0u;
     memset(&g_neko_vm_symbols, 0, sizeof(g_neko_vm_symbols));
@@ -870,6 +878,7 @@ static jboolean neko_resolve_vm_symbols(void) {
     NEKO_REQUIRED_VM_SYMBOLS(NEKO_RESOLVE_REQUIRED_SYMBOL);
 #undef NEKO_RESOLVE_REQUIRED_SYMBOL
     neko_resolve_strict_optional_symbols();
+    neko_resolve_stacktrace_symbols();
     NEKO_TRACE(0, "[nk] lj %u/%u", resolved, NEKO_REQUIRED_VM_SYMBOL_COUNT);
     return JNI_TRUE;
 }
@@ -2403,14 +2412,22 @@ static jint neko_throw_cached(JNIEnv *env, jthrowable cached) {
     return (*env)->Throw(env, cached);
 }
 
-static void neko_raise_cached_pending(void *thread, jthrowable cached) {
+NEKO_FAST_INLINE void* neko_load_oop_from_jni_ref(jobject ref) {
     uintptr_t cell;
-    void *oop;
-    if (thread == NULL || cached == NULL) return;
-    cell = ((uintptr_t)cached) & ~(uintptr_t)(sizeof(void*) - 1u);
-    oop = neko_load_oop_from_cell((const void*)cell);
-    if (oop != NULL) neko_set_pending_exception(thread, oop);
+    if (ref == NULL) return NULL;
+    cell = ((uintptr_t)ref) & ~(uintptr_t)(sizeof(void*) - 1u);
+    return __atomic_load_n((void* const*)cell, __ATOMIC_ACQUIRE);
 }
+
+static jint neko_raise_cached_pending(void *thread, jthrowable cached) {
+    void *oop;
+    if (thread == NULL || cached == NULL) return JNI_ERR;
+    oop = neko_load_oop_from_jni_ref((jobject)cached);
+    if (oop != NULL) neko_set_pending_exception(thread, oop);
+    return oop != NULL ? JNI_OK : JNI_ERR;
+}
+
+""" + wave1RuntimeEmitter.renderExceptionBridgeSupport() + """
 
 static inline jthrowable neko_cached_throwable_for_kind(uint32_t kind) {
     switch (kind) {

@@ -149,6 +149,50 @@ static void neko_log_runtime_helpers_ready(void) {
         return sb.toString();
     }
 
+    public String renderExceptionBridgeSupport() {
+        return """
+
+#ifndef NEKO_FAST_INLINE
+#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 199901L
+#define NEKO_FAST_INLINE static inline
+#else
+#define NEKO_FAST_INLINE static
+#endif
+#endif
+
+NEKO_FAST_INLINE JNIEnv* neko_env_from_thread(void *thread) {
+    if (thread == NULL || g_neko_vm_layout.off_java_thread_jni_environment < 0) return NULL;
+    return (JNIEnv*)((uint8_t*)thread + g_neko_vm_layout.off_java_thread_jni_environment);
+}
+
+NEKO_FAST_INLINE jboolean neko_exception_bridge_ready(void *thread) {
+    void *anchor_sp;
+    if (thread == NULL) return JNI_FALSE;
+    if (g_neko_vm_layout.off_java_thread_last_Java_sp < 0) return JNI_FALSE;
+    anchor_sp = __atomic_load_n((void**)((uint8_t*)thread + g_neko_vm_layout.off_java_thread_last_Java_sp), __ATOMIC_ACQUIRE);
+    return anchor_sp != NULL ? JNI_TRUE : JNI_FALSE;
+}
+
+static jint neko_raise_cached_with_trace(void *thread, jthrowable cached, jboolean fill_trace_now) {
+    JNIEnv *env;
+    if (thread == NULL || cached == NULL) {
+        return neko_raise_cached_pending(thread, cached);
+    }
+    if (!neko_exception_bridge_ready(thread)) {
+        return neko_raise_cached_pending(thread, cached);
+    }
+    env = neko_env_from_thread(thread);
+    if (env == NULL) {
+        return neko_raise_cached_pending(thread, cached);
+    }
+    if (fill_trace_now == JNI_TRUE && g_neko_JVM_FillInStackTrace != NULL) {
+        g_neko_JVM_FillInStackTrace(env, (jobject)cached);
+    }
+    return (*env)->Throw(env, cached);
+}
+""";
+    }
+
     public String renderRuntimeSupport() {
         return """
 typedef union {

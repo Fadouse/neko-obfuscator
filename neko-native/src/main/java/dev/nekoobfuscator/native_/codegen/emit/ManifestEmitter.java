@@ -260,7 +260,7 @@ public final class ManifestEmitter {
         sb.append("static void neko_resolve_discovered_invoke_sites(const char *owner_internal, const char *name, const char *desc, void *method_star);\n");
         sb.append("static jboolean neko_method_is_redefined_stale(void *method_star);\n");
         sb.append("static jboolean neko_manifest_method_active(uint32_t index);\n");
-        sb.append("static void neko_raise_cached_pending(void *thread, jthrowable cached);\n");
+        sb.append("static jint neko_raise_cached_pending(void *thread, jthrowable cached);\n");
         if (!signaturePlan.signatures().isEmpty()) {
             sb.append('\n');
         }
