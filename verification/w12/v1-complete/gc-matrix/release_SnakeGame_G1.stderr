@@ -1,0 +1,5 @@
+Exception in thread "main" java.lang.LinkageError: please check your native library load correctly
+	at Tuple.getX(Tuple.java)
+	at ThreadsController.<init>(ThreadsController.java:24)
+	at Window.<init>(Window.java:43)
+	at Main.main(Main.java:8)

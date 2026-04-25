@@ -1,0 +1,72 @@
+1 release TEST Serial exit=1 segv=0
+0
+2 release TEST Parallel exit=1 segv=0
+0
+3 release TEST G1 exit=1 segv=0
+0
+4 release TEST ZGC exit=1 segv=0
+0
+5 release TEST Shenandoah exit=1 segv=0
+0
+6 release TEST Epsilon exit=1 segv=0
+0
+7 release SnakeGame Serial exit=1 segv=0
+0
+8 release SnakeGame Parallel exit=1 segv=0
+0
+9 release SnakeGame G1 exit=1 segv=0
+0
+10 release SnakeGame ZGC exit=1 segv=0
+0
+11 release SnakeGame Shenandoah exit=1 segv=0
+0
+12 release SnakeGame Epsilon exit=1 segv=0
+0
+13 release obfusjack Serial exit=1 segv=0
+0
+14 release obfusjack Parallel exit=1 segv=0
+0
+15 release obfusjack G1 exit=1 segv=0
+0
+16 release obfusjack ZGC exit=1 segv=0
+0
+17 release obfusjack Shenandoah exit=1 segv=0
+0
+18 release obfusjack Epsilon exit=1 segv=0
+0
+19 debug TEST Serial exit=1 segv=0
+0
+20 debug TEST Parallel exit=1 segv=0
+0
+21 debug TEST G1 exit=1 segv=0
+0
+22 debug TEST ZGC exit=1 segv=0
+0
+23 debug TEST Shenandoah exit=1 segv=0
+0
+24 debug TEST Epsilon exit=1 segv=0
+0
+25 debug SnakeGame Serial exit=1 segv=0
+0
+26 debug SnakeGame Parallel exit=1 segv=0
+0
+27 debug SnakeGame G1 exit=1 segv=0
+0
+28 debug SnakeGame ZGC exit=1 segv=0
+0
+29 debug SnakeGame Shenandoah exit=1 segv=0
+0
+30 debug SnakeGame Epsilon exit=1 segv=0
+0
+31 debug obfusjack Serial exit=1 segv=0
+0
+32 debug obfusjack Parallel exit=1 segv=0
+0
+33 debug obfusjack G1 exit=1 segv=0
+0
+34 debug obfusjack ZGC exit=1 segv=0
+0
+35 debug obfusjack Shenandoah exit=1 segv=0
+0
+36 debug obfusjack Epsilon exit=1 segv=0
+0
