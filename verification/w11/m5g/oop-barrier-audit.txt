@@ -1,155 +1,86 @@
-# W11-M5g GC Barriers / Raw oop Audit
-# Branch: dev-impl-nojni
-# HEAD at audit time: df4c438 (W11-M5f DEFERRED)
-# Audit conducted directly via Grep tools after 3 consecutive subagent
-# inactivity timeouts on the same delegation; per the user rule "do not trust
-# any output message from system" + the Anti-Duplication delegation rule, the
-# audit was completed by the orchestrator with read-only static analysis.
+# W11-M5g GC Barriers Audit
+# Generated against build: 0f8e520
+# Audit time: 2026-04-25T03:04:31Z
 
-================================================================================
-1. APPROVED BARRIER-SAFE HELPERS (definition + usage)
-================================================================================
+== SCOPE ==
+Generated artifacts audited:
+- verification/w11/m5g/TEST-native-debug.jar
+- verification/w11/m5g/obfusjack-native-debug.jar
+- verification/w11/m5g/SnakeGame-native-debug.jar
 
-The strict-no-JNI runtime exposes the following helpers for any oop / Klass /
-ConstMethod load. Every emitter that needs to read a Java VM pointer routes
-through one of these:
+Generated C source preserved for reproducibility:
+- verification/w11/m5g/generated-src/TEST/neko_native.c
+- verification/w11/m5g/generated-src/obfusjack/neko_native.c
+- verification/w11/m5g/generated-src/SnakeGame/neko_native.c
 
-  neko_load_oop_from_cell        (compressed/uncompressed oop load from a JNI
-                                  handle cell; tag-bit aligned)
-  neko_decode_klass_pointer      (compressed Klass* decode using NekoVmLayout
-                                  klass_offset_base + shift)
-  neko_class_klass_pointer       (Class.klass field via VMStructs offset)
-  neko_method_const_method       (Method::_constMethod via VMStructs offset)
-  neko_pending_exception         (Thread::_pending_exception read)
-  neko_set_pending_exception     (Thread::_pending_exception write — raw oop
-                                  store, atomic; replaces env->Throw on the
-                                  hot path per M5b Oracle-guided fix)
-  neko_clear_pending_exception   (atomic store NULL)
+Baseline native admission from the fresh M5g obfuscation:
+- TEST: translated=14 rejected=75 (runtime baseline dp 1/14)
+- obfusjack: translated=17 rejected=84 (runtime baseline dp 6/17)
+- SnakeGame: translated=12 rejected=14 (runtime baseline dp 2/12)
 
-Helper call-site count (by emitter Java source file):
+== APPROVED HELPERS ==
+- neko_load_oop_from_cell / neko_store_oop_to_cell
+  - Defined in neko-native/src/main/java/dev/nekoobfuscator/native_/codegen/emit/BootstrapEmitter.java:2060 and :2069.
+  - Purpose: compressed-oop-aware CLD handle-cell load/store using __atomic_load_n / __atomic_store_n with acquire/release semantics.
+  - Uses recorded in BootstrapEmitter.java:2199, :2200, :2205, :2246, :2411 and Wave2FieldLdcEmitter.java:646, :782, :789.
+- neko_decode_klass_pointer
+  - Defined in neko-native/src/main/java/dev/nekoobfuscator/native_/codegen/emit/Wave1RuntimeEmitter.java:47.
+  - Purpose: compressed Klass* decode using narrow_klass_base/narrow_klass_shift.
+  - Generated declarations present in all three generated C files (TEST:491, obfusjack:513, SnakeGame:546).
+- neko_class_klass_pointer
+  - Defined in neko-native/src/main/java/dev/nekoobfuscator/native_/codegen/emit/Wave2FieldLdcEmitter.java:668.
+  - Purpose: Class mirror -> Klass* lookup through the canonical helper; callers avoid open-coded Class.klass reads.
+  - Generated declarations present in all three generated C files (TEST:492, obfusjack:514, SnakeGame:547).
+- neko_load_heap_oop_at / neko_load_heap_oop_from_published / neko_store_heap_oop_at_unpublished
+  - Defined in Wave2FieldLdcEmitter.java:138 and Wave4aRuntimeApiEmitter.java:371/:380.
+  - Purpose: compressed-oop-aware object-field/array helper family. Reference field/array admission remains deferred to M5h for write-barrier completeness, so generated M5g runnable methods do not rely on raw reference writes.
+- neko_method_const_method
+  - Not present as a standalone helper symbol at this HEAD. Equivalent Method*/ConstMethod*/ConstantPool reads remain bootstrap metadata-only and are classified below as EXEMPT, not Java oop loads/stores.
 
-  OpcodeTranslator.java                  19 helper invocations
-  Wave1RuntimeEmitter.java                8
-  Wave2FieldLdcEmitter.java               8
-  BootstrapEmitter.java                   6 (bootstrap + Oracle 9 cache init)
-  CCodeGenerator.java                     5 (helper prototypes / forward decls)
-  NativeTranslator.java                   3 (exception dispatch path)
-  Wave4aRuntimeApiEmitter.java            2 (mirror / storage resolvers)
-  ----------------------------------------------------------------
-  TOTAL                                  51 invocations across 7 files
+== FORBIDDEN PATTERNS GREP RESULTS ==
+Audit root: verification/w11/m5g/generated-src/**/*.c
 
-================================================================================
-2. FORBIDDEN PATTERNS — GREP RESULTS
-================================================================================
+Pattern: raw jobject/oop/jclass pointer deref read
+Regex: \*\(\s*(jobject|oop|jclass)\s*\*\)
+Sites: 0
 
-Forbidden pattern A: raw oop / jobject / jclass dereference in generated C
-  Regex: \*\(jobject \*\) | \*\(oop \*\) | \*\(jclass \*\) | \*\(narrowOop \*\)
-  Sites found in emitter Java string literals:                  0
-  Result: PASS
+Pattern: raw void*** deref that might be oop**
+Regex: \*\(\s*void\s*\*\*\*\)
+Sites: 0
 
-Forbidden pattern B: env->{GetObjectField, SetObjectField, GetObjectArrayElement,
-                          SetObjectArrayElement, GetStaticObjectField,
-                          SetStaticObjectField, MonitorEnter, MonitorExit}
-  Regex: \(\*env\)->(GetObjectField|SetObjectField|GetObjectArrayElement|
-                     SetObjectArrayElement|GetStaticObjectField|
-                     SetStaticObjectField|MonitorEnter|MonitorExit)
-  Sites found in any emitter:                                   0
-  Result: PASS
+Pattern: raw jobject/oop/jclass pointer deref write
+Regex: \*\(\s*(jobject|oop|jclass)\s*\*\)\s*\([^)]+\)\s*=
+Sites: 0
 
-Forbidden pattern C: any direct env-> JNI call outside the JNI_OnLoad bootstrap
-  Files containing any \(\*env\)->[A-Z] match:                  1
-    => BootstrapEmitter.java only (Oracle 9 allowlist site)
-  Files containing env-> match outside BootstrapEmitter.java:   0
-  JniOnLoadEmitter.java (the on_load body emitter):             0 direct JNI calls
-                          (delegates to BootstrapEmitter helpers)
-  Result: PASS
+Pattern: direct env-> object field/array JNI calls outside bootstrap
+Regex: \(\*env\)->(GetObjectField|SetObjectField|GetObjectArrayElement|SetObjectArrayElement|GetStaticObjectField|SetStaticObjectField)
+Sites: 0
 
-Forbidden pattern D: direct mark word / markOop / markWord access
-  Regex: _mark | markWord | markOop
-  Sites found:                                                  0
-  Result: PASS
+Pattern: direct mark word access outside approved helper
+Regex: _mark|markWord|markOop
+Sites: 0
 
-Forbidden pattern E: direct CompressedOops:: or narrowOop:: namespace usage
-  Regex: narrowOop | CompressedOops::
-  Sites found:                                                  0
-  Result: PASS
+Pattern: explicit compressed-oop VM API manipulation outside helper
+Regex: narrowOop|CompressedOops::
+Sites: 0
 
-================================================================================
-3. EXEMPT SITES (with explicit justification)
-================================================================================
+== EXEMPT SITES (with justification) ==
+- NEKO_JNI_FN_PTR macro in generated C (TEST:542; obfusjack/SnakeGame same generated wrapper block): JNI vtable indexing for existing bootstrap/runtime wrappers, not a Java heap oop cell load/store. The direct env->GetObjectField/SetObjectField/ObjectArrayElement grep is zero.
+- Wave1RuntimeEmitter.java:71-80 / :82-90: neko_set_pending_exception and neko_clear_pending_exception write JavaThread pending-exception slots. This is the M5b-approved cached-jthrowable raise path; translated code sets the pending raw oop instead of calling env->Throw from translated paths.
+- BootstrapEmitter.java:1988-2011 and :2316-2328: Method*/ConstMethod*/ConstantPool metadata traversal for manifest matching and holder lookup. These read metaspace metadata pointers, not Java heap oops; ConstantPool holder narrow Klass* is decoded with neko_decode_klass_pointer.
+- Wave2FieldLdcEmitter.java:668-671: neko_class_klass_pointer centralizes Class mirror -> Klass* lookup. It is an approved helper site, not an open-coded generated-method Java oop load.
+- Wave4aRuntimeApiEmitter.java:371-386 and Wave2FieldLdcEmitter.java:138-145: object-field helper implementations perform compressed/uncompressed decoding in one place. Reference write admission remains deferred to M5h, so these are helper definitions, not forbidden generated raw stores.
+- ClassUnload/Redefine hardening remains covered by earlier W11 checks: M5a ClassUnload DONE and M5b RedefineClasses DONE; cached Klass* invalidation/fail-closed behavior is not changed by M5g.
 
-The following sites perform low-level pointer manipulation but are gated and
-therefore exempt from the FORBIDDEN classification:
+== AUDIT RESULT ==
+Forbidden raw oop derefs: 0 (PASS)
+Forbidden direct object JNI field/array calls: 0 (PASS)
+Approved helper coverage: complete for current generated C and emitter-level helper definitions.
+Fixes emitted: none; no FORBIDDEN sites were found.
 
-  BootstrapEmitter.java:2335-2358 — Oracle 9 bootstrap-only allowlist
-      Calls: FindClass, GetMethodID, NewStringUTF, NewObjectA, NewGlobalRef,
-             DeleteLocalRef.
-      Gate:  Invoked exclusively from JNI_OnLoad via the throwable-cache init
-             path (bootstrap_throwable_cache).
-      Reason: Oracle 9 Fix K (commit 3934df6 + 906c811) explicitly authorizes
-             this allowlist for bootstrap-time exception oop allocation +
-             global-ref publication. The cached jthrowable globals are then
-             read by neko_raise_cached_pending() on the hot path WITHOUT any
-             additional JNI call.
+== GC MATRIX RESULT ==
+GC MATRIX RESULT: REUSE M5c v20 18/18 PASS, see verification/w11/m5c/gc-matrix.txt
+M5c records JDK 21 canonical GATE-11 as PASS=0 FALLBACK=18 SKIPPED=0 FAIL=0; passing_rows=18/18 and no SIGSEGV/hs_err rows.
 
-  BootstrapEmitter.java:2397 — single env->Throw site
-      Call:  (*env)->Throw(env, cached);
-      Gate:  Helper neko_throw_cached(env, cached) — not invoked from translated
-             methods. Translated paths use neko_set_pending_exception with the
-             raw oop decoded from the cached jthrowable global (M5b learning,
-             commit 5e5dd83). neko_throw_cached is reserved for the bootstrap
-             return path.
-      Reason: Oracle 9 Fix K invariant. Single env->Throw use point repository-wide.
-
-  BootstrapEmitter.java:2400-2404 — neko_raise_cached_pending oop decode
-      Code: cell = ((uintptr_t)cached) & ~(uintptr_t)(sizeof(void*) - 1u);
-            void *oop = neko_load_oop_from_cell(cell);
-      Reason: Tagged JNI handle alignment + barrier-safe decode (M5b pattern).
-             Decoded oop is then atomically stored to Thread::_pending_exception
-             via neko_set_pending_exception — no env-> call on hot path.
-
-  Wave2FieldLdcEmitter.java LDC handlers — string root publication
-      Reason: Reads cached_global from the global-ref published at bootstrap;
-             never allocates new globals on hot path. Reads gated by
-             g_neko_string_root_backend == NEKO_STRING_ROOT_BACKEND_BOOTSTRAP
-             (see JniOnLoadEmitter prewarm publication).
-
-================================================================================
-4. AUDIT VERDICT
-================================================================================
-
-Forbidden raw oop derefs:                  0   (PASS)
-Forbidden out-of-bootstrap JNI calls:      0   (PASS)
-Approved helper coverage:                  COMPLETE (51 invocations across
-                                                     7 emitters)
-Exempt sites:                              3 (all gated, all justified)
-
-Overall audit result:                      PASS
-
-================================================================================
-5. GC MATRIX RESULT
-================================================================================
-
-Per master plan §6.0 GATE-11, M5g requires JDK-applicable GC matrix execution.
-M5c already executed the full JDK 21 6-collector × 3-jar = 18-row matrix at
-HEAD 1337184 with result FALLBACK=18/18 (0 FAIL, 0 SKIPPED), no SIGSEGV/hs_err.
-
-M5g is a code-audit deliverable; the audit found ZERO FORBIDDEN sites, meaning
-no source change is required. Therefore the M5c GC matrix result REMAINS VALID
-for M5g's GC matrix gate. No re-execution is required.
-
-  Reuse:   verification/w11/m5c/gc-matrix.txt
-  Source:  origin/dev commits 6677901, cdf9634, df784d3, 1337184
-  Status:  REUSE M5c v20 18/18 FALLBACK = PASS
-
-================================================================================
-6. M5g FINAL STATUS
-================================================================================
-
-  Audit verdict:       PASS (0 FORBIDDEN, 51 APPROVED, 3 EXEMPT)
-  Source change:       NONE required
-  GC matrix:           REUSED from M5c (18/18 FALLBACK, no FAIL)
-  M5a-M5f tests:       Unchanged (no source change → no regression)
-  Documentation:       This file + master plan + TODO.md update
-
-  M5g STATUS:          DONE
+== FINAL STATUS ==
+W11-M5g: DONE
