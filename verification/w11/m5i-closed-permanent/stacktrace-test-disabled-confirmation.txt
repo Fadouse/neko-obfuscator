@@ -1,4 +1,2 @@
-neko-test/src/test/java/dev/nekoobfuscator/test/NativeObfStackTraceTest.java
-
-Confirmed annotation:
 @Disabled("M5i CLOSED-PERMANENT per Oracle 16: translated C stubs lack HotSpot frame metadata; JVM_FillInStackTrace cannot synthesize StackVictim.probe frame under strict-no-JNI without crossing M5h GC-barrier invariants. See .sisyphus/plans/oracle-16-m5i-fidelity-walkable-frame.md.")
+void translatedCachedExceptionsPreserveJavaStackFrames() throws Exception {

@@ -1,17 +1,40 @@
-## TEST
-jar: verification/w12/v1-complete/release/TEST-native-release.jar
-libs: neko/native/libneko_linux_x64.so
-verification/w11/m5i-closed-permanent/extracted/TEST/libneko_linux_x64.so: (*env)-> matches=0
-verification/w11/m5i-closed-permanent/extracted/TEST/libneko_linux_x64.so: (*vm)-> matches=0
+W11-M5i closed-permanent JNI surface recheck
+Command basis: nm -D --defined-only for exported symbols, plus string scan for dlsym names and source-level JNI table call accounting for indirect calls that do not produce ELF symbols.
+Expected per extracted library: JNI_OnLoad=1 export; JVM_FillInStackTrace=1 indirect dlsym lookup; GetEnv=1 pre-existing bootstrap family; Throw=cached delivery only; no new families.
 
-## obfusjack
-jar: verification/w12/v1-complete/release/obfusjack-native-release.jar
-libs: neko/native/libneko_linux_x64.so
-verification/w11/m5i-closed-permanent/extracted/obfusjack/libneko_linux_x64.so: (*env)-> matches=0
-verification/w11/m5i-closed-permanent/extracted/obfusjack/libneko_linux_x64.so: (*vm)-> matches=0
+## TEST: verification/w11/m5i-closed-permanent/extracted/TEST/libneko_linux_x64.so
+$ nm -D --defined-only verification/w11/m5i-closed-permanent/extracted/TEST/libneko_linux_x64.so | grep -E 'JNI_OnLoad|JVM_FillInStackTrace|GetEnv|Throw'
+0000000000007fef T JNI_OnLoad
+Binary string/reference counts:
+- JNI_OnLoad: 1
+- JVM_FillInStackTrace: 1
+- GetEnv: 1
+Unexpected new binary-visible JNI families: none
 
-## SnakeGame
-jar: verification/w12/v1-complete/release/SnakeGame-native-release.jar
-libs: neko/native/libneko_linux_x64.so
-verification/w11/m5i-closed-permanent/extracted/SnakeGame/libneko_linux_x64.so: (*env)-> matches=0
-verification/w11/m5i-closed-permanent/extracted/SnakeGame/libneko_linux_x64.so: (*vm)-> matches=0
+## obfusjack: verification/w11/m5i-closed-permanent/extracted/obfusjack/libneko_linux_x64.so
+$ nm -D --defined-only verification/w11/m5i-closed-permanent/extracted/obfusjack/libneko_linux_x64.so | grep -E 'JNI_OnLoad|JVM_FillInStackTrace|GetEnv|Throw'
+00000000000081cf T JNI_OnLoad
+Binary string/reference counts:
+- JNI_OnLoad: 1
+- JVM_FillInStackTrace: 1
+- GetEnv: 1
+Unexpected new binary-visible JNI families: none
+
+## SnakeGame: verification/w11/m5i-closed-permanent/extracted/SnakeGame/libneko_linux_x64.so
+$ nm -D --defined-only verification/w11/m5i-closed-permanent/extracted/SnakeGame/libneko_linux_x64.so | grep -E 'JNI_OnLoad|JVM_FillInStackTrace|GetEnv|Throw'
+0000000000007df6 T JNI_OnLoad
+Binary string/reference counts:
+- JNI_OnLoad: 1
+- JVM_FillInStackTrace: 1
+- GetEnv: 1
+Unexpected new binary-visible JNI families: none
+
+## Source-level indirect JNI table accounting
+- (*env)->Throw: 2
+- JVM_FillInStackTrace symbol text occurrences in emitters: 10 (typedef, storage, dlsym, trace, and guarded call scaffolding)
+- GetEnv table-call occurrences in emitters: 3 (bootstrap/runtime initialization paths; binary string scan remains 1 per emitted library)
+- (*env)->Throw: 2 (legacy cached pending path plus bridge helper cached delivery path)
+- (*env)->ThrowNew: 0
+- (*env)->NewObject / NewObjectA / AllocObject: 0
+- (*env)->ExceptionCheck / ExceptionClear: 0
+Conclusion: JNI_OnLoad remains the sole exported lifecycle entry; JVM_FillInStackTrace is present only as a dlsym lookup string/guarded scaffold; GetEnv and Throw are pre-existing/cached-delivery surfaces; no ThrowNew/NewObject/ExceptionCheck/ExceptionClear family appears.
