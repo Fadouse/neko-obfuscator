@@ -1,0 +1,7 @@
+Command stderr was not emitted by Gradle pty capture; fixture obfuscation stderr logs follow.
+
+--- neko-test/build/test-native/TEST-native.obfuscate.stderr.log ---
+
+--- neko-test/build/test-native/obfusjack-native.obfuscate.stderr.log ---
+
+--- neko-test/build/test-native/SnakeGame-native.obfuscate.stderr.log ---

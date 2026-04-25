@@ -1,16 +1,13 @@
-Command: ./gradlew :neko-test:test --tests dev.nekoobfuscator.test.NativeObfuscationIntegrationTest --no-daemon
+Command: ./gradlew :neko-test:test --tests dev.nekoobfuscator.test.NativeObfuscationIntegrationTest --info --rerun-tasks --no-daemon
 Exit: 0
+Gradle result: BUILD SUCCESSFUL in forced rerun (pty_cf0743c9).
+JUnit result: <testsuite name="dev.nekoobfuscator.test.NativeObfuscationIntegrationTest" tests="11" skipped="7" failures="0" errors="0" timestamp="2026-04-25T05:15:02" hostname="archkde" time="0.027">
 
-Gradle summary:
-- BUILD SUCCESSFUL in 5s
-- 19 actionable tasks: 2 executed, 17 up-to-date
-- Test class report: 11 tests, 7 skipped, 0 failures, 0 errors, 100% successful
+--- neko-test/build/test-native/TEST-native.obfuscate.stdout.log ---
+13:15:01.108 [main] INFO dev.nekoobfuscator.core.pipeline.ObfuscationPipeline -- Native stage: translated=14 rejected=75
 
-Admission-count proof (from NativeObfAdmissionGateTest adjunct and verification/w10/admission-counts.txt):
-- TEST.jar admitted=14 total=75 excluded=61
-- obfusjack-test21.jar admitted=17 total=84 excluded=67
-- SnakeGame.jar admitted=12 total=14 excluded=2
+--- neko-test/build/test-native/obfusjack-native.obfuscate.stdout.log ---
+13:15:02.536 [main] INFO dev.nekoobfuscator.core.pipeline.ObfuscationPipeline -- Native stage: translated=17 rejected=84
 
-Admission adjunct command: ./gradlew :neko-test:test --tests dev.nekoobfuscator.test.NativeObfAdmissionGateTest --no-daemon
-Admission adjunct exit: 0
-Admission adjunct summary: BUILD SUCCESSFUL in 5s; 3 tests completed.
+--- neko-test/build/test-native/SnakeGame-native.obfuscate.stdout.log ---
+13:15:01.804 [main] INFO dev.nekoobfuscator.core.pipeline.ObfuscationPipeline -- Native stage: translated=12 rejected=14
