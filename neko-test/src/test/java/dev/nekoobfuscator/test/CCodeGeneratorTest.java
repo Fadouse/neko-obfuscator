@@ -38,6 +38,10 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class CCodeGeneratorTest {
+    private static final Pattern HOT_PATH_JNI_WRAPPER_CALL = Pattern.compile(
+        "\\b(?:NEKO_ENSURE_[A-Z0-9_]+|neko_(?:find_class|get_(?:method_id|static_method_id|field_id|static_field_id|object_class|array_length|object_array_element|static_object_field)|call_[A-Za-z0-9_]+|new_[A-Za-z0-9_]+|jni_[A-Za-z0-9_]+))\\s*\\(|\\(\\*env\\)|env->"
+    );
+
     @Test
     void hotspotProbeEmitted() {
         ClassNode classNode = new ClassNode();
@@ -75,6 +79,43 @@ class CCodeGeneratorTest {
         assertTrue(source.contains("JNI_OnLoad"), source);
         assertTrue(source.contains("neko_resolve_vm_symbols()"), source);
         assertTrue(source.contains("neko_parse_vm_layout(env)"), source);
+    }
+
+    @Test
+    void strictNativeGeneratedSourceOmitsLoaderRefreshAndJvmtiEntrypoints() {
+        String source = minimalGeneratedSource();
+
+        assertFalse(source.contains("Java_dev_nekoobfuscator_runtime_NekoNativeLoader_refresh"), source);
+        assertFalse(source.contains("JVMTI"), source);
+        assertFalse(source.contains("jvmti"), source);
+        assertFalse(source.contains("Agent_OnLoad"), source);
+    }
+
+    @Test
+    void translatedHotPathBodyDoesNotCallJniWrappers() {
+        ClassNode classNode = new ClassNode();
+        classNode.version = Opcodes.V1_8;
+        classNode.access = Opcodes.ACC_PUBLIC;
+        classNode.name = "pkg/StrictNativeHotPath";
+        classNode.superName = "java/lang/Object";
+        classNode.methods = new ArrayList<>();
+
+        MethodNode method = new MethodNode(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC, "sum", "(II)I", null, null);
+        method.instructions.add(new VarInsnNode(Opcodes.ILOAD, 0));
+        method.instructions.add(new VarInsnNode(Opcodes.ILOAD, 1));
+        method.instructions.add(new InsnNode(Opcodes.IADD));
+        method.instructions.add(new InsnNode(Opcodes.IRETURN));
+        method.maxStack = 2;
+        method.maxLocals = 2;
+        classNode.methods.add(method);
+
+        L1Class owner = new L1Class(classNode);
+        NativeTranslator translator = new NativeTranslator("strict-hot-path", false, false, 12345L);
+        String source = translator.translate(List.of(new MethodSelection(owner, owner.findMethod("sum", "(II)I")))).source();
+        String bodySection = translatedFunctionBody(source, "Java_pkg_StrictNativeHotPath_sum");
+
+        Matcher wrapperCall = HOT_PATH_JNI_WRAPPER_CALL.matcher(bodySection);
+        assertFalse(wrapperCall.find(), () -> failure(wrapperCall.group(), bodySection));
     }
 
     @Test
@@ -249,7 +290,7 @@ class CCodeGeneratorTest {
 
         assertContains(source,
             "uint32_t owner_class_index;",
-            "jclass *owner_class_slot;",
+            "static jclass g_cls_",
             "void* cached_klass;",
             "neko_ldc_class_site_oop(thread,"
         );
@@ -283,8 +324,8 @@ class CCodeGeneratorTest {
         String source = translatedLdcStringSource("nk/test/sample/SampleStringAscii", "hello-neko");
 
         assertContains(source,
-            "neko_ldc_string_site_oop(env,",
-            expectedUtf8BlobFragment("hello-neko")
+            "neko_bound_string(env,",
+            "neko_oop_from_bound_global_ref((jobject)__ldc)"
         );
     }
 
@@ -294,8 +335,8 @@ class CCodeGeneratorTest {
         String source = translatedLdcStringSource("nk/test/sample/SampleStringUnicode", literal);
 
         assertContains(source,
-            "neko_ldc_string_site_oop(env,",
-            expectedModifiedUtf8BlobFragment(literal)
+            "neko_bound_string(env,",
+            "neko_oop_from_bound_global_ref((jobject)__ldc)"
         );
     }
 
@@ -377,9 +418,40 @@ class CCodeGeneratorTest {
     }
 
     private static String translatedBodySection(String source, String functionName) {
-        int functionIndex = source.indexOf("JNIEXPORT jobject JNICALL " + functionName);
+        int functionIndex = source.indexOf(functionName + "(");
+        if (functionIndex < 0) {
+            functionIndex = source.indexOf("neko_impl_0(");
+        }
         assertTrue(functionIndex >= 0, () -> "Missing translated function `" + functionName + "` in generated C.\n" + source);
         return source.substring(functionIndex);
+    }
+
+    private static String translatedFunctionBody(String source, String functionName) {
+        Matcher signature = Pattern.compile("\\b(?:NEKO_FORCE_ALIGN_STACK\\s+)?(?:void\\*|void|int32_t|int64_t|float|double)\\s+" + Pattern.quote(functionName) + "\\s*\\(").matcher(source);
+        boolean found = signature.find();
+        if (!found) {
+            signature = Pattern.compile("\\b(?:NEKO_FORCE_ALIGN_STACK\\s+)?(?:void\\*|void|int32_t|int64_t|float|double)\\s+neko_impl_0\\s*\\(").matcher(source);
+            found = signature.find();
+        }
+        assertTrue(found, () -> "Missing translated function `" + functionName + "` in generated C.\n" + source);
+
+        int bodyStart = source.indexOf('{', signature.end());
+        assertTrue(bodyStart >= 0, () -> "Missing translated function body for `" + functionName + "` in generated C.\n" + source);
+
+        int depth = 0;
+        for (int index = bodyStart; index < source.length(); index++) {
+            char current = source.charAt(index);
+            if (current == '{') {
+                depth++;
+            } else if (current == '}') {
+                depth--;
+                if (depth == 0) {
+                    return source.substring(bodyStart + 1, index);
+                }
+            }
+        }
+
+        throw new AssertionError("Unterminated translated function body for `" + functionName + "` in generated C.\n" + source);
     }
 
     private static String compileAndRunJniGlobalRefHarness(int javaSpecVersion) throws Exception {
@@ -445,11 +517,23 @@ class CCodeGeneratorTest {
     private static String jniGlobalRefHelpers() {
         String source = minimalGeneratedSource();
         String startMarker = "static inline void *volatile *neko_decode_jni_global_ref_slot(jobject global_ref, int jdk_feature) {";
-        String endMarker = "static jboolean neko_resolve_field_site_with_class(JNIEnv *env, void *thread, NekoManifestFieldSite *site, jclass owner_class) {";
         int start = source.indexOf(startMarker);
-        int end = source.indexOf(endMarker, start);
-        assertTrue(start >= 0 && end > start, () -> "Missing JNI global-ref helpers in generated C.\n" + source);
-        return source.substring(start, end);
+        assertTrue(start >= 0, () -> "Missing JNI global-ref helpers in generated C.\n" + source);
+        int bodyStart = source.indexOf('{', start);
+        assertTrue(bodyStart >= 0, () -> "Missing JNI global-ref helper body in generated C.\n" + source);
+        int depth = 0;
+        for (int index = bodyStart; index < source.length(); index++) {
+            char current = source.charAt(index);
+            if (current == '{') {
+                depth++;
+            } else if (current == '}') {
+                depth--;
+                if (depth == 0) {
+                    return source.substring(start, index + 1);
+                }
+            }
+        }
+        throw new AssertionError("Unterminated JNI global-ref helper in generated C.\n" + source);
     }
 
     private static String minimalGeneratedSource() {
@@ -589,6 +673,10 @@ class CCodeGeneratorTest {
                 uint32_t wave4a_disabled;
             } NekoVmLayout;
 
+            static inline void* neko_load_oop_from_cell(const void *cell) {
+                return cell == NULL ? NULL : *(void* const*)cell;
+            }
+
             struct SampleKlass {
                 void *java_mirror_handle;
             };
@@ -625,7 +713,7 @@ class CCodeGeneratorTest {
                 oop mirror = (oop)&marker;
                 oop slot = mirror;
                 oop *slot_ptr = &slot;
-                struct SampleKlass klass = { .java_mirror_handle = &slot_ptr };
+                struct SampleKlass klass = { .java_mirror_handle = slot_ptr };
                 NekoManifestLdcSite site = {0};
                 site.cached_klass = &klass;
                 if (neko_resolve_ldc_class_handle(&site) != mirror) {
@@ -640,7 +728,7 @@ class CCodeGeneratorTest {
 
     private static String mirrorHelpers() {
         String source = minimalGeneratedSource();
-        String startMarker = "static inline void* neko_resolve_mirror_locator_from_klass(const NekoVmLayout *layout, Klass *klass) {";
+        String startMarker = "static inline const void* neko_resolve_mirror_storage_slot_from_klass(const NekoVmLayout *layout, Klass *klass) {";
         String endMarker = "__attribute__((visibility(\"default\"))) oop neko_rt_static_base_from_holder_nosafepoint(Klass *holder) {";
         int start = source.indexOf(startMarker);
         int end = source.indexOf(endMarker, start);

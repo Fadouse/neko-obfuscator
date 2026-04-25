@@ -17,6 +17,10 @@ import java.util.List;
 import java.util.Map;
 
 public final class AssemblyStubEmitter {
+    private static final int RT_CTX_BYTES = 64;
+    private static final int RT_RETURN_SAVE_BYTES = 16;
+    private static final int RT_I2I_SOURCE_SAVE_BYTES = 8;
+
     private final CEmissionContext ctx;
 
     public AssemblyStubEmitter(CEmissionContext ctx) {
@@ -261,6 +265,60 @@ public final class AssemblyStubEmitter {
         sb.append("    ret\n");
     }
 
+    private void emitEnterVmFromI2i(StringBuilder sb, DispatchPlan plan) {
+        int ctxOffset = i2iCtxOffset(plan);
+        sb.append("    lea rdi, [rsp + ").append(ctxOffset).append("]\n");
+        sb.append("    mov rsi, r15\n");
+        sb.append("    mov rdx, r13\n");
+        sb.append("    xor ecx, ecx\n");
+        sb.append("    mov r8, QWORD PTR [rsp + ").append(plan.retSaveOffset()).append("]\n");
+        sb.append("    xor r9d, r9d\n");
+        sb.append("    call neko_rt_ctx_init\n");
+        sb.append("    lea rdi, [rsp + ").append(ctxOffset).append("]\n");
+        sb.append("    call neko_rt_enter_vm\n");
+    }
+
+    private void emitEnterVmFromC2i(StringBuilder sb, DispatchPlan plan) {
+        int ctxOffset = c2iCtxOffset(plan);
+        sb.append("    lea r10, [rsp + ").append(plan.frameBytes()).append("]\n");
+        sb.append("    lea rdi, [rsp + ").append(ctxOffset).append("]\n");
+        sb.append("    mov rsi, r15\n");
+        sb.append("    mov rdx, r10\n");
+        sb.append("    xor ecx, ecx\n");
+        sb.append("    mov r8, QWORD PTR [r10]\n");
+        sb.append("    xor r9d, r9d\n");
+        sb.append("    call neko_rt_ctx_init\n");
+        sb.append("    lea rdi, [rsp + ").append(ctxOffset).append("]\n");
+        sb.append("    call neko_rt_enter_vm\n");
+    }
+
+    private void emitLeaveVmPreservingReturn(StringBuilder sb, char returnKind, int ctxOffset, int returnSaveOffset) {
+        emitSaveReturnValue(sb, returnKind, returnSaveOffset);
+        sb.append("    lea rdi, [rsp + ").append(ctxOffset).append("]\n");
+        sb.append("    call neko_rt_leave_vm\n");
+        emitRestoreReturnValue(sb, returnKind, returnSaveOffset);
+    }
+
+    private void emitSaveReturnValue(StringBuilder sb, char returnKind, int returnSaveOffset) {
+        switch (returnKind) {
+            case 'V' -> {
+            }
+            case 'F' -> sb.append("    movss DWORD PTR [rsp + ").append(returnSaveOffset).append("], xmm0\n");
+            case 'D' -> sb.append("    movsd QWORD PTR [rsp + ").append(returnSaveOffset).append("], xmm0\n");
+            default -> sb.append("    mov QWORD PTR [rsp + ").append(returnSaveOffset).append("], rax\n");
+        }
+    }
+
+    private void emitRestoreReturnValue(StringBuilder sb, char returnKind, int returnSaveOffset) {
+        switch (returnKind) {
+            case 'V' -> {
+            }
+            case 'F' -> sb.append("    movss xmm0, DWORD PTR [rsp + ").append(returnSaveOffset).append("]\n");
+            case 'D' -> sb.append("    movsd xmm0, QWORD PTR [rsp + ").append(returnSaveOffset).append("]\n");
+            default -> sb.append("    mov rax, QWORD PTR [rsp + ").append(returnSaveOffset).append("]\n");
+        }
+    }
+
     private void emitStackCopiesFromInterpreter(StringBuilder sb, DispatchPlan plan, String labelPrefix) {
         for (int i = 0; i < plan.logicalArgKinds().size(); i++) {
             ArgLocation dest = plan.destLayout().locations().get(i);
@@ -293,6 +351,34 @@ public final class AssemblyStubEmitter {
             }
             ArgLocation source = plan.sourceLayout().locations().get(i);
             emitCompiledLoadToStack(sb, plan, source, dest.index(), plan.logicalArgKinds().get(i), labelPrefix + "_stack_" + i);
+        }
+    }
+
+    private void emitFpSpillsFromCompiled(StringBuilder sb, DispatchPlan plan) {
+        int fpCount = countFpRegisters(plan.sourceLayout());
+        int fpBase = c2iFpSpillBaseOffset(plan);
+        for (int fpIndex = 0; fpIndex < fpCount; fpIndex++) {
+            sb.append("    movdqu XMMWORD PTR [rsp + ").append(fpBase + (fpIndex * 16)).append("], ").append(fpRegister(fpIndex)).append("\n");
+        }
+    }
+
+    private void emitRegisterLoadsFromCompiled(StringBuilder sb, DispatchPlan plan) {
+        int fpBase = c2iFpSpillBaseOffset(plan);
+        for (int i = 0; i < plan.logicalArgKinds().size(); i++) {
+            ArgLocation dest = plan.destLayout().locations().get(i);
+            ArgLocation source = plan.sourceLayout().locations().get(i);
+            char kind = plan.logicalArgKinds().get(i);
+            if (dest.kind() == ArgLocationKind.GP_REG) {
+                if (source.kind() == ArgLocationKind.GP_REG) {
+                    if (kind == 'L' || kind == 'J') {
+                        sb.append("    mov ").append(dispatcherGpRegister(dest.index())).append(", QWORD PTR [rsp + ").append(plan.gpSpillBaseOffset() + (source.index() * 8)).append("]\n");
+                    } else {
+                        sb.append("    mov ").append(dispatcherGpRegister32(dest.index())).append(", DWORD PTR [rsp + ").append(plan.gpSpillBaseOffset() + (source.index() * 8)).append("]\n");
+                    }
+                }
+            } else if (dest.kind() == ArgLocationKind.FP_REG && source.kind() == ArgLocationKind.FP_REG) {
+                sb.append("    movdqu ").append(fpRegister(dest.index())).append(", XMMWORD PTR [rsp + ").append(fpBase + (source.index() * 16)).append("]\n");
+            }
         }
     }
 
@@ -388,6 +474,40 @@ public final class AssemblyStubEmitter {
         int gpSpillBaseOffset = entrySaveOffset + 8;
         int frameBytes = alignUp(callStackBytes + 8 + (sourceLayout.gpRegisterCount() * 8), 16);
         return new DispatchPlan(logicalArgKinds, sourceLayout, destLayout, frameBytes, entrySaveOffset, -1, gpSpillBaseOffset);
+    }
+
+    private int countFpRegisters(CallingLayout layout) {
+        int count = 0;
+        for (ArgLocation location : layout.locations()) {
+            if (location.kind() == ArgLocationKind.FP_REG) {
+                count = Math.max(count, location.index() + 1);
+            }
+        }
+        return count;
+    }
+
+    private int i2iCtxOffset(DispatchPlan plan) {
+        return plan.retSaveOffset() + 8;
+    }
+
+    private int i2iSourceSaveOffset(DispatchPlan plan) {
+        return i2iCtxOffset(plan) + RT_CTX_BYTES;
+    }
+
+    private int i2iReturnSaveOffset(DispatchPlan plan) {
+        return i2iSourceSaveOffset(plan) + RT_I2I_SOURCE_SAVE_BYTES;
+    }
+
+    private int c2iFpSpillBaseOffset(DispatchPlan plan) {
+        return plan.gpSpillBaseOffset() + (plan.sourceLayout().gpRegisterCount() * 8);
+    }
+
+    private int c2iCtxOffset(DispatchPlan plan) {
+        return c2iFpSpillBaseOffset(plan) + (countFpRegisters(plan.sourceLayout()) * 16);
+    }
+
+    private int c2iReturnSaveOffset(DispatchPlan plan) {
+        return c2iCtxOffset(plan) + RT_CTX_BYTES;
     }
 
     private CallingLayout buildJavaLayout(List<Character> logicalArgKinds) {

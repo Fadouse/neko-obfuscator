@@ -680,6 +680,25 @@ static void neko_reset_vm_layout(void) {
     g_neko_vm_layout.off_java_frame_anchor_pc = -1;
     g_neko_vm_layout.off_java_thread_jni_environment = -1;
     g_neko_vm_layout.off_oophandle_obj = -1;
+    g_neko_vm_layout.off_card_table_whole_heap = -1;
+    g_neko_vm_layout.off_card_table_byte_map = -1;
+    g_neko_vm_layout.off_card_table_byte_map_base = -1;
+    g_neko_vm_layout.off_card_table_barrier_set_card_table = -1;
+    g_neko_vm_layout.addr_barrier_set_static = 0u;
+    g_neko_vm_layout.card_table_byte_map_base = 0u;
+    g_neko_vm_layout.heap_low = 0u;
+    g_neko_vm_layout.heap_high = 0u;
+    g_neko_vm_layout.card_table_card_shift = -1;
+    g_neko_vm_layout.card_table_dirty_card = 0;
+    g_neko_vm_layout.g1_young_card = 2;
+    g_neko_vm_layout.g1_heap_region_shift = -1;
+    g_neko_vm_layout.off_g1_satb_mark_queue_active = -1;
+    g_neko_vm_layout.off_g1_satb_mark_queue_index = -1;
+    g_neko_vm_layout.off_g1_satb_mark_queue_buffer = -1;
+    g_neko_vm_layout.off_g1_dirty_card_queue_index = -1;
+    g_neko_vm_layout.off_g1_dirty_card_queue_buffer = -1;
+    g_neko_vm_layout.jvmci_write_barrier_pre_fn = 0u;
+    g_neko_vm_layout.jvmci_write_barrier_post_fn = 0u;
     g_neko_vm_layout.narrow_oop_shift = -1;
     g_neko_vm_layout.narrow_klass_shift = -1;
     g_neko_vm_layout.thread_state_in_java = -1;
@@ -938,6 +957,14 @@ static inline jboolean neko_loader_ready(void) {
 
 static void neko_capture_vm_constant(const char *name, int64_t value) {
     if (name == NULL) return;
+    if (neko_streq(name, "CardTable::dirty_card") || neko_ends_with(name, "::dirty_card")) {
+        g_neko_vm_layout.card_table_dirty_card = (int)value;
+        return;
+    }
+    if (neko_streq(name, "G1CardTable::g1_young_gen") || neko_ends_with(name, "::g1_young_gen")) {
+        g_neko_vm_layout.g1_young_card = (int)value;
+        return;
+    }
     if (neko_streq(name, "JVM_ACC_NOT_C1_COMPILABLE")) {
         g_neko_vm_layout.access_not_c1_compilable = (uint32_t)value;
         return;
@@ -1047,6 +1074,160 @@ static const char* neko_validate_vm_layout(void) {
     if (!g_neko_vm_layout.has_narrow_klass_base) return "CompressedKlassPointers::_narrow_klass._base";
     if (!g_neko_vm_layout.has_narrow_klass_shift) return "CompressedKlassPointers::_narrow_klass._shift";
     return NULL;
+}
+
+static void neko_derive_card_table_barrier_layout(void) {
+    void *barrier_set;
+    void *card_table;
+    void *byte_map;
+    void *byte_map_base;
+    void *whole_heap_start;
+    size_t whole_heap_words;
+    if (g_neko_vm_layout.addr_barrier_set_static == 0u
+        || g_neko_vm_layout.off_card_table_barrier_set_card_table < 0
+        || g_neko_vm_layout.off_card_table_byte_map < 0
+        || g_neko_vm_layout.off_card_table_byte_map_base < 0
+        || g_neko_vm_layout.off_card_table_whole_heap < 0) {
+        return;
+    }
+    barrier_set = *(void**)g_neko_vm_layout.addr_barrier_set_static;
+    if (barrier_set == NULL) return;
+    card_table = *(void**)((uint8_t*)barrier_set + g_neko_vm_layout.off_card_table_barrier_set_card_table);
+    if (card_table == NULL) return;
+    byte_map = *(void**)((uint8_t*)card_table + g_neko_vm_layout.off_card_table_byte_map);
+    byte_map_base = *(void**)((uint8_t*)card_table + g_neko_vm_layout.off_card_table_byte_map_base);
+    whole_heap_start = *(void**)((uint8_t*)card_table + g_neko_vm_layout.off_card_table_whole_heap);
+    whole_heap_words = *(size_t*)((uint8_t*)card_table + g_neko_vm_layout.off_card_table_whole_heap + sizeof(void*));
+    if (byte_map == NULL || byte_map_base == NULL || whole_heap_start == NULL) return;
+    g_neko_vm_layout.card_table_byte_map_base = (uintptr_t)byte_map_base;
+    if (whole_heap_words > 0u) {
+        g_neko_vm_layout.heap_low = (uintptr_t)whole_heap_start;
+        g_neko_vm_layout.heap_high = (uintptr_t)whole_heap_start + (whole_heap_words * sizeof(void*));
+    }
+    for (int shift = 1; shift < 32; shift++) {
+        uintptr_t computed = ((uintptr_t)byte_map_base) + (((uintptr_t)whole_heap_start) >> shift);
+        if (computed == (uintptr_t)byte_map) {
+            g_neko_vm_layout.card_table_card_shift = shift;
+            break;
+        }
+    }
+    if (g_neko_vm_layout.card_table_card_shift < 0) {
+        g_neko_vm_layout.card_table_card_shift = 9;
+    }
+    NEKO_TRACE(1, "[nk] card barrier base=%p shift=%d dirty=%d heap=[%p,%p)", (void*)g_neko_vm_layout.card_table_byte_map_base, g_neko_vm_layout.card_table_card_shift, g_neko_vm_layout.card_table_dirty_card, (void*)g_neko_vm_layout.heap_low, (void*)g_neko_vm_layout.heap_high);
+}
+
+#if defined(__linux__)
+typedef struct {
+    uintptr_t lo[64];
+    uintptr_t hi[64];
+    uint32_t readable[64];
+    uint32_t executable[64];
+    int count;
+} neko_libjvm_segments;
+
+static int neko_collect_libjvm_segments_cb(struct dl_phdr_info *info, size_t size, void *data) {
+    neko_libjvm_segments *segments = (neko_libjvm_segments*)data;
+    (void)size;
+    if (info == NULL || data == NULL || info->dlpi_name == NULL || strstr(info->dlpi_name, "libjvm.so") == NULL) return 0;
+    for (int i = 0; i < info->dlpi_phnum && segments->count < 64; i++) {
+        const ElfW(Phdr) *ph = &info->dlpi_phdr[i];
+        if (ph->p_type != PT_LOAD || (ph->p_flags & PF_R) == 0 || ph->p_memsz == 0) continue;
+        segments->lo[segments->count] = (uintptr_t)info->dlpi_addr + (uintptr_t)ph->p_vaddr;
+        segments->hi[segments->count] = segments->lo[segments->count] + (uintptr_t)ph->p_memsz;
+        segments->readable[segments->count] = (ph->p_flags & PF_R) != 0 ? 1u : 0u;
+        segments->executable[segments->count] = (ph->p_flags & PF_X) != 0 ? 1u : 0u;
+        segments->count++;
+    }
+    return 0;
+}
+
+static jboolean neko_collect_libjvm_segments(neko_libjvm_segments *segments) {
+    if (segments == NULL) return JNI_FALSE;
+    memset(segments, 0, sizeof(*segments));
+    dl_iterate_phdr(neko_collect_libjvm_segments_cb, segments);
+    return segments->count > 0 ? JNI_TRUE : JNI_FALSE;
+}
+
+static jboolean neko_addr_in_segments(const neko_libjvm_segments *segments, uintptr_t value, jboolean executable_only) {
+    if (segments == NULL || value == 0u) return JNI_FALSE;
+    for (int i = 0; i < segments->count; i++) {
+        if (executable_only && segments->executable[i] == 0u) continue;
+        if (value >= segments->lo[i] && value < segments->hi[i]) return JNI_TRUE;
+    }
+    return JNI_FALSE;
+}
+
+static uintptr_t neko_find_libjvm_string(const neko_libjvm_segments *segments, const char *name) {
+    size_t len;
+    if (segments == NULL || name == NULL) return 0u;
+    len = strlen(name) + 1u;
+    for (int i = 0; i < segments->count; i++) {
+        if (segments->readable[i] == 0u || segments->hi[i] <= segments->lo[i] || segments->hi[i] - segments->lo[i] < len) continue;
+        for (uintptr_t p = segments->lo[i]; p + len <= segments->hi[i]; p++) {
+            if (memcmp((const void*)p, name, len) == 0) return p;
+        }
+    }
+    return 0u;
+}
+
+static jboolean neko_read_jvmci_config_pair(const char *name, jboolean want_code_pointer, uintptr_t *out) {
+    neko_libjvm_segments segments;
+    uintptr_t name_addr;
+    if (out != NULL) *out = 0u;
+    if (name == NULL || out == NULL || !neko_collect_libjvm_segments(&segments)) return JNI_FALSE;
+    name_addr = neko_find_libjvm_string(&segments, name);
+    if (name_addr == 0u) return JNI_FALSE;
+    for (int i = 0; i < segments.count; i++) {
+        if (segments.readable[i] == 0u || segments.hi[i] <= segments.lo[i] + (2u * sizeof(uintptr_t))) continue;
+        for (uintptr_t p = segments.lo[i]; p + (2u * sizeof(uintptr_t)) <= segments.hi[i]; p += sizeof(uintptr_t)) {
+            uintptr_t key;
+            uintptr_t value;
+            memcpy(&key, (const void*)p, sizeof(key));
+            if (key != name_addr) continue;
+            memcpy(&value, (const void*)(p + sizeof(uintptr_t)), sizeof(value));
+            if (want_code_pointer) {
+                if (!neko_addr_in_segments(&segments, value, JNI_TRUE)) continue;
+            }
+            *out = value;
+            return JNI_TRUE;
+        }
+    }
+    return JNI_FALSE;
+}
+#else
+static jboolean neko_read_jvmci_config_pair(const char *name, jboolean want_code_pointer, uintptr_t *out) {
+    (void)name;
+    (void)want_code_pointer;
+    if (out != NULL) *out = 0u;
+    return JNI_FALSE;
+}
+#endif
+
+static void neko_derive_jvmci_g1_barrier_layout(void) {
+    uintptr_t value = 0u;
+    if (neko_read_jvmci_config_pair("G1ThreadLocalData::dirty_card_queue_index_offset", JNI_FALSE, &value)) {
+        g_neko_vm_layout.off_g1_dirty_card_queue_index = (ptrdiff_t)value;
+    }
+    if (neko_read_jvmci_config_pair("G1ThreadLocalData::dirty_card_queue_buffer_offset", JNI_FALSE, &value)) {
+        g_neko_vm_layout.off_g1_dirty_card_queue_buffer = (ptrdiff_t)value;
+    }
+    if (neko_read_jvmci_config_pair("G1ThreadLocalData::satb_mark_queue_active_offset", JNI_FALSE, &value)) {
+        g_neko_vm_layout.off_g1_satb_mark_queue_active = (ptrdiff_t)value;
+    }
+    if (neko_read_jvmci_config_pair("G1ThreadLocalData::satb_mark_queue_index_offset", JNI_FALSE, &value)) {
+        g_neko_vm_layout.off_g1_satb_mark_queue_index = (ptrdiff_t)value;
+    }
+    if (neko_read_jvmci_config_pair("G1ThreadLocalData::satb_mark_queue_buffer_offset", JNI_FALSE, &value)) {
+        g_neko_vm_layout.off_g1_satb_mark_queue_buffer = (ptrdiff_t)value;
+    }
+    if (neko_read_jvmci_config_pair("JVMCIRuntime::write_barrier_pre", JNI_TRUE, &value)) {
+        g_neko_vm_layout.jvmci_write_barrier_pre_fn = value;
+    }
+    if (neko_read_jvmci_config_pair("JVMCIRuntime::write_barrier_post", JNI_TRUE, &value)) {
+        g_neko_vm_layout.jvmci_write_barrier_post_fn = value;
+    }
+    NEKO_TRACE(1, "[nk] g1 satb active=%td index=%td buffer=%td slow_pre=%p dcq index=%td buffer=%td slow_post=%p", g_neko_vm_layout.off_g1_satb_mark_queue_active, g_neko_vm_layout.off_g1_satb_mark_queue_index, g_neko_vm_layout.off_g1_satb_mark_queue_buffer, (void*)g_neko_vm_layout.jvmci_write_barrier_pre_fn, g_neko_vm_layout.off_g1_dirty_card_queue_index, g_neko_vm_layout.off_g1_dirty_card_queue_buffer, (void*)g_neko_vm_layout.jvmci_write_barrier_post_fn);
 }
 
 """);
@@ -1203,6 +1384,16 @@ static jboolean neko_parse_vm_layout(JNIEnv *env) {
             else if (neko_streq(field_name, "_jni_environment")) g_neko_vm_layout.off_java_thread_jni_environment = (ptrdiff_t)offset;
         } else if (neko_streq(type_name, "ThreadShadow")) {
             if (neko_streq(field_name, "_pending_exception")) g_neko_vm_layout.off_thread_pending_exception = (ptrdiff_t)offset;
+        } else if (neko_streq(type_name, "CardTable")) {
+            if (neko_streq(field_name, "_whole_heap")) g_neko_vm_layout.off_card_table_whole_heap = (ptrdiff_t)offset;
+            else if (neko_streq(field_name, "_byte_map")) g_neko_vm_layout.off_card_table_byte_map = (ptrdiff_t)offset;
+            else if (neko_streq(field_name, "_byte_map_base")) g_neko_vm_layout.off_card_table_byte_map_base = (ptrdiff_t)offset;
+        } else if (neko_streq(type_name, "CardTableBarrierSet")) {
+            if (neko_streq(field_name, "_card_table")) g_neko_vm_layout.off_card_table_barrier_set_card_table = (ptrdiff_t)offset;
+        } else if (neko_streq(type_name, "BarrierSet")) {
+            if (neko_streq(field_name, "_barrier_set") && is_static && address != NULL) g_neko_vm_layout.addr_barrier_set_static = (uintptr_t)address;
+        } else if (neko_streq(type_name, "HeapRegion")) {
+            if (neko_streq(field_name, "LogOfHRGrainBytes") && is_static && address != NULL) g_neko_vm_layout.g1_heap_region_shift = *(const int*)address;
         }
         if (neko_streq(type_name, "InstanceKlass") && neko_streq(field_name, "_fieldinfo_stream")) {
             g_neko_vm_layout.off_instance_klass_fieldinfo_stream = (ptrdiff_t)offset;
@@ -1270,6 +1461,8 @@ static jboolean neko_parse_vm_layout(JNIEnv *env) {
     neko_derive_java_thread_anchor_offset();
     neko_derive_java_thread_jni_environment_offset();
     neko_derive_cld_handles_offset();
+    neko_derive_card_table_barrier_layout();
+    neko_derive_jvmci_g1_barrier_layout();
     neko_derive_bootstrap_wellknown_layout();
     missing = neko_validate_vm_layout();
     if (missing != NULL) {
@@ -2063,6 +2256,7 @@ static void neko_bootstrap_owner_discovery(void) {
 
 static void neko_bootstrap_class_discovery(JNIEnv *env, jclass klass) {
     Klass *owner_klass;
+    void *owner_name_sym;
     void *methods;
     int32_t method_count;
     if (env == NULL || klass == NULL) {
@@ -2071,6 +2265,15 @@ static void neko_bootstrap_class_discovery(JNIEnv *env, jclass klass) {
     }
     owner_klass = (Klass*)neko_class_klass_pointer(klass);
     if (owner_klass == NULL) {
+        neko_bootstrap_owner_discovery();
+        return;
+    }
+    if (g_neko_vm_layout.off_klass_name < 0) {
+        neko_bootstrap_owner_discovery();
+        return;
+    }
+    owner_name_sym = *(void**)((uint8_t*)owner_klass + g_neko_vm_layout.off_klass_name);
+    if (owner_name_sym == NULL) {
         neko_bootstrap_owner_discovery();
         return;
     }
@@ -2084,8 +2287,7 @@ static void neko_bootstrap_class_discovery(JNIEnv *env, jclass klass) {
         if (entry->owner_internal == NULL || entry->method_name == NULL || entry->method_desc == NULL) continue;
         owner_len = strlen(entry->owner_internal);
         if (owner_len >= 65536u) continue;
-        if (neko_find_klass_by_name_in_cld_graph(entry->owner_internal, (uint16_t)owner_len) != owner_klass) continue;
-        neko_bind_owner_by_internal_name(env, entry->owner_internal, klass);
+        if (!neko_symbol_equals_literal(owner_name_sym, entry->owner_internal, (uint16_t)owner_len)) continue;
         name_len = strlen(entry->method_name);
         desc_len = strlen(entry->method_desc);
         if (name_len >= 65536u || desc_len >= 65536u) continue;
@@ -2359,6 +2561,7 @@ static void neko_publish_prepared_ldc_class_site(JNIEnv *env, jclass klass, cons
             if (site->kind != NEKO_LDC_KIND_CLASS) continue;
             if (__atomic_load_n(&site->cached_klass, __ATOMIC_ACQUIRE) != NULL) continue;
             if (!neko_ldc_site_matches_loaded_class(env, site, klass, signature)) continue;
+            (void)neko_oop_from_jni_ref((jobject)klass);
             __atomic_store_n(&site->cached_klass, prepared_klass, __ATOMIC_RELEASE);
             NEKO_TRACE(0, "[nk] ldc-cls bind %s %p", signature, prepared_klass);
         }

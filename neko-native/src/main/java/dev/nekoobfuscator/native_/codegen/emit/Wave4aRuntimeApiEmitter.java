@@ -316,6 +316,17 @@ static inline bool neko_lh_is_array(uint32_t lh) {
     return ((int32_t)lh) < 0;   /* layout_helper encodes arrays with sign bit in HotSpot */
 }
 
+static void* neko_rt_try_alloc_instance_for_klass(void* klass) {
+    uint32_t lh;
+    size_t instance_size;
+    if (klass == NULL || g_neko_vm_layout.off_klass_layout_helper < 0) return NULL;
+    lh = *(uint32_t*)((uint8_t*)klass + g_neko_vm_layout.off_klass_layout_helper);
+    if (neko_lh_is_array(lh)) return NULL;
+    instance_size = neko_lh_instance_size(lh);
+    if (instance_size == 0u) return NULL;
+    return neko_rt_try_alloc_instance_fast_nosafepoint((Klass*)klass, instance_size);
+}
+
 static void* neko_rt_try_alloc_array_fast_nosafepoint(void* array_klass, int32_t length) {
     JavaThread *thread;
     void **top_ptr;
@@ -390,6 +401,37 @@ static inline int32_t neko_object_array_element_offset(void* array_klass, int32_
     uint32_t header_bytes = neko_lh_header_size(lh);
     uint32_t log2_elem = neko_lh_log2_element(lh);
     return (int32_t)(header_bytes + ((uint32_t)index << log2_elem));
+}
+
+static inline void* neko_rt_try_alloc_array_for_class(jclass array_class, int32_t length) {
+    void *array_klass;
+    if (array_class == NULL || length < 0) return NULL;
+    array_klass = neko_class_klass_pointer(array_class);
+    return neko_rt_try_alloc_array_fast_nosafepoint(array_klass, length);
+}
+
+static inline void* neko_raw_aaload(jobjectArray arr, int32_t index) {
+    void *array_oop;
+    void *array_klass;
+    int32_t offset;
+    if (arr == NULL || index < 0) return NULL;
+    array_oop = neko_current_oop_for_fast_access((jobject)arr);
+    array_klass = neko_raw_oop_klass((void*)arr);
+    if (array_oop == NULL || array_klass == NULL || g_neko_vm_layout.off_klass_layout_helper < 0) return NULL;
+    offset = neko_object_array_element_offset(array_klass, index);
+    return neko_load_heap_oop_from_published(array_oop, offset);
+}
+
+static inline void neko_raw_aastore(jobjectArray arr, int32_t index, void *value) {
+    void *array_oop;
+    void *array_klass;
+    int32_t offset;
+    if (arr == NULL || index < 0) return;
+    array_oop = neko_current_oop_for_fast_access((jobject)arr);
+    array_klass = neko_raw_oop_klass((void*)arr);
+    if (array_oop == NULL || array_klass == NULL || g_neko_vm_layout.off_klass_layout_helper < 0) return;
+    offset = neko_object_array_element_offset(array_klass, index);
+    neko_store_heap_oop_at(array_oop, offset, value, JNI_FALSE);
 }
 
 #undef NEKO_THREAD_LOCAL

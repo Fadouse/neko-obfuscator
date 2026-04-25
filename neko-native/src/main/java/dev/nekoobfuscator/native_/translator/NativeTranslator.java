@@ -120,8 +120,8 @@ public final class NativeTranslator {
         Map<AbstractInsnNode, Integer> pcMap = buildPcMap(node);
         Map<Integer, List<TryHandler>> activeHandlers = buildActiveHandlers(method, labelMap, pcMap);
 
-        emitParamToLocals(fn, method, argTypes);
         fn.addStatement(new CStatement.RawC("neko_native_frame_push(\"" + c(selection.owner().name()) + "\", \"" + c(selection.method().name()) + "\");"));
+        emitParamToLocals(fn, method, argTypes);
         opcodes.beginMethod(selection.owner().name(), selection.method().name(), selection.method().descriptor(), selection.method().isStatic());
 
         for (AbstractInsnNode insn = node.instructions.getFirst(); insn != null; insn = insn.getNext()) {
@@ -234,12 +234,12 @@ public final class NativeTranslator {
     private void emitParamToLocals(CFunction fn, L1Method method, Type[] argTypes) {
         int localIndex = 0;
         if (!method.isStatic()) {
-            fn.addStatement(new CStatement.RawC("locals[0].o = neko_oop_for_direct((jobject)_this);"));
+            fn.addStatement(new CStatement.RawC("locals[0].o = neko_stable_object_for_stack((jobject)_this);"));
             localIndex = 1;
         }
         for (int i = 0; i < argTypes.length; i++) {
             if (argTypes[i].getSort() == Type.OBJECT || argTypes[i].getSort() == Type.ARRAY) {
-                fn.addStatement(new CStatement.RawC("locals[" + localIndex + "].o = neko_oop_for_direct((jobject)p" + i + ");"));
+                fn.addStatement(new CStatement.RawC("locals[" + localIndex + "].o = neko_stable_object_for_stack((jobject)p" + i + ");"));
             } else {
                 fn.addStatement(new CStatement.RawC("locals[" + localIndex + "]." + slotField(argTypes[i]) + " = p" + i + ";"));
             }

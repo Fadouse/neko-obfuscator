@@ -72,7 +72,6 @@ static int neko_patch_method(const NekoManifestMethod *entry, void *method_star)
     uintptr_t index;
     void *compiled_code;
     void *stub_i2i;
-    void *stub_c2i;
     if (entry == NULL || method_star == NULL) return -1;
     index = (uintptr_t)(entry - g_neko_manifest_methods);
     if (index >= g_neko_manifest_method_count) return -1;
@@ -97,8 +96,7 @@ static int neko_patch_method(const NekoManifestMethod *entry, void *method_star)
     }
 
     stub_i2i = g_neko_signature_i2i_stubs[entry->signature_id];
-    stub_c2i = g_neko_signature_c2i_stubs[entry->signature_id];
-    if (stub_i2i == NULL || stub_c2i == NULL) {
+    if (stub_i2i == NULL) {
         g_neko_manifest_patch_states[index] = NEKO_PATCH_STATE_FAILED;
         neko_error_log("missing stub for signature %u (%s.%s%s)", entry->signature_id, entry->owner_internal, entry->method_name, entry->method_desc);
         return -1;
@@ -106,7 +104,6 @@ static int neko_patch_method(const NekoManifestMethod *entry, void *method_star)
 
     __atomic_store_n((void**)((uint8_t*)method_star + g_neko_vm_layout.off_method_i2i_entry), stub_i2i, __ATOMIC_RELEASE);
     __atomic_store_n((void**)((uint8_t*)method_star + g_neko_vm_layout.off_method_from_interpreted_entry), stub_i2i, __ATOMIC_RELEASE);
-    __atomic_store_n((void**)((uint8_t*)method_star + g_neko_vm_layout.off_method_from_compiled_entry), stub_c2i, __ATOMIC_RELEASE);
 
     g_neko_manifest_patch_states[index] = NEKO_PATCH_STATE_APPLIED;
     g_neko_manifest_patch_count++;

@@ -59,12 +59,12 @@ public final class Wave3InvokeStaticEmitter {
                 .append(site.siteIndex()).append("]\n");
         }
         sb.append("\n");
-        sb.append("#define NEKO_ENSURE_CLASS(slot, env, name) ((slot) != NULL ? (slot) : ((slot) = (jclass)neko_new_global_ref((env), neko_find_class((env), (name)))))\n");
-        sb.append("#define NEKO_ENSURE_STRING(slot, env, utf) ((slot) != NULL ? (slot) : ((slot) = (jstring)neko_new_global_ref((env), neko_new_string_utf((env), (utf)))))\n");
-        sb.append("#define NEKO_ENSURE_METHOD_ID(slot, env, cls, name, desc) ((slot) != NULL ? (slot) : ((slot) = neko_get_method_id((env), (cls), (name), (desc))))\n");
-        sb.append("#define NEKO_ENSURE_STATIC_METHOD_ID(slot, env, cls, name, desc) ((slot) != NULL ? (slot) : ((slot) = neko_get_static_method_id((env), (cls), (name), (desc))))\n");
-        sb.append("#define NEKO_ENSURE_FIELD_ID(slot, env, cls, name, desc) ((slot) != NULL ? (slot) : ((slot) = neko_get_field_id((env), (cls), (name), (desc))))\n");
-        sb.append("#define NEKO_ENSURE_STATIC_FIELD_ID(slot, env, cls, name, desc) ((slot) != NULL ? (slot) : ((slot) = neko_get_static_field_id((env), (cls), (name), (desc))))\n\n");
+        sb.append("#define NEKO_ENSURE_CLASS(slot, env, name) (slot)\n");
+        sb.append("#define NEKO_ENSURE_STRING(slot, env, utf) (slot)\n");
+        sb.append("#define NEKO_ENSURE_METHOD_ID(slot, env, cls, name, desc) (slot)\n");
+        sb.append("#define NEKO_ENSURE_STATIC_METHOD_ID(slot, env, cls, name, desc) (slot)\n");
+        sb.append("#define NEKO_ENSURE_FIELD_ID(slot, env, cls, name, desc) (slot)\n");
+        sb.append("#define NEKO_ENSURE_STATIC_FIELD_ID(slot, env, cls, name, desc) (slot)\n\n");
         return sb.toString();
     }
 
@@ -73,11 +73,30 @@ public final class Wave3InvokeStaticEmitter {
 static void neko_raise_bound_resolution_error(JNIEnv *env, const char *errorClass, const char *message) {
     (void)errorClass;
     (void)message;
-    (void)neko_throw_cached(env, g_neko_throw_le);
+    (void)env;
+    (void)neko_raise_cached_pending(neko_get_current_thread(), g_neko_throw_le);
+}
+
+static void neko_bind_clear_pending(JNIEnv *env) {
+    jthrowable pending;
+    void *thread;
+    if (env != NULL) {
+        pending = (*env)->ExceptionOccurred(env);
+        if (pending != NULL) {
+            (*env)->ExceptionClear(env);
+            (*env)->DeleteLocalRef(env, pending);
+        }
+    }
+    thread = neko_get_current_thread();
+    if (thread != NULL && neko_pending_exception(thread) != NULL) {
+        neko_clear_pending_exception(thread);
+    }
 }
 
 static void neko_bind_log_failure(JNIEnv *env, const char *errorClass, const char *message) {
-    neko_raise_bound_resolution_error(env, errorClass, message);
+    (void)errorClass;
+    (void)message;
+    neko_bind_clear_pending(env);
 }
 
 static void neko_bind_class_slot(JNIEnv *env, jclass *slot, const char *owner) {
@@ -96,6 +115,7 @@ static void neko_bind_class_slot(JNIEnv *env, jclass *slot, const char *owner) {
         neko_bind_log_failure(env, "java/lang/NoClassDefFoundError", NULL);
         return;
     }
+    (void)neko_oop_from_jni_ref(globalRef);
     *slot = (jclass)globalRef;
 }
 
@@ -119,6 +139,9 @@ static void neko_bind_field_slot(JNIEnv *env, jfieldID *slot, jclass cls, const 
 
 static void neko_bind_string_slot(JNIEnv *env, jstring *slot, const char *utf) {
     jstring localString;
+    jstring internedString;
+    jclass stringClass;
+    jmethodID internMethod;
     jobject globalRef;
     if (env == NULL || slot == NULL || *slot != NULL || utf == NULL) return;
     localString = neko_new_string_utf(env, utf);
@@ -127,7 +150,23 @@ static void neko_bind_string_slot(JNIEnv *env, jstring *slot, const char *utf) {
         if (localString != NULL) neko_delete_local_ref(env, localString);
         return;
     }
-    globalRef = neko_new_global_ref(env, localString);
+    internedString = localString;
+    stringClass = neko_find_class(env, "java/lang/String");
+    if (stringClass == NULL) {
+        neko_bind_clear_pending(env);
+        internMethod = NULL;
+    } else {
+        internMethod = neko_get_method_id(env, stringClass, "intern", "()Ljava/lang/String;");
+        if (internMethod == NULL) neko_bind_clear_pending(env);
+    }
+    if (internMethod != NULL) {
+        jstring candidate = (jstring)neko_call_object_method_a(env, localString, internMethod, NULL);
+        if (candidate != NULL) internedString = candidate;
+        else neko_bind_clear_pending(env);
+    }
+    globalRef = neko_new_global_ref(env, internedString);
+    if (internedString != localString) neko_delete_local_ref(env, internedString);
+    if (stringClass != NULL) neko_delete_local_ref(env, stringClass);
     neko_delete_local_ref(env, localString);
     if (globalRef == NULL) {
         neko_bind_log_failure(env, "java/lang/IllegalStateException", NULL);
@@ -136,54 +175,70 @@ static void neko_bind_string_slot(JNIEnv *env, jstring *slot, const char *utf) {
     *slot = (jstring)globalRef;
 }
 
+static void neko_bind_runtime_helper_slots(JNIEnv *env) {
+    if (env == NULL) return;
+    neko_bind_class_slot(env, &g_neko_rt_cls_stack_trace_element, "java/lang/StackTraceElement");
+    neko_bind_class_slot(env, &g_neko_rt_cls_boolean, "java/lang/Boolean");
+    neko_bind_class_slot(env, &g_neko_rt_cls_byte, "java/lang/Byte");
+    neko_bind_class_slot(env, &g_neko_rt_cls_character, "java/lang/Character");
+    neko_bind_class_slot(env, &g_neko_rt_cls_short, "java/lang/Short");
+    neko_bind_class_slot(env, &g_neko_rt_cls_integer, "java/lang/Integer");
+    neko_bind_class_slot(env, &g_neko_rt_cls_long, "java/lang/Long");
+    neko_bind_class_slot(env, &g_neko_rt_cls_float, "java/lang/Float");
+    neko_bind_class_slot(env, &g_neko_rt_cls_double, "java/lang/Double");
+    neko_bind_class_slot(env, &g_neko_rt_cls_string, "java/lang/String");
+    neko_bind_class_slot(env, &g_neko_rt_cls_method_handle, "java/lang/invoke/MethodHandle");
+    neko_bind_method_slot(env, &g_neko_rt_mid_stack_trace_element_init, g_neko_rt_cls_stack_trace_element, "java/lang/StackTraceElement", "<init>", "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;I)V", JNI_FALSE);
+    neko_bind_method_slot(env, &g_neko_rt_mid_boolean_value_of, g_neko_rt_cls_boolean, "java/lang/Boolean", "valueOf", "(Z)Ljava/lang/Boolean;", JNI_TRUE);
+    neko_bind_method_slot(env, &g_neko_rt_mid_byte_value_of, g_neko_rt_cls_byte, "java/lang/Byte", "valueOf", "(B)Ljava/lang/Byte;", JNI_TRUE);
+    neko_bind_method_slot(env, &g_neko_rt_mid_character_value_of, g_neko_rt_cls_character, "java/lang/Character", "valueOf", "(C)Ljava/lang/Character;", JNI_TRUE);
+    neko_bind_method_slot(env, &g_neko_rt_mid_short_value_of, g_neko_rt_cls_short, "java/lang/Short", "valueOf", "(S)Ljava/lang/Short;", JNI_TRUE);
+    neko_bind_method_slot(env, &g_neko_rt_mid_integer_value_of, g_neko_rt_cls_integer, "java/lang/Integer", "valueOf", "(I)Ljava/lang/Integer;", JNI_TRUE);
+    neko_bind_method_slot(env, &g_neko_rt_mid_long_value_of, g_neko_rt_cls_long, "java/lang/Long", "valueOf", "(J)Ljava/lang/Long;", JNI_TRUE);
+    neko_bind_method_slot(env, &g_neko_rt_mid_float_value_of, g_neko_rt_cls_float, "java/lang/Float", "valueOf", "(F)Ljava/lang/Float;", JNI_TRUE);
+    neko_bind_method_slot(env, &g_neko_rt_mid_double_value_of, g_neko_rt_cls_double, "java/lang/Double", "valueOf", "(D)Ljava/lang/Double;", JNI_TRUE);
+    neko_bind_method_slot(env, &g_neko_rt_mid_boolean_unbox, g_neko_rt_cls_boolean, "java/lang/Boolean", "booleanValue", "()Z", JNI_FALSE);
+    neko_bind_method_slot(env, &g_neko_rt_mid_byte_unbox, g_neko_rt_cls_byte, "java/lang/Byte", "byteValue", "()B", JNI_FALSE);
+    neko_bind_method_slot(env, &g_neko_rt_mid_character_unbox, g_neko_rt_cls_character, "java/lang/Character", "charValue", "()C", JNI_FALSE);
+    neko_bind_method_slot(env, &g_neko_rt_mid_short_unbox, g_neko_rt_cls_short, "java/lang/Short", "shortValue", "()S", JNI_FALSE);
+    neko_bind_method_slot(env, &g_neko_rt_mid_integer_unbox, g_neko_rt_cls_integer, "java/lang/Integer", "intValue", "()I", JNI_FALSE);
+    neko_bind_method_slot(env, &g_neko_rt_mid_long_unbox, g_neko_rt_cls_long, "java/lang/Long", "longValue", "()J", JNI_FALSE);
+    neko_bind_method_slot(env, &g_neko_rt_mid_float_unbox, g_neko_rt_cls_float, "java/lang/Float", "floatValue", "()F", JNI_FALSE);
+    neko_bind_method_slot(env, &g_neko_rt_mid_double_unbox, g_neko_rt_cls_double, "java/lang/Double", "doubleValue", "()D", JNI_FALSE);
+    neko_bind_method_slot(env, &g_neko_rt_mid_string_value_of_object, g_neko_rt_cls_string, "java/lang/String", "valueOf", "(Ljava/lang/Object;)Ljava/lang/String;", JNI_TRUE);
+    neko_bind_method_slot(env, &g_neko_rt_mid_string_concat, g_neko_rt_cls_string, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", JNI_FALSE);
+    neko_bind_method_slot(env, &g_neko_rt_mid_method_handle_invoke_with_arguments, g_neko_rt_cls_method_handle, "java/lang/invoke/MethodHandle", "invokeWithArguments", "([Ljava/lang/Object;)Ljava/lang/Object;", JNI_FALSE);
+    neko_bind_string_slot(env, &g_neko_rt_str_null, "null");
+}
+
 static jclass neko_bound_class(JNIEnv *env, jclass slot, const char *owner) {
-    jclass localClass;
     if (slot != NULL) return slot;
-    if (env == NULL || owner == NULL) {
-        neko_raise_bound_resolution_error(env, "java/lang/NoClassDefFoundError", NULL);
-        return NULL;
-    }
-    localClass = neko_find_class(env, owner);
-    return localClass;
+    neko_raise_bound_resolution_error(env, "java/lang/NoClassDefFoundError", owner);
+    return NULL;
 }
 
 static jmethodID neko_bound_method(JNIEnv *env, jmethodID slot, const char *owner, const char *name, const char *desc, jboolean isStatic) {
-    jclass localClass;
-    jmethodID method;
+    (void)isStatic;
+    (void)name;
+    (void)desc;
     if (slot != NULL) return slot;
-    if (env == NULL || owner == NULL || name == NULL || desc == NULL) {
-        neko_raise_bound_resolution_error(env, "java/lang/NoSuchMethodError", NULL);
-        return NULL;
-    }
-    localClass = neko_find_class(env, owner);
-    if (localClass == NULL) return NULL;
-    method = isStatic ? neko_get_static_method_id(env, localClass, name, desc) : neko_get_method_id(env, localClass, name, desc);
-    neko_delete_local_ref(env, localClass);
-    return method;
+    neko_raise_bound_resolution_error(env, "java/lang/NoSuchMethodError", owner);
+    return NULL;
 }
 
 static jfieldID neko_bound_field(JNIEnv *env, jfieldID slot, const char *owner, const char *name, const char *desc, jboolean isStatic) {
-    jclass localClass;
-    jfieldID field;
+    (void)isStatic;
+    (void)name;
+    (void)desc;
     if (slot != NULL) return slot;
-    if (env == NULL || owner == NULL || name == NULL || desc == NULL) {
-        neko_raise_bound_resolution_error(env, "java/lang/NoSuchFieldError", NULL);
-        return NULL;
-    }
-    localClass = neko_find_class(env, owner);
-    if (localClass == NULL) return NULL;
-    field = isStatic ? neko_get_static_field_id(env, localClass, name, desc) : neko_get_field_id(env, localClass, name, desc);
-    neko_delete_local_ref(env, localClass);
-    return field;
+    neko_raise_bound_resolution_error(env, "java/lang/NoSuchFieldError", owner);
+    return NULL;
 }
 
 static jstring neko_bound_string(JNIEnv *env, jstring slot, const char *utf) {
     if (slot != NULL) return slot;
-    if (env == NULL || utf == NULL) {
-        neko_raise_bound_resolution_error(env, "java/lang/IllegalStateException", NULL);
-        return NULL;
-    }
-    return neko_new_string_utf(env, utf);
+    neko_raise_bound_resolution_error(env, "java/lang/IllegalStateException", utf);
+    return NULL;
 }
 """;
     }
@@ -244,10 +299,20 @@ static void neko_log_wave3_ready(void) {
             sb.append("    g_owner_bound_").append(ownerId).append(" = JNI_TRUE;\n");
             for (String classOwner : resolution.classes()) {
                 if (owner.equals(classOwner)) {
-                    continue;
+                    sb.append("    if (self_class != NULL && ").append(generator.classSlotName(classOwner)).append(" == NULL) {\n");
+                    sb.append("        ").append(generator.classSlotName(classOwner)).append(" = (jclass)neko_new_global_ref(env, self_class);\n");
+                    sb.append("    }\n");
+                    sb.append("    neko_bind_class_slot(env, &").append(generator.classSlotName(classOwner)).append(", \"")
+                        .append(c(classOwner)).append("\");\n");
+                } else {
+                    sb.append("    neko_bind_class_slot(env, &").append(generator.classSlotName(classOwner)).append(", \"")
+                        .append(c(classOwner)).append("\");\n");
                 }
-                sb.append("    neko_bind_class_slot(env, &").append(generator.classSlotName(classOwner)).append(", \"")
-                    .append(c(classOwner)).append("\");\n");
+            }
+            for (String classOwner : resolution.classes()) {
+                sb.append("    if (").append(generator.classSlotName(classOwner)).append(" != NULL) {\n");
+                sb.append("        neko_bootstrap_class_discovery(env, ").append(generator.classSlotName(classOwner)).append(");\n");
+                sb.append("    }\n");
             }
             for (MethodRef methodRef : resolution.methods()) {
                 sb.append("    neko_bind_method_slot(env, &").append(generator.methodSlotName(methodRef.owner(), methodRef.name(), methodRef.desc(), methodRef.isStatic()))
@@ -278,6 +343,13 @@ static void neko_log_wave3_ready(void) {
             int ownerId = entry.getValue();
             sb.append("    if (strcmp(owner_internal, \"").append(c(owner)).append("\") == 0) { neko_bind_owner_")
                 .append(ownerId).append("(env, self_class); return; }\n");
+        }
+        sb.append("}\n\n");
+        sb.append("static void neko_bind_all_owners(JNIEnv *env) {\n");
+        sb.append("    if (env == NULL) return;\n");
+        for (Map.Entry<String, Integer> entry : ctx.ownerBindIndex().entrySet()) {
+            int ownerId = entry.getValue();
+            sb.append("    neko_bind_owner_").append(ownerId).append("(env, NULL);\n");
         }
         sb.append("}\n\n");
         return sb.toString();

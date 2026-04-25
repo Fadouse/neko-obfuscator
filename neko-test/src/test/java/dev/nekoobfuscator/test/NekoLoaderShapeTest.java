@@ -41,6 +41,7 @@ class NekoLoaderShapeTest {
     @Test
     void forbiddenLegacyHelpersAreAbsent() {
         List<String> forbidden = List.of(
+            "refresh",
             "bindClass",
             "nekoBindClass",
             "nekoVmOption",

@@ -3,6 +3,17 @@ package dev.nekoobfuscator.native_.codegen.emit;
 public final class JniOnLoadEmitter {
     public String renderJniOnLoad() {
         return """
+static uint8_t g_neko_all_owners_bind_started = 0u;
+
+static void neko_bind_all_owners_once(JNIEnv *env) {
+    uint8_t expected = 0u;
+    if (env == NULL) return;
+    if (__atomic_compare_exchange_n(&g_neko_all_owners_bind_started, &expected, 1u, JNI_FALSE, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+        neko_bind_all_owners(env);
+        neko_bootstrap_owner_discovery();
+    }
+}
+
 static void neko_onload_clear_pending_exception(JNIEnv *env, const char *where) {
     const char *label = where == NULL ? "unknown" : where;
     if (env != NULL && *env != NULL && (*env)->ExceptionCheck(env)) {
@@ -65,29 +76,41 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *reserved) {
     neko_log_wave4a_status();
     neko_resolve_string_intern_layout();
     NEKO_TRACE(0, "[nk] ol resolve_string_intern_layout ok hash_off=%td", g_neko_vm_layout.off_string_hash);
-    neko_string_intern_prewarm_and_publish(env);
-    NEKO_TRACE(0, "[nk] ol prewarm ok backend=%d", (int)g_neko_string_root_backend);
-    NEKO_TRACE(0, "[nk] owner discovery deferred until loader_refresh");
+    g_neko_string_root_backend = NEKO_STRING_ROOT_BACKEND_FALLBACK_REGENERATE;
+    NEKO_TRACE(0, "[nk] ol string root prewarm disabled; bound global strings are used");
+    neko_bind_runtime_helper_slots(env);
+    neko_onload_clear_pending_exception(env, "runtime_helper_bind");
+    neko_bootstrap_owner_discovery();
+    neko_onload_clear_pending_exception(env, "early_owner_discovery");
+    neko_bootstrap_owner_discovery();
+    neko_onload_clear_pending_exception(env, "owner_discovery");
+    NEKO_TRACE(0, "[nk] owner discovery completed in JNI_OnLoad");
     neko_log_wave2_ready();
     neko_log_wave3_ready();
     neko_onload_clear_pending_exception(env, "complete");
     return JNI_VERSION_1_6;
 }
 
-JNIEXPORT void JNICALL JNI_OnUnload(JavaVM *vm, void *reserved) {
-    JNIEnv *env = NULL;
-    jint env_status;
-    (void)reserved;
-    if (vm == NULL) return;
-    env_status = (*vm)->GetEnv(vm, (void**)&env, JNI_VERSION_1_6);
-    if (env_status != JNI_OK || env == NULL) return;
-    neko_manifest_teardown(env);
+JNIEXPORT void JNICALL Java_dev_nekoobfuscator_runtime_NekoNativeLoader_bindClass(JNIEnv *env, jclass loaderClass, jclass ownerClass) {
+    (void)loaderClass;
+    if (env == NULL || ownerClass == NULL) return;
+    if (g_neko_java_vm == NULL) {
+        JavaVM *vm = NULL;
+        if ((*env)->GetJavaVM(env, &vm) == JNI_OK) {
+            g_neko_java_vm = vm;
+        }
+    }
+    if (!neko_loader_ready()) {
+        __atomic_store_n(&g_neko_loader_ready, 1u, __ATOMIC_RELEASE);
+    }
+    neko_bootstrap_class_discovery(env, ownerClass);
+    neko_bind_all_owners_once(env);
+    neko_bootstrap_class_discovery(env, ownerClass);
 }
 
-JNIEXPORT void JNICALL Java_dev_nekoobfuscator_runtime_NekoNativeLoader_refresh(JNIEnv *env, jclass loaderClass, jclass ownerClass) {
-    (void)loaderClass;
-    neko_bootstrap_class_discovery(env, ownerClass);
-    neko_onload_clear_pending_exception(env, "loader_refresh");
+JNIEXPORT void JNICALL JNI_OnUnload(JavaVM *vm, void *reserved) {
+    (void)vm;
+    (void)reserved;
 }
 """;
     }

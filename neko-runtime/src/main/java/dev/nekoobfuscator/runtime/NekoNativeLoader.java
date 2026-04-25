@@ -13,35 +13,58 @@ public final class NekoNativeLoader {
     private NekoNativeLoader() {
     }
 
-    private static native void refresh(Class<?> owner);
-
     public static void load() {
-        loadForClass(null);
-    }
-
-    public static void loadForClass(Class<?> owner) {
         if (loaded) {
-            refresh(owner);
             return;
         }
         synchronized (LOCK) {
             if (loaded) {
-                refresh(owner);
                 return;
             }
             String platform = detectPlatform();
             String arch = detectArch();
             String ext = libExt(platform);
-            String resourcePath = "/neko/native/" + resourceName(platform, arch, ext);
+            String resourceName = resourceName(platform, arch, ext);
+            String loadingKey = "dev.nekoobfuscator.native.loading." + resourceName;
+            if (Boolean.getBoolean(loadingKey)) {
+                loaded = true;
+                return;
+            }
+            String resourcePath = "/neko/native/" + resourceName;
             try {
+                System.setProperty(loadingKey, "true");
                 Path tmp = extractResource(resourcePath, ext);
                 System.load(tmp.toAbsolutePath().toString());
                 loaded = true;
-                refresh(owner);
             } catch (IOException e) {
+                System.clearProperty(loadingKey);
                 throw new UnsatisfiedLinkError("Failed to load native library: " + e.getMessage());
+            } catch (LinkageError e) {
+                System.clearProperty(loadingKey);
+                throw e;
+            } finally {
+                System.clearProperty(loadingKey);
             }
         }
+    }
+
+    public static void load(Class<?> owner) {
+        boolean loading = isLoading();
+        load();
+        if (owner != null && !loading) {
+            bindClass(owner);
+        }
+    }
+
+    private static native void bindClass(Class<?> owner);
+
+    private static boolean isLoading() {
+        String platform = detectPlatform();
+        String arch = detectArch();
+        String ext = libExt(platform);
+        String resourceName = resourceName(platform, arch, ext);
+        String loadingKey = "dev.nekoobfuscator.native.loading." + resourceName;
+        return Boolean.getBoolean(loadingKey);
     }
 
     private static String detectPlatform() {
