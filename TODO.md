@@ -2,6 +2,13 @@
 
 Handoff document for incoming agents. Read this in full before touching the tree.
 
+## 0. Current W11/W12 closure update (2026-04-25)
+
+- W11-M5f is CLOSED-PERMANENT per Oracle 14.
+- W11-M5h is CLOSED-PERMANENT per Oracle 14.
+- W11-M5i is CLOSED-PERMANENT per Oracle 16 after keeping Oracle 15's JNIEnv derivation and wide-oop JNI handle correctness fixes. The helper and 17 migrated raise sites remain inert forward-compat scaffolding; `NativeObfStackTraceTest` stays `@Disabled` because translated C stubs cannot provide HotSpot frame metadata for `StackVictim.probe` under strict-no-JNI.
+- W12 is DONE WITH PERMANENT DEFERRALS for M5f + M5h + M5i; admission counts remain TEST `14`, obfusjack `17`, SnakeGame `12`.
+
 ---
 
 ## 1. Project goal

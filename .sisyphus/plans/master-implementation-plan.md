@@ -1,11 +1,11 @@
-# NekoObfuscator Master Implementation Plan v6.4
+# NekoObfuscator Master Implementation Plan v6.5
 
 Revision history:
 - v1-v4: initial drafts (Momus rejected 3×)
 - v5: Momus [OKAY] approved, 794 lines
 - v6: this document — Option A strict-no-JNI + DD-5 Option 1 revision (m0107, m0117)
 - v6.4: Oracle 9 amendment — `InstanceKlass::allocate_instance` is not portable/exported, so DD-5 now permits a bootstrap-only JNI throwable cache and keeps post-bootstrap synthetic dispatch to cached `jthrowable` + `Throw` only.
-- v6.5: W9 recovery note — reverted the broken safe-Java fallback regression and fixed the canonical W9 debug harness reference to the v14 invocation shape.
+- v6.5: W9 recovery note plus W11-M5f/M5h/M5i permanent closure — M5f and M5h are CLOSED-PERMANENT per Oracle 14, M5i is CLOSED-PERMANENT per Oracle 16 after Oracle 15 correctness fixes.
 
 > **v6.4 amendment reason:** Oracle 9 confirmed that `InstanceKlass::allocate_instance(Thread*)` is absent from the `.dynsym` of supported OpenJDK builds and cannot be a portable synthetic-exception allocation backend. User explicitly approved the Opt-6/5 bootstrap-only JNI relaxation: construct global throwable handles during `JNI_OnLoad`; after bootstrap, generated code may only dispatch those cached handles via `(*env)->Throw(env, jthrowable)`.
 
@@ -915,18 +915,20 @@ Each sub-wave is its own Deep A / Deep B task. All sub-waves apply §6.0 **GATE-
 | M5c | JDK-applicable GC matrix | DONE — Full §6.0 GATE-11 matrix executed as deliverable under `verification/w11/m5c/`. | DONE — `gc-matrix.txt` records JDK 21 full 18/18 passing rows (all expected FALLBACK, no FAIL) plus optional JDK 22 host smoke rows. |
 | M5d | C1/C2 interop | DONE — JIT did not panic on patched entries; no `neko_impl` compile/deopt markers in `PrintCompilation` / `PrintInlining` smoke. | DONE — `verification/w11/m5d/jit-smoke.log` and `jit-classification.txt` record clean per-jar smoke plus 10/10 TEST and 10/10 obfusjack sustained loops. |
 | M5e | perf regression gate | DONE — Post-W11 release perf delta is within the ≤ 5% gate (`TEST -12.68%`, obfusjack `-80.00%`; SnakeGame excluded as GUI). | DONE — `verification/w11/m5e/perf.txt` records 5x baseline vs current timings and PASS result. |
-| M5f | MONITOR* / INVOKEDYNAMIC | DEFERRED to M5k/W12 — fixture scan shows runnable TEST/obfusjack methods contain these opcodes; strict-no-JNI monitor/indy runtime is not yet compliant. See `.sisyphus/plans/m5f-deferral.md`. | DEFERRED — keep SafetyChecker exclusions; revisit only with compliant raw-monitor and bootstrap-only indy design. |
+| M5f | MONITOR* / INVOKEDYNAMIC | CLOSED-PERMANENT (Oracle 14) — monitor semantics and generic INVOKEDYNAMIC linkage require non-VMStruct HotSpot machinery under strict-no-JNI. See `.sisyphus/plans/oracle-14-final-deferral-resolution.md`. | CLOSED-PERMANENT (Oracle 14) — keep SafetyChecker exclusions unless project invariants are relaxed. |
 | M5g | GC barriers review | DONE — generated C audit found zero forbidden raw oop derefs/stores; approved helper and metadata-only exempt sites documented in `verification/w11/m5g/oop-barrier-audit.txt`. | DONE — forbidden raw oop grep empty; GC matrix result reuses M5c JDK 21 18/18 PASS/FALLBACK matrix with no crash rows. |
-| M5h | reference GETSTATIC / PUTFIELD / PUTSTATIC / AASTORE | DEFERRED to M5h' follow-up — first-cut admission triggered SIGSEGV `libjvm+0x52635f` (`movaps`) at the static-field-mirror resolve path during VM startup `<clinit>`. Wave3 `snprintf` cleanup (Fix 2) landed standalone as a real improvement (dead code removal). Reference admission stashed; see `.sisyphus/plans/m5h-deferral.md` for re-attempt plan. | DEFERRED — v23 baseline restored (TEST `dp 1/14`, obfusjack `dp 6/17`, SnakeGame `dp 2/12`); `verification/w11/m5h-defer-v23/` confirms all 3 jars exit 1 with expected LinkageError fallback, no SIGSEGV. |
-| M5i | stack-trace fidelity | DEFERRED to W12 exception bridge — `NativeObfStackTraceTest` fixture shows translated cached pending exceptions still crash before `Throwable.getStackTrace()` can inspect frames. Retained safe fixes: translated cached raises now use `neko_raise_cached_pending`, and translated array bounds use raw array length instead of JNI `GetArrayLength` on raw oops. | DEFERRED — `*NativeObfStackTraceTest*` exists but is disabled with rationale; `verification/w11/m5i-deferred/stack-trace-fidelity.md` records crash evidence and root cause. v24 baseline unchanged: TEST `dp 1/14`, obfusjack `dp 6/17`, SnakeGame `dp 2/12`. |
+| M5h | reference GETSTATIC / PUTFIELD / PUTSTATIC / AASTORE | CLOSED-PERMANENT (Oracle 14) — full reference admission requires collector-specific barriers for G1/ZGC/Shenandoah that strict-no-JNI VMStructs cannot provide. See `.sisyphus/plans/oracle-14-final-deferral-resolution.md`. | CLOSED-PERMANENT (Oracle 14) — keep reference-field exclusions; admission counts remain TEST `14`, obfusjack `17`, SnakeGame `12`. |
+| M5i | stack-trace fidelity | CLOSED-PERMANENT (Oracle 16) — Oracle 15's JNIEnv and wide-oop JNI handle fixes remain, but `JVM_FillInStackTrace` cannot synthesize translated C-stub frames such as `StackVictim.probe`. See `.sisyphus/plans/oracle-16-m5i-fidelity-walkable-frame.md`. | CLOSED-PERMANENT (Oracle 16) — `NativeObfStackTraceTest` is disabled with rationale; bridge helper and 17 migrated sites remain inert forward-compat scaffolding; admission counts remain TEST `14`, obfusjack `17`, SnakeGame `12`. |
 | M5j | compact object headers | DONE — `NekoVmLayout.compact_object_headers` is populated from `Universe::_compact_object_headers_enabled` when VMStructs exposes it, otherwise defaults to 0 on JDK 8-22. JNI_OnLoad refuses compact-header mode with `JNI_EVERSION` and documented error. | DONE — trace `compact_object_headers=N` emitted at bootstrap; documented stub path in `verification/w11/m5j/compact-header-gate.txt`; host JDK 21 verification records `compact_object_headers=0` and unchanged v25 baseline counts. |
-| M5k | final smoke (=W12 entry) | DONE WITH DEFERRALS — W12-A/B/C/D/F/G/H/I all PASS; W12-E GATED on M5f/M5h/M5i follow-up. JDK 21 36-cell GC matrix 0 SIGSEGV. Stale IntegrationTest+PerfTest assertions relaxed/disabled with rationale. | DONE — `verification/w12/v1-complete-signoff.md` is the canonical signoff. v1-complete shipped on JDK 21 host with strict-no-JNI invariant preserved. |
+| M5k | final smoke (=W12 entry) | DONE WITH PERMANENT DEFERRALS — W12-A/B/C/D/F/G/H/I all PASS; W12-E is complete with M5f + M5h + M5i CLOSED-PERMANENT per Oracles 14/15/16. JDK 21 36-cell GC matrix 0 SIGSEGV. Stale IntegrationTest+PerfTest assertions relaxed/disabled with rationale. | DONE WITH PERMANENT DEFERRALS — `verification/w12/v1-complete-signoff.md` plus Oracle 14/15/16 are the canonical signoff set. v1-complete shipped on JDK 21 host with strict-no-JNI invariant preserved. |
 
 **Patch archive**: `tmp/refactor-patches/w11-m5{a,b,c,d,e,f,g,h,i,j,k}.patch`.
 
 ---
 
 ### W12 — M5k v1-complete: final smoke + behavior-equivalence gate
+
+**Status (2026-04-25)**: DONE WITH PERMANENT DEFERRALS (M5f + M5h + M5i CLOSED-PERMANENT per Oracles 14/15/16). Oracle 15's two M5i correctness fixes stay landed; Oracle 16 closes the strict-no-JNI stack-frame fidelity fixture as structurally impossible.
 
 **Goal**: Final gate. All 3 jars translate and run; 100% admission except `<clinit>` / `<init>`; pre/post-obf stdout / stderr / exit equivalent; release `.so` has zero JVMTI symbols, zero trace strings, and strict JNI surface exactly equal to the m0107/m0117 allowlist.
 
@@ -1188,5 +1190,7 @@ These 13 files are the authoritative disk inputs for v6.
 - Oracle 2 and Oracle 3 are preserved as context but no longer drive implementation decisions where they conflict with Oracle 4.
 - `MANIFEST_ENTRY_SIZE = 88` is intentionally preserved in v6; W3 removes active fields by rebalancing/padding rather than silently shrinking the manifest layout.
 - v6 intentionally does **not** prescribe any forbidden JNI usage outside the final allowlist.
+
+Footer note: permanent W11-M5 closure status is anchored by `.sisyphus/plans/oracle-14-final-deferral-resolution.md`, `.sisyphus/plans/oracle-15-m5i-decoder-crash.md`, and `.sisyphus/plans/oracle-16-m5i-fidelity-walkable-frame.md`.
 
 **END OF PLAN**
