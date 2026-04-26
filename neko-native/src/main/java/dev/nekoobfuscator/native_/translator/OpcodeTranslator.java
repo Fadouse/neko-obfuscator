@@ -37,6 +37,8 @@ public final class OpcodeTranslator {
     private final MethodHandleBridgeFactory methodHandleBridgeFactory;
     private final Map<String, String> stringCacheVars = new LinkedHashMap<>();
     private String currentOwnerInternalName = "";
+    private String currentMethodName = "";
+    private boolean currentMethodStatic = false;
     private String currentMethodKey = "";
     private int indyIndex = 0;
     private int invokeSiteIndex = 0;
@@ -57,6 +59,8 @@ public final class OpcodeTranslator {
 
     public void beginMethod(String owner, String name, String desc, boolean isStatic) {
         this.currentOwnerInternalName = owner;
+        this.currentMethodName = name;
+        this.currentMethodStatic = isStatic;
         this.currentMethodKey = owner + '#' + name + desc;
         this.indyIndex = 0;
         this.invokeSiteIndex = 0;
@@ -188,12 +192,12 @@ public final class OpcodeTranslator {
             case Opcodes.DUP2_X2 -> stmts.add(raw("{ neko_slot v1 = stack[sp-1]; neko_slot v2 = stack[sp-2]; neko_slot v3 = stack[sp-3]; neko_slot v4 = stack[sp-4]; stack[sp-4] = v2; stack[sp-3] = v1; stack[sp-2] = v4; stack[sp-1] = v3; stack[sp] = v2; stack[sp+1] = v1; sp += 2; }"));
             case Opcodes.SWAP -> stmts.add(raw("{ neko_slot t = stack[sp-1]; stack[sp-1] = stack[sp-2]; stack[sp-2] = t; }"));
 
-            case Opcodes.IRETURN -> stmts.add(raw("return POP_I();"));
-            case Opcodes.LRETURN -> stmts.add(raw("return POP_L();"));
-            case Opcodes.FRETURN -> stmts.add(raw("return POP_F();"));
-            case Opcodes.DRETURN -> stmts.add(raw("return POP_D();"));
-            case Opcodes.ARETURN -> stmts.add(raw("return POP_O();"));
-            case Opcodes.RETURN -> stmts.add(raw("return;"));
+            case Opcodes.IRETURN -> stmts.add(raw("{ jint __ret = POP_I(); neko_shadow_pop(); return __ret; }"));
+            case Opcodes.LRETURN -> stmts.add(raw("{ jlong __ret = POP_L(); neko_shadow_pop(); return __ret; }"));
+            case Opcodes.FRETURN -> stmts.add(raw("{ jfloat __ret = POP_F(); neko_shadow_pop(); return __ret; }"));
+            case Opcodes.DRETURN -> stmts.add(raw("{ jdouble __ret = POP_D(); neko_shadow_pop(); return __ret; }"));
+            case Opcodes.ARETURN -> stmts.add(raw("{ jobject __ret = POP_O(); neko_shadow_pop(); return __ret; }"));
+            case Opcodes.RETURN -> stmts.add(raw("neko_shadow_pop(); return;"));
 
             case Opcodes.ARRAYLENGTH -> stmts.add(raw("{ jarray arr = (jarray)POP_O(); PUSH_I(neko_get_array_length(env, arr)); }"));
             case Opcodes.ATHROW -> stmts.add(raw("{ neko_throw(env, (jthrowable)POP_O()); }"));
@@ -276,7 +280,8 @@ public final class OpcodeTranslator {
             stmts.add(raw("PUSH_O(" + cachedStringExpression(s) + ");"));
         } else if (ldc.cst instanceof Type type) {
             if (type.getSort() == Type.OBJECT && type.getInternalName().equals(currentOwnerInternalName)) {
-                stmts.add(raw("PUSH_O(" + cachedClassExpression(currentOwnerInternalName) + ");"));
+                String currentClassExpr = currentMethodStatic ? "clazz" : "neko_get_object_class(env, self)";
+                stmts.add(raw("PUSH_O(" + currentClassExpr + ");"));
             } else {
                 stmts.add(raw("PUSH_O(" + cachedTypeClassExpression(type.getDescriptor()) + ");"));
             }
@@ -298,6 +303,9 @@ public final class OpcodeTranslator {
         if (canDirectInvoke(binding, opcode)) {
             return translateDirectInvoke(mi, binding, opcode == Opcodes.INVOKESTATIC, opcode == Opcodes.INVOKESPECIAL);
         }
+        if (isClassLoaderDefineClass(mi)) {
+            return translateClassLoaderDefineClassInvoke(mi, opcode);
+        }
         if (opcode == Opcodes.INVOKEVIRTUAL || opcode == Opcodes.INVOKEINTERFACE) {
             return translateVirtualDispatchWithCache(mi);
         }
@@ -317,6 +325,41 @@ public final class OpcodeTranslator {
             sb.append(emitGuardedCallResult(ret, "cls != NULL && mid != NULL", virtualCallWrapper(ret), "env, obj, mid, __args"));
         }
         sb.append(" }");
+        return sb.toString();
+    }
+
+    private boolean isClassLoaderDefineClass(MethodInsnNode mi) {
+        if (!"defineClass".equals(mi.name) || !Type.getReturnType(mi.desc).equals(Type.getType(Class.class))) {
+            return false;
+        }
+        Type[] args = Type.getArgumentTypes(mi.desc);
+        return args.length >= 2
+            && args[0].equals(Type.getType(String.class))
+            && args[1].equals(Type.getType(byte[].class));
+    }
+
+    private String translateClassLoaderDefineClassInvoke(MethodInsnNode mi, int opcode) {
+        Type[] args = Type.getArgumentTypes(mi.desc);
+        StringBuilder sb = new StringBuilder("{ ");
+        sb.append(declarePoppedArgs(args));
+        sb.append("jobject obj = POP_O(); ");
+        sb.append("jclass cls = ").append(cachedClassExpression(mi.owner)).append("; ");
+        sb.append("jmethodID mid = ").append(cachedMethodExpression(mi.owner, mi.name, mi.desc, false)).append("; ");
+        sb.append("jobject result = NULL; ");
+        if (opcode == Opcodes.INVOKESPECIAL) {
+            sb.append("if (cls != NULL && mid != NULL) { result = ")
+                .append(nonvirtualCallWrapper(Type.getType(Class.class)))
+                .append("(env, obj, cls, mid, __args); } ");
+        } else {
+            sb.append("if (cls != NULL && mid != NULL) { result = ")
+                .append(virtualCallWrapper(Type.getType(Class.class)))
+                .append("(env, obj, mid, __args); } ");
+        }
+        sb.append("if (!neko_exception_check(env)) { ");
+        sb.append("if (result != NULL) neko_manifest_patch_defined_class(env, (jclass)result); ");
+        sb.append("PUSH_O(result); ");
+        sb.append("} ");
+        sb.append("}");
         return sb.toString();
     }
 
@@ -382,8 +425,42 @@ public final class OpcodeTranslator {
                     + cachedClassExpression("java/lang/NullPointerException")
                     + "; neko_throw_new(env, exc, \"\"); } else { PUSH_O(neko_get_object_class(env, obj)); } }";
             }
+            if ("java/lang/Throwable".equals(mi.owner) && "getStackTrace".equals(mi.name) && "()[Ljava/lang/StackTraceElement;".equals(mi.desc)) {
+                return "{ jobject obj = POP_O(); if (obj == NULL) { jclass exc = "
+                    + cachedClassExpression("java/lang/NullPointerException")
+                    + "; neko_throw_new(env, exc, \"\"); } else { jobjectArray __trace = neko_shadow_stack_trace(env); if (!neko_exception_check(env)) { PUSH_O(__trace); } } }";
+            }
+            if ("java/lang/reflect/Method".equals(mi.owner) && "invoke".equals(mi.name) && "(Ljava/lang/Object;[Ljava/lang/Object;)Ljava/lang/Object;".equals(mi.desc)) {
+                String methodClass = cachedClassExpression("java/lang/reflect/Method");
+                String callerAdapter = cachedMethodExpression("java/lang/reflect/Method", "invoke", "(Ljava/lang/Object;[Ljava/lang/Object;Ljava/lang/Class;)Ljava/lang/Object;", false);
+                String callerClass = currentMethodStatic ? "clazz" : "neko_get_object_class(env, self)";
+                return "{ jobject __invokeArgsArray = POP_O(); "
+                    + "jobject __targetObj = POP_O(); "
+                    + "jobject __methodObj = POP_O(); "
+                    + "if (__methodObj == NULL) { jclass exc = "
+                    + cachedClassExpression("java/lang/NullPointerException")
+                    + "; neko_throw_new(env, exc, \"\"); } else { "
+                    + "jclass __methodCls = " + methodClass + "; "
+                    + "jmethodID __callerInvoke = " + callerAdapter + "; "
+                    + "jclass __callerCls = " + callerClass + "; "
+                    + "jobject __reflectResult = NULL; "
+                    + "if (__methodCls != NULL && __callerInvoke != NULL && __callerCls != NULL) { "
+                    + "jvalue __reflectArgs[3]; "
+                    + "__reflectArgs[0].l = __targetObj; "
+                    + "__reflectArgs[1].l = __invokeArgsArray; "
+                    + "__reflectArgs[2].l = __callerCls; "
+                    + "__reflectResult = neko_call_nonvirtual_object_method_a(env, __methodObj, __methodCls, __callerInvoke, __reflectArgs); "
+                    + "} "
+                    + "if (!neko_exception_check(env)) { PUSH_O(__reflectResult); } } }";
+            }
         }
         return null;
+    }
+
+    public static String simpleSourceFileName(String ownerInternalName) {
+        int slash = ownerInternalName.lastIndexOf('/');
+        String simple = slash >= 0 ? ownerInternalName.substring(slash + 1) : ownerInternalName;
+        return simple + ".java";
     }
 
     private String translateMethodHandleInvoke(MethodInsnNode mi) {

@@ -114,6 +114,10 @@ public final class NativeTranslator {
 
         emitParamToLocals(fn, method, argTypes);
         opcodes.beginMethod(selection.owner().name(), selection.method().name(), selection.method().descriptor(), selection.method().isStatic());
+        fn.addStatement(new CStatement.RawC(
+            "neko_shadow_push(\"" + c(selection.owner().name()) + "\", \"" + c(selection.method().name()) + "\", \""
+                + c(OpcodeTranslator.simpleSourceFileName(selection.owner().name())) + "\");"
+        ));
 
         for (AbstractInsnNode insn = node.instructions.getFirst(); insn != null; insn = insn.getNext()) {
             if (insn instanceof LabelNode labelNode) {
@@ -437,6 +441,7 @@ public final class NativeTranslator {
     }
 
     private void emitDefaultReturn(CFunction function, CType returnType) {
+        function.addStatement(new CStatement.RawC("neko_shadow_pop();"));
         switch (returnType) {
             case VOID -> function.addStatement(new CStatement.ReturnVoid());
             case JLONG -> function.addStatement(new CStatement.RawC("return (jlong)0;"));

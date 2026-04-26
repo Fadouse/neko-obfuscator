@@ -861,6 +861,71 @@ static inline jint neko_monitor_enter(JNIEnv *env, jobject obj) { return NEKO_JN
 static inline jint neko_monitor_exit(JNIEnv *env, jobject obj) { return NEKO_JNI_FN_PTR(env, 218, jint, jobject)(env, obj); }
 static inline jboolean neko_exception_check(JNIEnv *env) { return NEKO_JNI_FN_PTR(env, 228, jboolean)(env); }
 
+typedef struct {
+    const char *owner;
+    const char *method;
+    const char *file;
+} neko_shadow_frame;
+
+#define NEKO_SHADOW_STACK_MAX 256
+static __thread neko_shadow_frame g_neko_shadow_stack[NEKO_SHADOW_STACK_MAX];
+static __thread uint32_t g_neko_shadow_depth = 0u;
+
+static void neko_shadow_push(const char *owner, const char *method, const char *file) {
+    if (owner == NULL || method == NULL || file == NULL) return;
+    if (g_neko_shadow_depth < NEKO_SHADOW_STACK_MAX) {
+        g_neko_shadow_stack[g_neko_shadow_depth].owner = owner;
+        g_neko_shadow_stack[g_neko_shadow_depth].method = method;
+        g_neko_shadow_stack[g_neko_shadow_depth].file = file;
+        g_neko_shadow_depth++;
+    }
+}
+
+static void neko_shadow_pop(void) {
+    if (g_neko_shadow_depth > 0u) g_neko_shadow_depth--;
+}
+
+static jstring neko_shadow_dotted_string(JNIEnv *env, const char *internal_name) {
+    char buf[512];
+    size_t i;
+    if (internal_name == NULL) return NULL;
+    for (i = 0u; i + 1u < sizeof(buf) && internal_name[i] != '\0'; i++) {
+        buf[i] = internal_name[i] == '/' ? '.' : internal_name[i];
+    }
+    buf[i] = '\0';
+    return neko_new_string_utf(env, buf);
+}
+
+static jobjectArray neko_shadow_stack_trace(JNIEnv *env) {
+    jclass ste_cls = neko_find_class(env, "java/lang/StackTraceElement");
+    jmethodID ste_ctor;
+    jobjectArray trace;
+    uint32_t depth = g_neko_shadow_depth;
+    uint32_t count;
+    uint32_t i;
+    if (ste_cls == NULL || neko_exception_check(env)) return NULL;
+    ste_ctor = neko_get_method_id(env, ste_cls, "<init>", "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;I)V");
+    if (ste_ctor == NULL || neko_exception_check(env)) return NULL;
+    count = depth == 0u ? 0u : depth;
+    trace = neko_new_object_array(env, (jsize)count, ste_cls, NULL);
+    if (trace == NULL || neko_exception_check(env)) return trace;
+    for (i = 0u; i < count; i++) {
+        neko_shadow_frame *frame = &g_neko_shadow_stack[depth - 1u - i];
+        jvalue args[4];
+        jobject element;
+        args[0].l = neko_shadow_dotted_string(env, frame->owner);
+        args[1].l = neko_new_string_utf(env, frame->method);
+        args[2].l = neko_new_string_utf(env, frame->file);
+        args[3].i = -1;
+        if (neko_exception_check(env)) return trace;
+        element = neko_new_object_a(env, ste_cls, ste_ctor, args);
+        if (neko_exception_check(env) || element == NULL) return trace;
+        neko_set_object_array_element(env, trace, (jsize)i, element);
+        if (neko_exception_check(env)) return trace;
+    }
+    return trace;
+}
+
 static char* neko_dotted_class_name(const char *internalName) {
     size_t len = strlen(internalName);
     char *out = (char*)malloc(len + 1u);
