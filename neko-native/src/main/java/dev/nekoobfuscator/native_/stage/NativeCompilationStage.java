@@ -22,6 +22,7 @@ import org.objectweb.asm.tree.InsnNode;
 import org.objectweb.asm.tree.LdcInsnNode;
 import org.objectweb.asm.tree.MethodInsnNode;
 import org.objectweb.asm.tree.MethodNode;
+import org.objectweb.asm.tree.TypeInsnNode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -39,7 +40,11 @@ public final class NativeCompilationStage {
     private static final Logger log = LoggerFactory.getLogger(NativeCompilationStage.class);
     private static final String NATIVE_TRANSLATE_DESC = "Ldev/nekoobfuscator/api/annotation/NativeTranslate;";
     private static final String NATIVE_LOADER_OWNER = "dev/nekoobfuscator/runtime/NekoNativeLoader";
-    private static final String NATIVE_BIND_DESC = "(Ljava/lang/Class;Ljava/lang/String;)V";
+    private static final String NATIVE_LOAD_NAME = "load";
+    private static final String NATIVE_LOAD_DESC = "()V";
+    private static final String LINKAGE_ERROR_INTERNAL = "java/lang/LinkageError";
+    private static final String LINKAGE_ERROR_INIT_DESC = "(Ljava/lang/String;)V";
+    private static final String LINKAGE_ERROR_MESSAGE = "please check your native library load correctly";
 
     private final ObfuscationConfig.NativeConfig cfg;
     private final long masterSeed;
@@ -249,16 +254,7 @@ public final class NativeCompilationStage {
                 if (methodNode == null) {
                     continue;
                 }
-                methodNode.instructions.clear();
-                methodNode.tryCatchBlocks.clear();
-                if (methodNode.localVariables != null) {
-                    methodNode.localVariables.clear();
-                }
-                methodNode.visibleLocalVariableAnnotations = null;
-                methodNode.invisibleLocalVariableAnnotations = null;
-                methodNode.access = (methodNode.access | Opcodes.ACC_NATIVE) & ~Opcodes.ACC_STRICT;
-                methodNode.maxStack = 0;
-                methodNode.maxLocals = 0;
+                rewriteTranslatedMethod(methodNode);
             }
         }
 
@@ -267,6 +263,37 @@ public final class NativeCompilationStage {
             ensureClinitLoadsNative(parsedClasses.get(owner).classNode());
         }
         return modifiedClasses;
+    }
+
+    private void rewriteTranslatedMethod(MethodNode methodNode) {
+        methodNode.instructions.clear();
+        if (methodNode.tryCatchBlocks != null) {
+            methodNode.tryCatchBlocks.clear();
+        }
+        if (methodNode.localVariables != null) {
+            methodNode.localVariables.clear();
+        }
+        methodNode.visibleLocalVariableAnnotations = null;
+        methodNode.invisibleLocalVariableAnnotations = null;
+        methodNode.access &= ~(Opcodes.ACC_NATIVE | Opcodes.ACC_STRICT);
+
+        InsnList body = methodNode.instructions;
+        body.add(new TypeInsnNode(Opcodes.NEW, LINKAGE_ERROR_INTERNAL));
+        body.add(new InsnNode(Opcodes.DUP));
+        body.add(new LdcInsnNode(LINKAGE_ERROR_MESSAGE));
+        body.add(new MethodInsnNode(Opcodes.INVOKESPECIAL, LINKAGE_ERROR_INTERNAL, "<init>", LINKAGE_ERROR_INIT_DESC, false));
+        body.add(new InsnNode(Opcodes.ATHROW));
+
+        methodNode.maxStack = 3;
+        methodNode.maxLocals = parameterSlotCount(methodNode.access, methodNode.desc);
+    }
+
+    private int parameterSlotCount(int access, String descriptor) {
+        int slots = (access & Opcodes.ACC_STATIC) == 0 ? 1 : 0;
+        for (Type argumentType : Type.getArgumentTypes(descriptor)) {
+            slots += argumentType.getSize();
+        }
+        return slots;
     }
 
     private MethodNode findMethod(ClassNode classNode, String name, String desc) {
@@ -282,37 +309,34 @@ public final class NativeCompilationStage {
         MethodNode clinit = findMethod(classNode, "<clinit>", "()V");
         if (clinit == null) {
             clinit = new MethodNode(Opcodes.ACC_STATIC, "<clinit>", "()V", null, null);
-            appendNativeBootstrap(clinit.instructions, classNode.name);
+            appendNativeBootstrap(clinit.instructions);
             clinit.instructions.add(new InsnNode(Opcodes.RETURN));
-            clinit.maxStack = 2;
+            clinit.maxStack = 1;
             clinit.maxLocals = 0;
             classNode.methods.add(clinit);
             return;
         }
 
-        if (containsNativeBind(clinit)) {
+        if (containsNativeLoad(clinit)) {
             return;
         }
         InsnList loadCall = new InsnList();
-        appendNativeBootstrap(loadCall, classNode.name);
+        appendNativeBootstrap(loadCall);
         clinit.instructions.insert(loadCall);
-        clinit.maxStack = Math.max(clinit.maxStack, 2);
+        clinit.maxStack = Math.max(clinit.maxStack, 1);
     }
 
-    private void appendNativeBootstrap(InsnList instructions, String ownerInternalName) {
-        instructions.add(new MethodInsnNode(Opcodes.INVOKESTATIC, NATIVE_LOADER_OWNER, "load", "()V", false));
-        instructions.add(new LdcInsnNode(Type.getObjectType(ownerInternalName)));
-        instructions.add(new LdcInsnNode(ownerInternalName));
-        instructions.add(new MethodInsnNode(Opcodes.INVOKESTATIC, NATIVE_LOADER_OWNER, "bindClass", NATIVE_BIND_DESC, false));
+    private void appendNativeBootstrap(InsnList instructions) {
+        instructions.add(new MethodInsnNode(Opcodes.INVOKESTATIC, NATIVE_LOADER_OWNER, NATIVE_LOAD_NAME, NATIVE_LOAD_DESC, false));
     }
 
-    private boolean containsNativeBind(MethodNode clinit) {
+    private boolean containsNativeLoad(MethodNode clinit) {
         for (var insn = clinit.instructions.getFirst(); insn != null; insn = insn.getNext()) {
             if (insn instanceof MethodInsnNode methodInsn
                 && methodInsn.getOpcode() == Opcodes.INVOKESTATIC
                 && NATIVE_LOADER_OWNER.equals(methodInsn.owner)
-                && "bindClass".equals(methodInsn.name)
-                && NATIVE_BIND_DESC.equals(methodInsn.desc)) {
+                && NATIVE_LOAD_NAME.equals(methodInsn.name)
+                && NATIVE_LOAD_DESC.equals(methodInsn.desc)) {
                 return true;
             }
         }

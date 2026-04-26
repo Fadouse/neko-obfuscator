@@ -19,60 +19,54 @@ public final class NekoNativeLoader {
     private NekoNativeLoader() {}
 
     public static void load() {
-        if (loaded) {
-            return;
-        }
-        synchronized (LOCK) {
-            if (loaded) {
-                return;
-            }
-            try {
-                String os = System.getProperty("os.name", "").toLowerCase();
-                String arch = System.getProperty("os.arch", "").toLowerCase();
+        if (!loaded) {
+            synchronized (LOCK) {
+                if (!loaded) {
+                    try {
+                        String os = System.getProperty("os.name", "").toLowerCase();
+                        String arch = System.getProperty("os.arch", "").toLowerCase();
 
-                String platform;
-                String ext;
-                if (os.contains("win")) {
-                    platform = "windows";
-                    ext = ".dll";
-                } else if (os.contains("mac") || os.contains("darwin")) {
-                    platform = "macos";
-                    ext = ".dylib";
-                } else {
-                    platform = "linux";
-                    ext = ".so";
-                }
+                        String platform;
+                        String ext;
+                        if (os.contains("win")) {
+                            platform = "windows";
+                            ext = ".dll";
+                        } else if (os.contains("mac") || os.contains("darwin")) {
+                            platform = "macos";
+                            ext = ".dylib";
+                        } else {
+                            platform = "linux";
+                            ext = ".so";
+                        }
 
-                String archSuffix;
-                if (arch.contains("aarch64") || arch.contains("arm64")) {
-                    archSuffix = "aarch64";
-                } else {
-                    archSuffix = "x64";
-                }
+                        String archSuffix;
+                        if (arch.contains("aarch64") || arch.contains("arm64")) {
+                            archSuffix = "aarch64";
+                        } else {
+                            archSuffix = "x64";
+                        }
 
-                String libName = "libneko_" + platform + "_" + archSuffix + ext;
-                String resourcePath = "/neko/native/" + libName;
+                        String libName = "libneko_" + platform + "_" + archSuffix + ext;
+                        String resourcePath = "/neko/native/" + libName;
 
-                Path tmp = Files.createTempFile("libneko_", ext);
-                tmp.toFile().deleteOnExit();
-                try (InputStream is = NekoNativeLoader.class.getResourceAsStream(resourcePath)) {
-                    if (is == null) {
-                        throw new UnsatisfiedLinkError("Native library not found: " + resourcePath);
+                        Path tmp = Files.createTempFile("libneko_", ext);
+                        tmp.toFile().deleteOnExit();
+                        try (InputStream is = NekoNativeLoader.class.getResourceAsStream(resourcePath)) {
+                            if (is == null) {
+                                throw new UnsatisfiedLinkError("Native library not found: " + resourcePath);
+                            }
+                            Files.copy(is, tmp, StandardCopyOption.REPLACE_EXISTING);
+                        }
+
+                        System.load(tmp.toAbsolutePath().toString());
+                        loaded = true;
+                    } catch (IOException e) {
+                        throw new UnsatisfiedLinkError("Failed to load native library: " + e.getMessage());
                     }
-                    Files.copy(is, tmp, StandardCopyOption.REPLACE_EXISTING);
                 }
-
-                System.load(tmp.toAbsolutePath().toString());
-                loaded = true;
-            } catch (IOException e) {
-                throw new UnsatisfiedLinkError("Failed to load native library: " + e.getMessage());
             }
         }
-    }
-
-    public static void bindClass(Class<?> self, String internalOwnerName) {
-        load();
-        nekoBindClass(self, internalOwnerName);
+        nekoBootstrap();
     }
 
     static String nekoVmOption(String name) {
@@ -272,5 +266,5 @@ public final class NekoNativeLoader {
         }
     }
 
-    private static native void nekoBindClass(Class<?> self, String internalOwnerName);
+    private static native void nekoBootstrap();
 }

@@ -3,6 +3,13 @@ package dev.nekoobfuscator.native_.codegen;
 import dev.nekoobfuscator.core.ir.l3.CFunction;
 import dev.nekoobfuscator.core.ir.l3.CStatement;
 import dev.nekoobfuscator.core.ir.l3.CVariable;
+import dev.nekoobfuscator.native_.codegen.emit.JniHandlesShimEmitter;
+import dev.nekoobfuscator.native_.codegen.emit.JniOnLoadEmitter;
+import dev.nekoobfuscator.native_.codegen.emit.ManifestEmitter;
+import dev.nekoobfuscator.native_.codegen.emit.MethodPatcherEmitter;
+import dev.nekoobfuscator.native_.codegen.emit.SignatureDispatcherEmitter;
+import dev.nekoobfuscator.native_.codegen.emit.SignaturePlan;
+import dev.nekoobfuscator.native_.codegen.emit.TrampolineEmitter;
 import dev.nekoobfuscator.native_.translator.NativeTranslator.NativeMethodBinding;
 import org.objectweb.asm.Type;
 
@@ -15,6 +22,12 @@ import java.util.Set;
 public final class CCodeGenerator {
     @SuppressWarnings("unused")
     private final SymbolTableGenerator symbols;
+    private final ManifestEmitter manifestEmitter = new ManifestEmitter();
+    private final SignatureDispatcherEmitter signatureDispatcherEmitter = new SignatureDispatcherEmitter();
+    private final TrampolineEmitter trampolineEmitter = new TrampolineEmitter();
+    private final MethodPatcherEmitter methodPatcherEmitter = new MethodPatcherEmitter();
+    private final JniHandlesShimEmitter jniHandlesShimEmitter = new JniHandlesShimEmitter();
+    private final JniOnLoadEmitter jniOnLoadEmitter = new JniOnLoadEmitter();
     private final LinkedHashMap<String, Integer> classSlotIndex = new LinkedHashMap<>();
     private final LinkedHashMap<String, Integer> methodSlotIndex = new LinkedHashMap<>();
     private final LinkedHashMap<String, Integer> fieldSlotIndex = new LinkedHashMap<>();
@@ -181,24 +194,40 @@ public final class CCodeGenerator {
 
         StringBuilder sb = new StringBuilder();
         sb.append("#include \"neko_native.h\"\n");
+        sb.append("#include <stddef.h>\n");
         sb.append("#include <stdint.h>\n");
         sb.append("#include <stdio.h>\n");
         sb.append("#include <stdlib.h>\n");
         sb.append("#include <string.h>\n");
         sb.append("#include <math.h>\n\n");
+        SignaturePlan signaturePlan = SignaturePlan.build(bindings);
+        /* Forward decls + manifest struct first; everything below references them. */
+        sb.append(manifestEmitter.renderStructAndForwardDecls());
+        sb.append("/* Forward decls for trampoline ↔ patcher coupling. */\n");
+        sb.append("struct neko_sig_entry { void *i2i; void *c2i; };\n");
+        sb.append("__attribute__((visibility(\"hidden\"))) extern const struct neko_sig_entry g_neko_sig_table[];\n");
+        sb.append("__attribute__((visibility(\"hidden\"))) extern const uint32_t g_neko_sig_table_count;\n");
+        sb.append("static jboolean neko_resolve_jnihandles(void *jvm);\n");
+        sb.append("static void *neko_dlsym(void *h, const char *name);\n\n");
         sb.append(renderResolutionCaches());
         sb.append(renderRuntimeSupport());
         sb.append(renderHotSpotSupport());
+        sb.append(methodPatcherEmitter.render());
+        sb.append(jniHandlesShimEmitter.render());
         sb.append(renderBindSupport());
-        sb.append(renderNativeBindingTables(bindings));
+        sb.append(jniOnLoadEmitter.renderRegistrationTable());
         sb.append(renderBindOwnerFunctions());
         sb.append(renderIcacheDirectStubs());
         sb.append(renderIcacheMetas());
         sb.append(body);
-        sb.append(renderJniOnLoad(bindings));
-        sb.append(renderNativeBindingRegistry(bindings));
+        sb.append(manifestEmitter.renderTables(bindings, signaturePlan));
+        sb.append(signatureDispatcherEmitter.render(signaturePlan));
+        sb.append(trampolineEmitter.render(signaturePlan));
+        sb.append(manifestEmitter.renderDiscoveryDriver(bindings));
+        sb.append(jniOnLoadEmitter.renderJniOnLoadAndBootstrap());
         return sb.toString();
     }
+
 
     private String renderPrototype(NativeMethodBinding binding) {
         StringBuilder sb = new StringBuilder();
@@ -257,79 +286,6 @@ public final class CCodeGenerator {
             return "    /* " + comment.text() + " */\n";
         }
         throw new IllegalStateException("Unsupported C statement in generator: " + statement.getClass().getSimpleName());
-    }
-
-    private String renderJniOnLoad(List<NativeMethodBinding> bindings) {
-        return "JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *reserved) {\n"
-            + "    JNIEnv *env = NULL;\n"
-            + "    (void)reserved;\n"
-            + "    if ((*vm)->GetEnv(vm, (void**)&env, JNI_VERSION_1_6) != JNI_OK) return JNI_ERR;\n"
-            + "    jclass loaderClass = neko_find_class(env, \"dev/nekoobfuscator/runtime/NekoNativeLoader\");\n"
-            + "    if (loaderClass == NULL) return JNI_ERR;\n"
-            + "    neko_hotspot_init(env);\n"
-            + "    if (neko_register_natives(env, loaderClass, g_neko_loader_methods, 1) != 0) return JNI_ERR;\n"
-            + "    return JNI_VERSION_1_6;\n"
-            + "}\n";
-    }
-
-    private String renderNativeBindingTables(List<NativeMethodBinding> bindings) {
-        StringBuilder sb = new StringBuilder();
-        Map<String, List<NativeMethodBinding>> byOwner = new LinkedHashMap<>();
-        for (NativeMethodBinding binding : bindings) {
-            byOwner.computeIfAbsent(binding.ownerInternalName(), ignored -> new java.util.ArrayList<>()).add(binding);
-        }
-        sb.append("// === Native binding registry ===\n");
-        int groupIndex = 0;
-        for (Map.Entry<String, List<NativeMethodBinding>> entry : byOwner.entrySet()) {
-            sb.append("static JNINativeMethod g_owner_bindings_").append(groupIndex).append("[] = {\n");
-            for (NativeMethodBinding binding : entry.getValue()) {
-                sb.append("    {\"").append(c(binding.methodName())).append("\", \"")
-                    .append(c(binding.descriptor())).append("\", (void*)&")
-                    .append(binding.cFunctionName()).append("},\n");
-            }
-            sb.append("};\n");
-            groupIndex++;
-        }
-        sb.append("JNIEXPORT void JNICALL Java_dev_nekoobfuscator_runtime_NekoNativeLoader_nekoBindClass(JNIEnv *env, jclass loaderClass, jclass target, jstring internalOwner);\n");
-        sb.append("static JNINativeMethod g_neko_loader_methods[] = {\n");
-        sb.append("    {\"nekoBindClass\", \"(Ljava/lang/Class;Ljava/lang/String;)V\", (void*)&Java_dev_nekoobfuscator_runtime_NekoNativeLoader_nekoBindClass},\n");
-        sb.append("};\n\n");
-        return sb.toString();
-    }
-
-    private String renderNativeBindingRegistry(List<NativeMethodBinding> bindings) {
-        StringBuilder sb = new StringBuilder();
-        Map<String, List<NativeMethodBinding>> byOwner = new LinkedHashMap<>();
-        int groupIndex;
-        for (NativeMethodBinding binding : bindings) {
-            byOwner.computeIfAbsent(binding.ownerInternalName(), ignored -> new java.util.ArrayList<>()).add(binding);
-        }
-        sb.append("static jint neko_bind_owner(JNIEnv *env, jclass target, const char *owner) {\n");
-        sb.append("    if (target == NULL || owner == NULL) return JNI_ERR;\n");
-        groupIndex = 0;
-        for (Map.Entry<String, List<NativeMethodBinding>> entry : byOwner.entrySet()) {
-            sb.append("    if (strcmp(owner, \"").append(c(entry.getKey())).append("\") == 0) { neko_bind_owner_")
-                .append(ownerBindIndex.get(entry.getKey()))
-                .append("(env, target); return neko_register_natives(env, target, g_owner_bindings_")
-                .append(groupIndex).append(", sizeof(g_owner_bindings_").append(groupIndex).append(") / sizeof(g_owner_bindings_")
-                .append(groupIndex).append("[0])); }\n");
-            groupIndex++;
-        }
-        sb.append("    return JNI_ERR;\n");
-        sb.append("}\n\n");
-        sb.append("JNIEXPORT void JNICALL Java_dev_nekoobfuscator_runtime_NekoNativeLoader_nekoBindClass(JNIEnv *env, jclass loaderClass, jclass target, jstring internalOwner) {\n");
-        sb.append("    (void)loaderClass;\n");
-        sb.append("    if (target == NULL || internalOwner == NULL) return;\n");
-        sb.append("    const char *owner = neko_get_string_utf_chars(env, internalOwner);\n");
-        sb.append("    if (owner == NULL) return;\n");
-        sb.append("    jint status = neko_bind_owner(env, target, owner);\n");
-        sb.append("    neko_release_string_utf_chars(env, internalOwner, owner);\n");
-        sb.append("    if (status != 0) {\n");
-        sb.append("        jclass errCls = neko_find_class(env, \"java/lang/UnsatisfiedLinkError\");\n");
-        sb.append("        if (errCls != NULL) neko_throw_new(env, errCls, \"Failed to bind native methods for class\");\n");
-        sb.append("    }\n");
-        sb.append("}\n\n");
-        return sb.toString();
     }
 
     private String renderResolutionCaches() {

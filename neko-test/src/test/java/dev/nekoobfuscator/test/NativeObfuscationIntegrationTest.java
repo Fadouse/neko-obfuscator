@@ -209,7 +209,8 @@ class NativeObfuscationIntegrationTest {
 
         assertEquals(originalMethods.keySet(), nativeMethods.keySet(), "Method signatures changed during native rewrite");
         for (Map.Entry<String, Integer> entry : nativeMethods.entrySet()) {
-            assertTrue((entry.getValue() & Opcodes.ACC_NATIVE) != 0, () -> "Expected method to be native: " + entry.getKey());
+            assertEquals(0, entry.getValue() & Opcodes.ACC_NATIVE,
+                () -> "Expected method to NOT be ACC_NATIVE (no-native-keyword refactor): " + entry.getKey());
         }
     }
 

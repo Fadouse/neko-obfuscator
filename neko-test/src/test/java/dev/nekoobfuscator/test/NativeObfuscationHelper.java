@@ -217,16 +217,34 @@ final class NativeObfuscationHelper {
 
     static void assertClassHasNativeMethod(byte[] classBytes, String methodName, String descriptor) {
         MethodNode method = requireMethod(classBytes, methodName, descriptor);
-        Assertions.assertTrue((method.access & Opcodes.ACC_NATIVE) != 0,
-            () -> "Expected method " + methodName + descriptor + " to be ACC_NATIVE");
+        Assertions.assertEquals(0, method.access & Opcodes.ACC_NATIVE,
+            () -> "Expected method " + methodName + descriptor + " to NOT be ACC_NATIVE (native keyword removed by patch model)");
+        boolean throwsLinkage = false;
+        for (var insn = method.instructions.getFirst(); insn != null; insn = insn.getNext()) {
+            if (insn instanceof org.objectweb.asm.tree.TypeInsnNode tn
+                && tn.getOpcode() == Opcodes.NEW
+                && "java/lang/LinkageError".equals(tn.desc)) {
+                throwsLinkage = true;
+                break;
+            }
+        }
+        Assertions.assertTrue(throwsLinkage,
+            () -> "Expected method " + methodName + descriptor + " body to throw LinkageError");
     }
 
     static long countNativeMethods(Path jar) throws IOException {
+        // After the no-native-keyword refactor, "translated method" is identified by a body that
+        // throws LinkageError (the runtime native lib patches Method* to redirect dispatch).
         long count = 0;
         for (ClassNode classNode : readAllClasses(jar)) {
             for (MethodNode method : classNode.methods) {
-                if ((method.access & Opcodes.ACC_NATIVE) != 0) {
-                    count++;
+                for (var insn = method.instructions.getFirst(); insn != null; insn = insn.getNext()) {
+                    if (insn instanceof org.objectweb.asm.tree.TypeInsnNode tn
+                        && tn.getOpcode() == Opcodes.NEW
+                        && "java/lang/LinkageError".equals(tn.desc)) {
+                        count++;
+                        break;
+                    }
                 }
             }
         }
