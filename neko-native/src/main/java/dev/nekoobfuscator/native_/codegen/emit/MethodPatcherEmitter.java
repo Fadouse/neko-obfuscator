@@ -17,6 +17,9 @@ public final class MethodPatcherEmitter {
         return """
 /* === Method* layout discovery + entry patcher === */
 #include <dlfcn.h>
+#if defined(__linux__) || defined(__APPLE__)
+#include <sys/mman.h>
+#endif
 
 #define NEKO_ACC_NATIVE_BIT 0x00000100u
 #define NEKO_ACC_NOT_C1_COMPILABLE_FALLBACK  0x04000000u
@@ -526,6 +529,209 @@ static void neko_blob_visit_log(void *blob, const char *name, void *cookie) {
     }
 }
 
+/* === Phase 2: private CodeHeap allocator + registration ===
+ * We construct a CodeHeap struct ourselves (in C-heap memory), back it with
+ * a private mmap'd executable region + segmap, and append the CodeHeap* to
+ * HotSpot's CodeCache::_heaps GrowableArray. After registration,
+ * CodeCache::find_blob_at(pc) will scan our heap when given a PC inside
+ * our exec region. Phase 3 then constructs CodeBlobs there.
+ *
+ * Layout offsets we DERIVE (not exposed by VMStructs but stable in
+ * jdk-21.0.10 hotspot/share/memory/heap.hpp):
+ *   _segment_size                   at log2_segment_size_offset - 8  (size_t before)
+ *   _number_of_reserved_segments    at log2_segment_size_offset - 16
+ *   _number_of_committed_segments   at log2_segment_size_offset - 24
+ *   _next_segment                   at log2_segment_size_offset + 8  (skip 4 + 4 pad)
+ *   _freelist                       at log2_segment_size_offset + 16 (a FreeBlock*)
+ * If a future JDK reorders these, port maintenance per-version. */
+
+#define NEKO_PRIV_HEAP_BYTES   (256 * 1024)  /* 256 KB exec area */
+#define NEKO_PRIV_SEGMENT_BYTES 128
+
+typedef struct {
+    void   *codeheap;        /* C-heap allocated CodeHeap struct */
+    void   *exec_region;     /* mmap PROT_RWX area */
+    size_t  exec_size;
+    void   *segmap_region;   /* mmap RW area, one byte per segment */
+    size_t  segmap_size;
+    size_t  segment_size;
+    size_t  next_byte;       /* bump cursor inside exec_region */
+    jboolean registered;
+} neko_priv_codeheap_t;
+
+static neko_priv_codeheap_t g_neko_priv_heap = {0};
+
+static int neko_priv_use_enabled(void) {
+    return getenv("NEKO_USE_CODEBLOB") != NULL;
+}
+
+static void *neko_alloc_exec_pages(size_t size) {
+#if defined(__linux__) || defined(__APPLE__)
+    void *p = mmap(NULL, size, PROT_READ|PROT_WRITE|PROT_EXEC,
+                   MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
+    return p == MAP_FAILED ? NULL : p;
+#else
+    return NULL;
+#endif
+}
+
+static void *neko_alloc_rw_pages(size_t size) {
+#if defined(__linux__) || defined(__APPLE__)
+    void *p = mmap(NULL, size, PROT_READ|PROT_WRITE,
+                   MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
+    return p == MAP_FAILED ? NULL : p;
+#else
+    return NULL;
+#endif
+}
+
+static void neko_codeheap_set_virtualspace(void *vspace, void *low, void *high) {
+    *(void**)((char*)vspace + g_neko_method_layout.off_virtualspace_low_boundary) = low;
+    *(void**)((char*)vspace + g_neko_method_layout.off_virtualspace_high_boundary) = high;
+    *(void**)((char*)vspace + g_neko_method_layout.off_virtualspace_low) = low;
+    *(void**)((char*)vspace + g_neko_method_layout.off_virtualspace_high) = high;
+}
+
+static jboolean neko_priv_heap_init(void) {
+    if (g_neko_priv_heap.codeheap != NULL) return JNI_TRUE;
+    if (!neko_codecache_layout_ready()) {
+        NEKO_PATCH_LOG("priv heap init: codecache layout not ready");
+        return JNI_FALSE;
+    }
+    if (g_neko_method_layout.sizeof_CodeHeap == 0) {
+        NEKO_PATCH_LOG("priv heap init: sizeof(CodeHeap) unknown");
+        return JNI_FALSE;
+    }
+    if (g_neko_method_layout.bufferblob_vtable == NULL) {
+        NEKO_PATCH_LOG("priv heap init: vtable not harvested");
+        return JNI_FALSE;
+    }
+
+    const size_t exec_bytes = NEKO_PRIV_HEAP_BYTES;
+    const size_t seg_bytes  = NEKO_PRIV_SEGMENT_BYTES;
+    const size_t segments   = exec_bytes / seg_bytes;
+
+    void *exec = neko_alloc_exec_pages(exec_bytes);
+    if (exec == NULL) { NEKO_PATCH_LOG("priv heap init: mmap exec failed"); return JNI_FALSE; }
+    void *segmap = neko_alloc_rw_pages(segments);
+    if (segmap == NULL) {
+        NEKO_PATCH_LOG("priv heap init: mmap segmap failed");
+        munmap(exec, exec_bytes);
+        return JNI_FALSE;
+    }
+    /* segmap initial state: 0xFF means "no block here" / free.
+     * HotSpot's CodeHeap::find_block_for treats 0xFF as a chain marker
+     * meaning "skip 254 segments back" — for empty regions there's no
+     * block to find, so find_blob_at will iterate to a different heap. */
+    memset(segmap, 0xFF, segments);
+
+    void *heap = calloc(1, g_neko_method_layout.sizeof_CodeHeap);
+    if (heap == NULL) {
+        munmap(exec, exec_bytes);
+        munmap(segmap, segments);
+        return JNI_FALSE;
+    }
+
+    /* Fill the two embedded VirtualSpace structs. */
+    char *vs_mem = (char*)heap + g_neko_method_layout.off_codeheap_memory;
+    char *vs_seg = (char*)heap + g_neko_method_layout.off_codeheap_segmap;
+    neko_codeheap_set_virtualspace(vs_mem, exec, (char*)exec + exec_bytes);
+    neko_codeheap_set_virtualspace(vs_seg, segmap, (char*)segmap + segments);
+
+    /* log2_segment_size and friends. The neighbours' offsets are derived
+     * from the VMStructs-exposed _log2_segment_size offset. Verified
+     * against jdk-21.0.10 heap.hpp:
+     *   ptrdiff_t off = g_neko_method_layout.off_codeheap_log2_segment_size;
+     *   _number_of_committed_segments = off - 24
+     *   _number_of_reserved_segments  = off - 16
+     *   _segment_size                 = off - 8
+     *   _log2_segment_size            = off       (int)
+     *   _next_segment                 = off + 8   (skip 4-byte int + 4-byte pad)
+     */
+    ptrdiff_t off_log2 = g_neko_method_layout.off_codeheap_log2_segment_size;
+    *(size_t*)((char*)heap + off_log2 - 24) = segments; /* _number_of_committed_segments */
+    *(size_t*)((char*)heap + off_log2 - 16) = segments; /* _number_of_reserved_segments  */
+    *(size_t*)((char*)heap + off_log2 - 8)  = seg_bytes;/* _segment_size */
+    *(int*   )((char*)heap + off_log2)      = 7;        /* _log2_segment_size */
+    *(size_t*)((char*)heap + off_log2 + 8)  = 0;        /* _next_segment (used segments) */
+
+    g_neko_priv_heap.codeheap = heap;
+    g_neko_priv_heap.exec_region = exec;
+    g_neko_priv_heap.exec_size = exec_bytes;
+    g_neko_priv_heap.segmap_region = segmap;
+    g_neko_priv_heap.segmap_size = segments;
+    g_neko_priv_heap.segment_size = seg_bytes;
+    g_neko_priv_heap.next_byte = 0;
+    g_neko_priv_heap.registered = JNI_FALSE;
+    NEKO_PATCH_LOG("priv heap init: heap=%p exec=[%p..%p) segmap=[%p..%p)",
+        heap, exec, (char*)exec + exec_bytes, segmap, (char*)segmap + segments);
+    return JNI_TRUE;
+}
+
+static jboolean neko_priv_heap_register(void) {
+    if (g_neko_priv_heap.codeheap == NULL) return JNI_FALSE;
+    if (g_neko_priv_heap.registered) return JNI_TRUE;
+    if (g_neko_method_layout.addr_codecache_heaps == NULL) return JNI_FALSE;
+    void **heaps_static = (void**)g_neko_method_layout.addr_codecache_heaps;
+    void *heaps_array = *heaps_static;
+    if (heaps_array == NULL) return JNI_FALSE;
+    int *len_ptr = (int*)((char*)heaps_array + g_neko_method_layout.off_growable_array_len);
+    int *cap_ptr = (int*)((char*)heaps_array + g_neko_method_layout.off_growable_array_capacity);
+    void ***data_pp = (void***)((char*)heaps_array + g_neko_method_layout.off_growable_array_data);
+    int len = *len_ptr;
+    int cap = *cap_ptr;
+    void **data = *data_pp;
+    NEKO_PATCH_LOG("priv heap register: heaps=%p len=%d cap=%d data=%p",
+        heaps_array, len, cap, data);
+    if (data == NULL) return JNI_FALSE;
+    if (cap > len) {
+        /* Slack capacity present — append in place. */
+        data[len] = g_neko_priv_heap.codeheap;
+        __atomic_thread_fence(__ATOMIC_RELEASE);
+        *len_ptr = len + 1;
+        g_neko_priv_heap.registered = JNI_TRUE;
+        NEKO_PATCH_LOG("priv heap register: appended at slot %d", len);
+        return JNI_TRUE;
+    }
+    /* No slack. Build a brand-new GrowableArray with extra capacity, copy
+     * old entries plus ours, then atomic-swap the static _heaps pointer.
+     * The old array stays valid for any in-flight reader — leaks ~24 bytes
+     * but that's a one-time cost.
+     *
+     * HotSpot only mutates _heaps in CodeCache::add_heap, which is gated
+     * on !Universe::is_fully_initialized(). By the time our JNI_OnLoad
+     * runs the universe is fully initialized, so HotSpot itself won't be
+     * concurrently growing _heaps and we don't need a CodeCache_lock. */
+    {
+        size_t array_size = (size_t)g_neko_method_layout.off_growable_array_data + sizeof(void*);
+        /* Pad to 16 bytes for safety (matches typical alignment). */
+        array_size = (array_size + 15u) & ~(size_t)15u;
+        void *new_array = calloc(1, array_size);
+        if (new_array == NULL) {
+            NEKO_PATCH_LOG("priv heap register: malloc new array failed");
+            return JNI_FALSE;
+        }
+        int new_cap = len + 4;
+        void **new_data = (void**)calloc((size_t)new_cap, sizeof(void*));
+        if (new_data == NULL) {
+            free(new_array);
+            NEKO_PATCH_LOG("priv heap register: malloc new data failed");
+            return JNI_FALSE;
+        }
+        for (int i = 0; i < len; i++) new_data[i] = data[i];
+        new_data[len] = g_neko_priv_heap.codeheap;
+        *(int*)((char*)new_array + g_neko_method_layout.off_growable_array_len) = len + 1;
+        *(int*)((char*)new_array + g_neko_method_layout.off_growable_array_capacity) = new_cap;
+        *(void***)((char*)new_array + g_neko_method_layout.off_growable_array_data) = new_data;
+        __atomic_thread_fence(__ATOMIC_RELEASE);
+        __atomic_store_n(heaps_static, new_array, __ATOMIC_RELEASE);
+        g_neko_priv_heap.registered = JNI_TRUE;
+        NEKO_PATCH_LOG("priv heap register: swapped _heaps from %p to %p (len %d -> %d, cap %d -> %d)",
+            heaps_array, new_array, len, len + 1, cap, new_cap);
+        return JNI_TRUE;
+    }
+}
+
 static jboolean neko_codecache_walk(void) {
     if (!neko_codecache_layout_ready()) {
         NEKO_PATCH_LOG("codecache walk: layout not ready");
@@ -676,11 +882,19 @@ static jboolean neko_method_layout_init(JNIEnv *env) {
         g_neko_method_layout.off_codeblob_name,
         g_neko_method_layout.off_codeblob_size,
         g_neko_method_layout.off_codeblob_code_begin);
-    /* Phase 1 only walks when debug is on, so a layout mismatch can't hurt
-     * production runs. Phase 2 will gate trampoline relocation behind the
-     * walk's success. */
-    if (NEKO_PATCH_DEBUG) {
+    /* Phase 1 (codecache walk) runs whenever NEKO_PATCH_DEBUG=1 OR
+     * NEKO_USE_CODEBLOB=1 — Phase 2 needs the harvested vtable. The walk
+     * itself uses initialized==JNI_TRUE to short-circuit on later calls. */
+    if (NEKO_PATCH_DEBUG || neko_priv_use_enabled()) {
         (void)neko_codecache_walk();
+    }
+    /* Phase 2 (allocate + register own CodeHeap) only fires when
+     * NEKO_USE_CODEBLOB=1. Init+register happens at most once per process —
+     * neko_priv_heap.codeheap != NULL on the second call short-circuits. */
+    if (neko_priv_use_enabled()) {
+        if (neko_priv_heap_init()) {
+            (void)neko_priv_heap_register();
+        }
     }
     g_neko_method_layout.usable = JNI_TRUE;
     return JNI_TRUE;
