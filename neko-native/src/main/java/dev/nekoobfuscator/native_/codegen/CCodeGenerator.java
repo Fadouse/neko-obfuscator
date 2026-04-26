@@ -207,6 +207,17 @@ public final class CCodeGenerator {
         sb.append("struct neko_sig_entry { void *i2i; void *c2i; };\n");
         sb.append("__attribute__((visibility(\"hidden\"))) extern const struct neko_sig_entry g_neko_sig_table[];\n");
         sb.append("__attribute__((visibility(\"hidden\"))) extern const uint32_t g_neko_sig_table_count;\n");
+        sb.append("__attribute__((visibility(\"hidden\"))) extern ptrdiff_t g_neko_off_thread_state;\n");
+        sb.append("__attribute__((visibility(\"hidden\"))) extern int32_t   g_neko_thread_state_in_java;\n");
+        sb.append("__attribute__((visibility(\"hidden\"))) extern int32_t   g_neko_thread_state_in_native;\n");
+        sb.append("__attribute__((visibility(\"hidden\"))) extern int32_t   g_neko_thread_state_in_native_trans;\n");
+        sb.append("__attribute__((visibility(\"hidden\"))) extern ptrdiff_t g_neko_off_thread_polling_word;\n");
+        sb.append("__attribute__((visibility(\"hidden\"))) extern jboolean  g_neko_thread_state_ready;\n");
+        sb.append("__attribute__((visibility(\"hidden\"))) extern ptrdiff_t g_neko_off_last_Java_sp;\n");
+        sb.append("__attribute__((visibility(\"hidden\"))) extern ptrdiff_t g_neko_off_last_Java_fp;\n");
+        sb.append("__attribute__((visibility(\"hidden\"))) extern ptrdiff_t g_neko_off_last_Java_pc;\n");
+        sb.append("__attribute__((visibility(\"hidden\"))) extern jboolean  g_neko_frame_anchor_ready;\n");
+        sb.append("__attribute__((visibility(\"hidden\"))) void neko_handle_safepoint_poll(void);\n");
         sb.append("static jboolean neko_resolve_jnihandles(void *jvm);\n");
         sb.append("static void *neko_dlsym(void *h, const char *name);\n\n");
         sb.append(renderResolutionCaches());

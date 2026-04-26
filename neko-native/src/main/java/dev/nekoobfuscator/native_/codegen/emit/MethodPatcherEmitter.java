@@ -43,9 +43,47 @@ typedef struct {
     uint32_t method_flag_not_c1_compilable;
     uint32_t method_flag_not_c2_compilable;
     uint32_t method_flag_not_osr_compilable;
+    /* Thread-state machine — populated from VMStructs Thread::_thread_state +
+     * VMIntConstants JavaThreadState enum values. The trampoline reads these
+     * via the exported globals below to flip between in_Java and in_native. */
+    ptrdiff_t off_thread_state;
+    int32_t thread_state_in_java;
+    int32_t thread_state_in_native;
+    int32_t thread_state_in_native_trans;
+    /* SafepointMechanism polling: the byte at ((char*)thread)[off_safepoint_poll]
+     * (when present) is non-zero whenever a safepoint is requested; the
+     * trampoline's transition-back checks it and yields if needed. */
+    ptrdiff_t off_thread_polling_word;
+    /* JavaFrameAnchor inside JavaThread (so GC can walk our stack while we are
+     * in _thread_in_native). Two emission paths: direct flat fields on
+     * JavaThread (older JDKs) or via the embedded _anchor struct. We pick
+     * whichever resolved and publish the final byte offsets to the asm. */
+    ptrdiff_t off_thread_anchor;
+    ptrdiff_t off_frame_anchor_sp;
+    ptrdiff_t off_frame_anchor_fp;
+    ptrdiff_t off_frame_anchor_pc;
+    ptrdiff_t off_thread_last_Java_sp_direct;
+    ptrdiff_t off_thread_last_Java_fp_direct;
+    ptrdiff_t off_thread_last_Java_pc_direct;
 } neko_method_layout_t;
 
 static neko_method_layout_t g_neko_method_layout = {0};
+
+/* === Globals exported to naked-asm trampolines via RIP-relative loads. ===
+ * Hidden visibility lets the linker resolve them to local definitions while
+ * still allowing the inline asm to reference them as if external symbols. */
+__attribute__((visibility("hidden"))) ptrdiff_t g_neko_off_thread_state = 0;
+__attribute__((visibility("hidden"))) int32_t   g_neko_thread_state_in_java = 0;
+__attribute__((visibility("hidden"))) int32_t   g_neko_thread_state_in_native = 0;
+__attribute__((visibility("hidden"))) int32_t   g_neko_thread_state_in_native_trans = 0;
+__attribute__((visibility("hidden"))) ptrdiff_t g_neko_off_thread_polling_word = 0;
+__attribute__((visibility("hidden"))) jboolean  g_neko_thread_state_ready = JNI_FALSE;
+/* Final byte offsets within JavaThread for the frame anchor fields. Picked
+ * from either the flat-field path (older JDKs) or _anchor + sub-offset. */
+__attribute__((visibility("hidden"))) ptrdiff_t g_neko_off_last_Java_sp = 0;
+__attribute__((visibility("hidden"))) ptrdiff_t g_neko_off_last_Java_fp = 0;
+__attribute__((visibility("hidden"))) ptrdiff_t g_neko_off_last_Java_pc = 0;
+__attribute__((visibility("hidden"))) jboolean  g_neko_frame_anchor_ready = JNI_FALSE;
 
 #define NEKO_PATCH_DEBUG (getenv("NEKO_PATCH_DEBUG") != NULL)
 #define NEKO_PATCH_LOG(fmt, ...) do { if (NEKO_PATCH_DEBUG) { fprintf(stderr, "[neko-patch] " fmt "\\n", ##__VA_ARGS__); fflush(stderr); } } while (0)
@@ -172,6 +210,35 @@ static jboolean neko_walk_vm_structs(void *jvm) {
             else if (neko_streq_safe(field_name, "_flags") || neko_streq_safe(field_name, "_flags._status") || neko_streq_safe(field_name, "_flags._flags")) {
                 g_neko_method_layout.off_method_flags_status = (ptrdiff_t)off_value;
             }
+        } else if (neko_streq_safe(type_name, "Thread") || neko_streq_safe(type_name, "JavaThread")) {
+            if (neko_streq_safe(field_name, "_thread_state")) {
+                if (g_neko_method_layout.off_thread_state == 0
+                    || neko_streq_safe(type_name, "JavaThread")) {
+                    g_neko_method_layout.off_thread_state = (ptrdiff_t)off_value;
+                }
+            } else if (neko_streq_safe(field_name, "_polling_word")
+                    || neko_streq_safe(field_name, "_polling_page")) {
+                g_neko_method_layout.off_thread_polling_word = (ptrdiff_t)off_value;
+            } else if (neko_streq_safe(field_name, "_anchor")) {
+                g_neko_method_layout.off_thread_anchor = (ptrdiff_t)off_value;
+            } else if (neko_streq_safe(field_name, "_anchor._last_Java_sp")
+                    || neko_streq_safe(field_name, "_last_Java_sp")) {
+                g_neko_method_layout.off_thread_last_Java_sp_direct = (ptrdiff_t)off_value;
+            } else if (neko_streq_safe(field_name, "_anchor._last_Java_fp")
+                    || neko_streq_safe(field_name, "_last_Java_fp")) {
+                g_neko_method_layout.off_thread_last_Java_fp_direct = (ptrdiff_t)off_value;
+            } else if (neko_streq_safe(field_name, "_anchor._last_Java_pc")
+                    || neko_streq_safe(field_name, "_last_Java_pc")) {
+                g_neko_method_layout.off_thread_last_Java_pc_direct = (ptrdiff_t)off_value;
+            }
+        } else if (neko_streq_safe(type_name, "JavaFrameAnchor")) {
+            if (neko_streq_safe(field_name, "_last_Java_sp")) {
+                g_neko_method_layout.off_frame_anchor_sp = (ptrdiff_t)off_value;
+            } else if (neko_streq_safe(field_name, "_last_Java_fp")) {
+                g_neko_method_layout.off_frame_anchor_fp = (ptrdiff_t)off_value;
+            } else if (neko_streq_safe(field_name, "_last_Java_pc")) {
+                g_neko_method_layout.off_frame_anchor_pc = (ptrdiff_t)off_value;
+            }
         }
     }
     return JNI_TRUE;
@@ -215,6 +282,10 @@ static void neko_walk_vm_int_constants(void *jvm) {
         else if (neko_strstr_safe(name, "not_c1_compilable")) g_neko_method_layout.method_flag_not_c1_compilable = (uint32_t)value;
         else if (neko_strstr_safe(name, "not_c2_compilable")) g_neko_method_layout.method_flag_not_c2_compilable = (uint32_t)value;
         else if (neko_strstr_safe(name, "not_c1_osr_compilable")) g_neko_method_layout.method_flag_not_osr_compilable = (uint32_t)value;
+        /* JavaThreadState enum values — names are stable across JDKs. */
+        else if (neko_streq_safe(name, "_thread_in_Java")) g_neko_method_layout.thread_state_in_java = (int32_t)value;
+        else if (neko_streq_safe(name, "_thread_in_native")) g_neko_method_layout.thread_state_in_native = (int32_t)value;
+        else if (neko_streq_safe(name, "_thread_in_native_trans")) g_neko_method_layout.thread_state_in_native_trans = (int32_t)value;
     }
 }
 
@@ -262,6 +333,43 @@ static jboolean neko_method_layout_init(JNIEnv *env) {
         g_neko_method_layout.off_method_from_compiled_entry,
         g_neko_method_layout.off_method_flags_status,
         g_neko_method_layout.access_flags_size);
+    NEKO_PATCH_LOG("thread: state_off=%td poll_off=%td in_java=%d in_native=%d in_native_trans=%d",
+        g_neko_method_layout.off_thread_state,
+        g_neko_method_layout.off_thread_polling_word,
+        g_neko_method_layout.thread_state_in_java,
+        g_neko_method_layout.thread_state_in_native,
+        g_neko_method_layout.thread_state_in_native_trans);
+    /* Publish thread-state info to the asm-visible globals. */
+    g_neko_off_thread_state             = g_neko_method_layout.off_thread_state;
+    g_neko_thread_state_in_java         = g_neko_method_layout.thread_state_in_java;
+    g_neko_thread_state_in_native       = g_neko_method_layout.thread_state_in_native;
+    g_neko_thread_state_in_native_trans = g_neko_method_layout.thread_state_in_native_trans;
+    g_neko_off_thread_polling_word      = g_neko_method_layout.off_thread_polling_word;
+    g_neko_thread_state_ready =
+        (g_neko_method_layout.off_thread_state != 0
+         && g_neko_method_layout.thread_state_in_java != g_neko_method_layout.thread_state_in_native)
+        ? JNI_TRUE : JNI_FALSE;
+    /* Resolve frame-anchor final offsets: direct fields take priority,
+     * else compute from anchor + sub-offset. */
+    if (g_neko_method_layout.off_thread_last_Java_sp_direct > 0) {
+        g_neko_off_last_Java_sp = g_neko_method_layout.off_thread_last_Java_sp_direct;
+    } else if (g_neko_method_layout.off_thread_anchor > 0) {
+        g_neko_off_last_Java_sp = g_neko_method_layout.off_thread_anchor + g_neko_method_layout.off_frame_anchor_sp;
+    }
+    if (g_neko_method_layout.off_thread_last_Java_fp_direct > 0) {
+        g_neko_off_last_Java_fp = g_neko_method_layout.off_thread_last_Java_fp_direct;
+    } else if (g_neko_method_layout.off_thread_anchor > 0) {
+        g_neko_off_last_Java_fp = g_neko_method_layout.off_thread_anchor + g_neko_method_layout.off_frame_anchor_fp;
+    }
+    if (g_neko_method_layout.off_thread_last_Java_pc_direct > 0) {
+        g_neko_off_last_Java_pc = g_neko_method_layout.off_thread_last_Java_pc_direct;
+    } else if (g_neko_method_layout.off_thread_anchor > 0) {
+        g_neko_off_last_Java_pc = g_neko_method_layout.off_thread_anchor + g_neko_method_layout.off_frame_anchor_pc;
+    }
+    g_neko_frame_anchor_ready = (g_neko_off_last_Java_sp > 0) ? JNI_TRUE : JNI_FALSE;
+    NEKO_PATCH_LOG("anchor: sp=%td fp=%td pc=%td ready=%d",
+        g_neko_off_last_Java_sp, g_neko_off_last_Java_fp, g_neko_off_last_Java_pc,
+        (int)g_neko_frame_anchor_ready);
     g_neko_method_layout.usable = JNI_TRUE;
     return JNI_TRUE;
 }
@@ -284,6 +392,19 @@ static jboolean neko_apply_no_compile_flags(void *method_star) {
         else if (width == 2) __atomic_fetch_or((uint16_t*)addr, (uint16_t)mask, __ATOMIC_SEQ_CST);
     }
     return JNI_TRUE;
+}
+
+/* Called from naked-asm trampoline when the polling word indicates a safepoint
+ * is requested. We can't easily reach HotSpot's SafepointMechanism::block from
+ * here without C++ glue, so we go through a JNI no-op (MonitorEnter on a sentinel)
+ * which forces the JVM through its safepoint check. */
+__attribute__((visibility("hidden"))) void neko_handle_safepoint_poll(void) {
+    JNIEnv *env = NULL;
+    if (g_neko_java_vm == NULL) return;
+    if ((*g_neko_java_vm)->GetEnv(g_neko_java_vm, (void**)&env, JNI_VERSION_1_6) != JNI_OK || env == NULL) return;
+    /* GetVersion is the cheapest JNI call that takes us through the
+     * thread-in-native -> thread-in-Java transition with safepoint poll. */
+    (void)(*env)->GetVersion(env);
 }
 
 static jboolean neko_patch_method_entry(void *method_star, void *manifest_entry) {

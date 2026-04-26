@@ -105,7 +105,61 @@ public final class X86_64SysVTrampoline {
             }
             slotsConsumed += slotsForArg;
         }
+        // Frame anchor: write last_Java_sp = sender_sp(r13), fp = saved rbp, pc = ret addr.
+        // The original return addr is at [rbp + 8]. Saved rbp is in [rbp].
+        sb.append("        \"cmpb $0, g_neko_frame_anchor_ready(%%rip)\\n\"\n");
+        sb.append("        \"je   7f\\n\"\n");
+        sb.append("        \"movq g_neko_off_last_Java_sp(%%rip), %%r10\\n\"\n");
+        sb.append("        \"movq %%r13, (%%r15, %%r10, 1)\\n\"\n");
+        sb.append("        \"movq g_neko_off_last_Java_fp(%%rip), %%r10\\n\"\n");
+        sb.append("        \"movq (%%rbp), %%r11\\n\"\n");
+        sb.append("        \"movq %%r11, (%%r15, %%r10, 1)\\n\"\n");
+        sb.append("        \"movq g_neko_off_last_Java_pc(%%rip), %%r10\\n\"\n");
+        sb.append("        \"movq 8(%%rbp), %%r11\\n\"\n");
+        sb.append("        \"movq %%r11, (%%r15, %%r10, 1)\\n\"\n");
+        sb.append("        \"7:\\n\"\n");
+        // Thread-state transition: _thread_in_Java -> _thread_in_native.
+        // r15 holds the JavaThread*; off and state values come from runtime globals.
+        sb.append("        \"cmpb $0, g_neko_thread_state_ready(%%rip)\\n\"\n");
+        sb.append("        \"je   4f\\n\"\n");
+        sb.append("        \"movq g_neko_off_thread_state(%%rip), %%r10\\n\"\n");
+        sb.append("        \"movl g_neko_thread_state_in_native(%%rip), %%r11d\\n\"\n");
+        sb.append("        \"movl %%r11d, (%%r15, %%r10, 1)\\n\"\n");
+        sb.append("        \"mfence\\n\"\n");
+        sb.append("        \"4:\\n\"\n");
         sb.append("        \"call  neko_sig_").append(sigId).append("_dispatch\\n\"\n");
+        // Save the return value across the transition-back so we don't clobber it.
+        sb.append("        \"movq %%rax, -8(%%rbp)\\n\"\n");
+        sb.append("        \"movq %%xmm0, -16(%%rbp)\\n\"\n");
+        // Transition _thread_in_native -> _thread_in_Java. If a safepoint is
+        // requested (polling word non-zero) call neko_handle_safepoint_poll.
+        sb.append("        \"cmpb $0, g_neko_thread_state_ready(%%rip)\\n\"\n");
+        sb.append("        \"je   5f\\n\"\n");
+        sb.append("        \"movq g_neko_off_thread_state(%%rip), %%r10\\n\"\n");
+        sb.append("        \"movl g_neko_thread_state_in_native_trans(%%rip), %%r11d\\n\"\n");
+        sb.append("        \"movl %%r11d, (%%r15, %%r10, 1)\\n\"\n");
+        sb.append("        \"mfence\\n\"\n");
+        // Check polling word
+        sb.append("        \"movq g_neko_off_thread_polling_word(%%rip), %%r10\\n\"\n");
+        sb.append("        \"testq %%r10, %%r10\\n\"\n");
+        sb.append("        \"je   6f\\n\"\n");
+        sb.append("        \"movq (%%r15, %%r10, 1), %%r11\\n\"\n");
+        sb.append("        \"testq %%r11, %%r11\\n\"\n");
+        sb.append("        \"je   6f\\n\"\n");
+        sb.append("        \"call  neko_handle_safepoint_poll\\n\"\n");
+        sb.append("        \"6:\\n\"\n");
+        sb.append("        \"movq g_neko_off_thread_state(%%rip), %%r10\\n\"\n");
+        sb.append("        \"movl g_neko_thread_state_in_java(%%rip), %%r11d\\n\"\n");
+        sb.append("        \"movl %%r11d, (%%r15, %%r10, 1)\\n\"\n");
+        sb.append("        \"5:\\n\"\n");
+        // Clear the frame anchor (only sp matters for HotSpot's "last_Java_sp != 0" tests).
+        sb.append("        \"cmpb $0, g_neko_frame_anchor_ready(%%rip)\\n\"\n");
+        sb.append("        \"je   8f\\n\"\n");
+        sb.append("        \"movq g_neko_off_last_Java_sp(%%rip), %%r10\\n\"\n");
+        sb.append("        \"movq $0, (%%r15, %%r10, 1)\\n\"\n");
+        sb.append("        \"8:\\n\"\n");
+        sb.append("        \"movq -8(%%rbp), %%rax\\n\"\n");
+        sb.append("        \"movq -16(%%rbp), %%xmm0\\n\"\n");
         sb.append("        \"9:\\n\"\n");
         sb.append("        \"addq  $128, %%rsp\\n\"\n");
         sb.append("        \"popq  %%rbp\\n\"\n");
