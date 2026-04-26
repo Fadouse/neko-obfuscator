@@ -561,8 +561,12 @@ typedef struct {
 
 static neko_priv_codeheap_t g_neko_priv_heap = {0};
 
+/* Phase 2/3 default: ON. Set NEKO_DISABLE_CODEBLOB=1 to fall back to the
+ * libneko-only trampoline path (no private CodeHeap, no relocated thunks).
+ * The disabled path is kept as an escape hatch for diagnosing layout-walk
+ * regressions on a new JDK release. */
 static int neko_priv_use_enabled(void) {
-    return getenv("NEKO_USE_CODEBLOB") != NULL;
+    return getenv("NEKO_DISABLE_CODEBLOB") == NULL;
 }
 
 static void *neko_alloc_exec_pages(size_t size) {
@@ -730,6 +734,144 @@ static jboolean neko_priv_heap_register(void) {
             heaps_array, new_array, len, len + 1, cap, new_cap);
         return JNI_TRUE;
     }
+}
+
+/* === Phase 3: per-signature thunk + CodeBlob construction ===
+ * For each signature trampoline (lives in libneko.so), build a small
+ * position-independent thunk inside our private CodeHeap exec region:
+ *
+ *   movabs $real_trampoline_addr, %r11   ; 10 bytes
+ *   jmp    *%r11                         ;  3 bytes
+ *
+ * Total 13 bytes (rounded up to a 16-byte tail). Around the thunk we lay
+ * out a HeapBlock header (16 bytes: size_t _length, bool _used) and a
+ * synthetic BufferBlob struct (vtable harvested from an existing adapter)
+ * so HotSpot's CodeCache::find_blob_at(thunk_pc) can resolve the blob and
+ * walk its metadata without crashing. The caller patches Method::_i2i_entry
+ * (and _from_interpreted_entry) to thunk_pc; HotSpot's c2i adapter for
+ * _from_compiled_entry already routes JIT callers through _i2i_entry, so
+ * leaving _from_compiled_entry alone is intentional. */
+
+#define NEKO_PRIV_THUNK_SLOT_MAX 128
+
+typedef struct {
+    void *real_trampoline;   /* libneko.so trampoline PC */
+    void *thunk_pc;          /* relocated thunk PC inside our exec heap */
+} neko_priv_thunk_slot_t;
+
+static neko_priv_thunk_slot_t g_neko_priv_thunks[NEKO_PRIV_THUNK_SLOT_MAX] = {0};
+static uint32_t g_neko_priv_thunk_count = 0;
+
+/* Round x up to multiple of n (n must be power-of-two). */
+#define NEKO_ROUND_UP(x, n) (((x) + ((n) - 1u)) & ~((typeof(x))(n) - 1u))
+
+static void *neko_priv_alloc_thunk(void *real_trampoline) {
+    if (g_neko_priv_heap.codeheap == NULL || !g_neko_priv_heap.registered) return NULL;
+    if (real_trampoline == NULL) return NULL;
+    if (g_neko_method_layout.bufferblob_vtable == NULL) return NULL;
+    if (g_neko_method_layout.sizeof_BufferBlob == 0) return NULL;
+
+    /* Layout inside one segment-aligned block:
+     *   [HeapBlock header (16)]  [BufferBlob struct]  [thunk (16)]
+     * Round total bytes up to segment_size. */
+    const size_t header_bytes = 16;
+    const size_t blob_bytes   = g_neko_method_layout.sizeof_BufferBlob;
+    const size_t thunk_bytes  = 16;
+    size_t total = header_bytes + blob_bytes + thunk_bytes;
+    size_t seg_bytes = g_neko_priv_heap.segment_size;
+    size_t segments  = (total + seg_bytes - 1u) / seg_bytes;
+    size_t block_bytes = segments * seg_bytes;
+    if (g_neko_priv_heap.next_byte + block_bytes > g_neko_priv_heap.exec_size) return NULL;
+
+    char *block = (char*)g_neko_priv_heap.exec_region + g_neko_priv_heap.next_byte;
+    size_t base_segment = g_neko_priv_heap.next_byte / seg_bytes;
+    g_neko_priv_heap.next_byte += block_bytes;
+
+    /* HeapBlock header. _length is in segment units (per HotSpot). _used==1. */
+    *(size_t*)block = segments;
+    *(int8_t*)(block + sizeof(size_t)) = 1;
+    /* Remaining bytes of the 16-byte header are zero. */
+
+    /* BufferBlob: vtable + _name + _size + _header_size + _data_offset +
+     * _frame_complete_offset + _frame_size + _code_begin/_code_end +
+     * _content_begin/_data_end. Everything else stays zero (calloc'd region). */
+    char *blob = block + header_bytes;
+    memset(blob, 0, blob_bytes);
+    *(void**)blob = g_neko_method_layout.bufferblob_vtable;
+    if (g_neko_method_layout.off_codeblob_name > 0) {
+        *(const char**)(blob + g_neko_method_layout.off_codeblob_name) = "neko_trampoline";
+    }
+    if (g_neko_method_layout.off_codeblob_size > 0) {
+        *(int*)(blob + g_neko_method_layout.off_codeblob_size) = (int)block_bytes;
+    }
+    if (g_neko_method_layout.off_codeblob_header_size > 0) {
+        *(int*)(blob + g_neko_method_layout.off_codeblob_header_size) = (int)blob_bytes;
+    }
+    /* CodeBlob::content/code/data layout: code starts immediately after the
+     * BufferBlob struct ends; thunk_bytes is its length; no data section. */
+    char *code_begin = blob + blob_bytes;
+    char *code_end   = code_begin + thunk_bytes;
+    if (g_neko_method_layout.off_codeblob_code_begin > 0) {
+        *(void**)(blob + g_neko_method_layout.off_codeblob_code_begin) = code_begin;
+    }
+    if (g_neko_method_layout.off_codeblob_code_end > 0) {
+        *(void**)(blob + g_neko_method_layout.off_codeblob_code_end) = code_end;
+    }
+    if (g_neko_method_layout.off_codeblob_content_begin > 0) {
+        *(void**)(blob + g_neko_method_layout.off_codeblob_content_begin) = code_begin;
+    }
+    if (g_neko_method_layout.off_codeblob_data_end > 0) {
+        *(void**)(blob + g_neko_method_layout.off_codeblob_data_end) = code_end;
+    }
+    /* _data_offset is computed in CodeBlob constructors as relative to
+     * the blob start. Setting it to point at code_end keeps any
+     * data_address() reads inside the blob bounds. */
+    if (g_neko_method_layout.off_codeblob_data_offset > 0) {
+        *(int*)(blob + g_neko_method_layout.off_codeblob_data_offset) = (int)(blob_bytes + thunk_bytes);
+    }
+    /* _frame_complete_offset == 0 means "no frame to complete" — fine for an
+     * adapter-style stub that doesn't push a frame. _frame_size == 0 means
+     * "no stack frame" — also fine. */
+
+    /* Thunk bytes: movabs $imm64,%r11 ; jmp *%r11 ; pad with int3. */
+    char *thunk = code_begin;
+    thunk[0] = (char)0x49; thunk[1] = (char)0xBB;
+    memcpy(thunk + 2, &real_trampoline, sizeof(void*));
+    thunk[10] = (char)0x41; thunk[11] = (char)0xFF; thunk[12] = (char)0xE3;
+    for (size_t i = 13; i < thunk_bytes; i++) thunk[i] = (char)0xCC;
+
+    /* Segmap: HotSpot encodes "segments since the start of this block" at
+     * each segment index. Index 0 is 0, index 1 is 1, ..., capped at 0xFE
+     * (0xFF means "not allocated / chain marker"). */
+    char *segmap = (char*)g_neko_priv_heap.segmap_region;
+    for (size_t i = 0; i < segments; i++) {
+        segmap[base_segment + i] = (char)(i < 0xFEu ? i : 0xFEu);
+    }
+
+    /* _next_segment: HotSpot's bump-pointer cursor. Updated so future scans
+     * iterate up to here. We're the sole writer, so a plain store suffices. */
+    ptrdiff_t off_log2 = g_neko_method_layout.off_codeheap_log2_segment_size;
+    *(size_t*)((char*)g_neko_priv_heap.codeheap + off_log2 + 8) = base_segment + segments;
+
+    NEKO_PATCH_LOG("priv thunk: real=%p thunk=%p blob=%p seg_base=%zu segs=%zu",
+        real_trampoline, code_begin, blob, base_segment, segments);
+    return code_begin;
+}
+
+static void *neko_priv_get_thunk(void *real_trampoline) {
+    if (real_trampoline == NULL) return NULL;
+    for (uint32_t i = 0; i < g_neko_priv_thunk_count; i++) {
+        if (g_neko_priv_thunks[i].real_trampoline == real_trampoline) {
+            return g_neko_priv_thunks[i].thunk_pc;
+        }
+    }
+    if (g_neko_priv_thunk_count >= NEKO_PRIV_THUNK_SLOT_MAX) return NULL;
+    void *thunk = neko_priv_alloc_thunk(real_trampoline);
+    if (thunk == NULL) return NULL;
+    g_neko_priv_thunks[g_neko_priv_thunk_count].real_trampoline = real_trampoline;
+    g_neko_priv_thunks[g_neko_priv_thunk_count].thunk_pc = thunk;
+    g_neko_priv_thunk_count++;
+    return thunk;
 }
 
 static jboolean neko_codecache_walk(void) {
@@ -990,14 +1132,23 @@ static jboolean neko_patch_method_entry(void *method_star, void *manifest_entry)
         return JNI_FALSE;
     }
     (void)neko_apply_no_compile_flags(method_star);
-    void *i2i = g_neko_sig_table[entry->signature_id].i2i;
-    /* Patch _i2i_entry and _from_interpreted_entry to our naked-asm trampoline.
-     * Leave _from_compiled_entry alone: HotSpot's existing c2i adapter at that
+    void *real_i2i = g_neko_sig_table[entry->signature_id].i2i;
+    /* Phase 3: when NEKO_USE_CODEBLOB=1 succeeded, route _i2i_entry through
+     * a relocated thunk inside our private CodeHeap so HotSpot's
+     * find_blob_at(thunk_pc) returns a valid (synthetic) BufferBlob. This
+     * makes IC resolution from JIT-compiled callers happy. The thunk is just
+     * `movabs $real_i2i, %r11; jmp *%r11`, fully position-independent.
+     * Falls back to the libneko trampoline if Phase 2 didn't register a heap. */
+    void *i2i = real_i2i;
+    if (g_neko_priv_heap.registered) {
+        void *thunk = neko_priv_get_thunk(real_i2i);
+        if (thunk != NULL) i2i = thunk;
+    }
+    /* Leave _from_compiled_entry alone: HotSpot's existing c2i adapter at that
      * slot bridges JIT→interpreter calling conventions and lands on _i2i_entry,
      * which is exactly what we want. Patching c2i ourselves would break
      * MethodHandle / reflection paths that come in through JIT-compiled
-     * adapter frames. (void *)g_neko_sig_table[entry->signature_id].c2i is no
-     * longer applied for this reason. */
+     * adapter frames. */
     __atomic_store_n((void**)((uint8_t*)method_star + g_neko_method_layout.off_method_i2i_entry), i2i, __ATOMIC_RELEASE);
     __atomic_store_n((void**)((uint8_t*)method_star + g_neko_method_layout.off_method_from_interpreted_entry), i2i, __ATOMIC_RELEASE);
     NEKO_PATCH_LOG("patched %s.%s%s sig=%u method=%p", entry->owner_internal, entry->method_name, entry->method_desc, entry->signature_id, method_star);
