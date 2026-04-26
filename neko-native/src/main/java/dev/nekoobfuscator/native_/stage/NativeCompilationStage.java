@@ -280,14 +280,17 @@ public final class NativeCompilationStage {
         methodNode.access &= ~(Opcodes.ACC_NATIVE | Opcodes.ACC_STRICT);
 
         InsnList body = methodNode.instructions;
-        // Inflate the body above HotSpot's MaxInlineSize (35 bytes by default)
-        // so JIT-compiled callers don't bake the LinkageError-throw into their
-        // inlined output, which would bypass our _i2i_entry trampoline. Each
-        // ICONST_0 + IFEQ pair is 4 bytes; 12 of them keep the body comfortably
-        // above the threshold without affecting runtime semantics (control
-        // always falls through).
+        // Inflate the body above HotSpot's three inline thresholds:
+        //   MaxInlineSize     = 35   (C1 trivial inliner)
+        //   MaxInlineLevel    irrelevant
+        //   FreqInlineSize    = 325  (C2 frequency-based inliner)
+        // Each ICONST_0 + IFEQ pair is 4 bytes; 90 pairs = 360 bytes, which
+        // pushes the body over FreqInlineSize so neither C1 nor C2 will
+        // inline us. Control always falls through (the comparison is a
+        // constant zero) so semantics are preserved. 90 pairs encode their
+        // branch targets within s2 reach (jump distance 360 < 32767).
         LabelNode exitLabel = new LabelNode();
-        for (int i = 0; i < 12; i++) {
+        for (int i = 0; i < 90; i++) {
             body.add(new InsnNode(Opcodes.ICONST_0));
             body.add(new JumpInsnNode(Opcodes.IFEQ, exitLabel));
         }
