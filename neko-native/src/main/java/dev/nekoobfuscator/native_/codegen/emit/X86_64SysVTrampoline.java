@@ -5,14 +5,14 @@ package dev.nekoobfuscator.native_.codegen.emit;
  *
  * HotSpot interpreter calling convention at {@code _i2i_entry} entry:
  *   rbx  = Method*
- *   r13  = sender_sp (caller's rsp before the call instruction; points at the
- *          top-of-operand-stack arg)
+ *   r13  = sender_sp (preserved for HotSpot's interpreter return protocol)
  *   r15  = JavaThread*
- *   args = at POSITIVE offsets from r13, with the last-pushed (rightmost) arg
- *          at [r13 + 0] and the first-pushed (receiver, for instance methods)
- *          at the highest offset. Long/double values occupy 2 slots but the
- *          64-bit value lives in the lower-index slot.
- *   The return address is on the C stack at (rsp).
+ *   args = at POSITIVE offsets from the entry stack pointer plus one word
+ *          (return-pc slot). The last-pushed (rightmost) arg is at
+ *          [entry_rsp + 8], and the first-pushed arg (receiver for instance
+ *          methods) is at the highest offset. Long/double values occupy 2
+ *          slots but the 64-bit value lives in the lower-index slot.
+ *   The return address is on the C stack at [entry_rsp].
  *
  * On {@code _from_compiled_entry} the JIT delivers args in the SysV C ABI
  * registers (rdi, rsi, rdx, rcx, r8, r9 for GP; xmm0..7 for FP). The c2i
@@ -69,7 +69,7 @@ public final class X86_64SysVTrampoline {
         // alignment plus arg-spill region) and force 16-byte alignment.
         sb.append("        \"subq  $256, %%rsp\\n\"\n");
         sb.append("        \"andq  $-16, %%rsp\\n\"\n");
-        // scan g_neko_manifest_method_stars for matching rbx
+        // scan primary and alias Method* tables for matching rbx
         sb.append("        \"leaq  g_neko_manifest_method_stars(%%rip), %%r10\\n\"\n");
         sb.append("        \"movl  g_neko_manifest_method_count(%%rip), %%r11d\\n\"\n");
         sb.append("        \"xorl  %%eax, %%eax\\n\"\n");
@@ -81,6 +81,21 @@ public final class X86_64SysVTrampoline {
         sb.append("        \"incl  %%eax\\n\"\n");
         sb.append("        \"jmp   1b\\n\"\n");
         sb.append("        \"3:\\n\"\n");
+        sb.append("        \"leaq  g_neko_manifest_alias_method_stars(%%rip), %%r10\\n\"\n");
+        sb.append("        \"movl  g_neko_manifest_alias_count(%%rip), %%r11d\\n\"\n");
+        sb.append("        \"xorl  %%eax, %%eax\\n\"\n");
+        sb.append("        \".Lneko_i2i_alias_loop_%=:\\n\"\n");
+        sb.append("        \"cmpl  %%r11d, %%eax\\n\"\n");
+        sb.append("        \"jge   .Lneko_i2i_miss_%=\\n\"\n");
+        sb.append("        \"cmpq  %%rbx, (%%r10, %%rax, 8)\\n\"\n");
+        sb.append("        \"je    .Lneko_i2i_alias_hit_%=\\n\"\n");
+        sb.append("        \"incl  %%eax\\n\"\n");
+        sb.append("        \"jmp   .Lneko_i2i_alias_loop_%=\\n\"\n");
+        sb.append("        \".Lneko_i2i_alias_hit_%=:\\n\"\n");
+        sb.append("        \"leaq  g_neko_manifest_alias_indices(%%rip), %%r10\\n\"\n");
+        sb.append("        \"movl  (%%r10, %%rax, 4), %%eax\\n\"\n");
+        sb.append("        \"jmp   2f\\n\"\n");
+        sb.append("        \".Lneko_i2i_miss_%=:\\n\"\n");
         sb.append("        \"xorl  %%eax, %%eax\\n\"\n");
         sb.append("        \"pxor  %%xmm0, %%xmm0\\n\"\n");
         sb.append("        \"jmp   9f\\n\"\n");
@@ -91,7 +106,11 @@ public final class X86_64SysVTrampoline {
           .append(", %%rax, %%rcx\\n\"\n");
         sb.append("        \"addq  %%rcx, %%rdi\\n\"\n");
 
-        // Shuffle args from interpreter slots into SysV C ABI
+        // Shuffle args from interpreter slots into SysV C ABI. Use the actual
+        // entry stack layout, not r13. HotSpot MethodHandle linkTo* stubs may
+        // remove their trailing MemberName by adjusting rsp before tail-jumping
+        // to the target Method::_from_interpreted_entry, while r13 still carries
+        // the sender_sp needed for the eventual interpreter return protocol.
         // For reference args (and the receiver), pass the ADDRESS of the
         // interpreter slot rather than its contents. HotSpot's JNI handle
         // representation is a pointer to an oop cell, and JNIHandles::resolve
@@ -105,7 +124,7 @@ public final class X86_64SysVTrampoline {
         int extraStackSlot = 0;
         if (!shape.isStatic()) {
             int slotOffset = receiverIndex * 8;
-            sb.append("        \"leaq  ").append(slotOffset).append("(%%r13), %").append(gpReg(gpUsed)).append("\\n\"\n");
+            sb.append("        \"leaq  ").append(slotOffset + 16).append("(%%rbp), %").append(gpReg(gpUsed)).append("\\n\"\n");
             gpUsed++;
         }
         for (int i = 0; i < args.length; i++) {
@@ -115,30 +134,30 @@ public final class X86_64SysVTrampoline {
                 if (xmmUsed < 8) {
                     if (a == 'F') sb.append("        \"movss ");
                     else sb.append("        \"movsd ");
-                    sb.append(slotOffset).append("(%%r13), %%xmm").append(xmmUsed).append("\\n\"\n");
+                    sb.append(slotOffset + 16).append("(%%rbp), %%xmm").append(xmmUsed).append("\\n\"\n");
                     xmmUsed++;
                 } else {
-                    sb.append("        \"movq  ").append(slotOffset).append("(%%r13), %%rax\\n\"\n");
+                    sb.append("        \"movq  ").append(slotOffset + 16).append("(%%rbp), %%rax\\n\"\n");
                     sb.append("        \"movq  %%rax, ").append(extraStackSlot * 8).append("(%%rsp)\\n\"\n");
                     extraStackSlot++;
                 }
             } else if (a == 'L') {
                 // Reference arg: pass slot address as jobject.
                 if (gpUsed < 6) {
-                    sb.append("        \"leaq  ").append(slotOffset).append("(%%r13), %").append(gpReg(gpUsed)).append("\\n\"\n");
+                    sb.append("        \"leaq  ").append(slotOffset + 16).append("(%%rbp), %").append(gpReg(gpUsed)).append("\\n\"\n");
                     gpUsed++;
                 } else {
-                    sb.append("        \"leaq  ").append(slotOffset).append("(%%r13), %%rax\\n\"\n");
+                    sb.append("        \"leaq  ").append(slotOffset + 16).append("(%%rbp), %%rax\\n\"\n");
                     sb.append("        \"movq  %%rax, ").append(extraStackSlot * 8).append("(%%rsp)\\n\"\n");
                     extraStackSlot++;
                 }
             } else {
                 // Primitive (I/J): pass slot value.
                 if (gpUsed < 6) {
-                    sb.append("        \"movq  ").append(slotOffset).append("(%%r13), %").append(gpReg(gpUsed)).append("\\n\"\n");
+                    sb.append("        \"movq  ").append(slotOffset + 16).append("(%%rbp), %").append(gpReg(gpUsed)).append("\\n\"\n");
                     gpUsed++;
                 } else {
-                    sb.append("        \"movq  ").append(slotOffset).append("(%%r13), %%rax\\n\"\n");
+                    sb.append("        \"movq  ").append(slotOffset + 16).append("(%%rbp), %%rax\\n\"\n");
                     sb.append("        \"movq  %%rax, ").append(extraStackSlot * 8).append("(%%rsp)\\n\"\n");
                     extraStackSlot++;
                 }
@@ -203,7 +222,8 @@ public final class X86_64SysVTrampoline {
         // Restore rsp via rbp (we may have re-aligned).
         sb.append("        \"movq  %%rbp, %%rsp\\n\"\n");
         sb.append("        \"popq  %%rbp\\n\"\n");
-        // Return to interpreter caller: pop return address, restore rsp from r13, jmp via rax.
+        // Return to interpreter caller: save return pc, restore rsp from the
+        // HotSpot-provided sender_sp in r13, and tail-jump to the continuation.
         sb.append("        \"movq  (%%rsp), %%r10\\n\"\n");
         sb.append("        \"movq  %%r13, %%rsp\\n\"\n");
         sb.append("        \"jmp   *%%r10\\n\"\n");
@@ -353,7 +373,7 @@ public final class X86_64SysVTrampoline {
             spillIndex++;
         }
 
-        // Manifest scan: find entry index for rbx in g_neko_manifest_method_stars.
+        // Manifest scan: find entry index for rbx in primary or alias Method* tables.
         sb.append("        \"leaq  g_neko_manifest_method_stars(%%rip), %%r10\\n\"\n");
         sb.append("        \"movl  g_neko_manifest_method_count(%%rip), %%r11d\\n\"\n");
         sb.append("        \"xorl  %%eax, %%eax\\n\"\n");
@@ -365,6 +385,21 @@ public final class X86_64SysVTrampoline {
         sb.append("        \"incl  %%eax\\n\"\n");
         sb.append("        \"jmp   1b\\n\"\n");
         sb.append("        \"3:\\n\"\n");
+        sb.append("        \"leaq  g_neko_manifest_alias_method_stars(%%rip), %%r10\\n\"\n");
+        sb.append("        \"movl  g_neko_manifest_alias_count(%%rip), %%r11d\\n\"\n");
+        sb.append("        \"xorl  %%eax, %%eax\\n\"\n");
+        sb.append("        \".Lneko_c2i_alias_loop_%=:\\n\"\n");
+        sb.append("        \"cmpl  %%r11d, %%eax\\n\"\n");
+        sb.append("        \"jge   .Lneko_c2i_miss_%=\\n\"\n");
+        sb.append("        \"cmpq  %%rbx, (%%r10, %%rax, 8)\\n\"\n");
+        sb.append("        \"je    .Lneko_c2i_alias_hit_%=\\n\"\n");
+        sb.append("        \"incl  %%eax\\n\"\n");
+        sb.append("        \"jmp   .Lneko_c2i_alias_loop_%=\\n\"\n");
+        sb.append("        \".Lneko_c2i_alias_hit_%=:\\n\"\n");
+        sb.append("        \"leaq  g_neko_manifest_alias_indices(%%rip), %%r10\\n\"\n");
+        sb.append("        \"movl  (%%r10, %%rax, 4), %%eax\\n\"\n");
+        sb.append("        \"jmp   2f\\n\"\n");
+        sb.append("        \".Lneko_c2i_miss_%=:\\n\"\n");
         sb.append("        \"xorl  %%eax, %%eax\\n\"\n");
         sb.append("        \"pxor  %%xmm0, %%xmm0\\n\"\n");
         sb.append("        \"jmp   9f\\n\"\n");

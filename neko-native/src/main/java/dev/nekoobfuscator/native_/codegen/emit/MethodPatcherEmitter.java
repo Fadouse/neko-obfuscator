@@ -3,9 +3,10 @@ package dev.nekoobfuscator.native_.codegen.emit;
 /**
  * Emits the runtime VMStructs walk that discovers Method* field offsets
  * across HotSpot versions, plus the {@code neko_patch_method_entry} routine
- * that swaps {@code _i2i_entry} / {@code _from_interpreted_entry} /
- * {@code _from_compiled_entry} to per-signature trampolines and ORs the
- * no-compile flags so the JIT can't recompile around the patch.
+ * that swaps {@code _i2i_entry} / {@code _from_interpreted_entry} to
+ * per-signature trampolines while preserving HotSpot's real c2i adapter in
+ * {@code _from_compiled_entry}. It also ORs no-compile flags so the JIT can't
+ * recompile around the patch.
  *
  * Discovery is fully native: dlsym + {@code /proc/self/maps} fallback for
  * libjvm, then VMStructs / VMTypes / VMIntConstants walks. No JVM helper
@@ -1133,26 +1134,19 @@ static jboolean neko_patch_method_entry(void *method_star, void *manifest_entry)
     }
     (void)neko_apply_no_compile_flags(method_star);
     void *real_i2i = g_neko_sig_table[entry->signature_id].i2i;
-    void *real_c2i = g_neko_sig_table[entry->signature_id].c2i;
-    /* Phase 3 + 4: when the private CodeHeap is registered, route _i2i_entry
-     * AND _from_compiled_entry through relocated thunks inside that heap so
-     * HotSpot's find_blob_at(thunk_pc) returns a valid (synthetic) BufferBlob.
-     * This makes IC resolution from JIT-compiled callers happy.
-     *
-     * The c2i thunk targets a per-signature c2i function in libneko that
-     * translates JIT calling convention (rdi/rsi/rdx/rcx/r8/r9 + xmm0..7)
-     * into interpreter slot layout, then chains into the i2i body. */
+    /* Route interpreter-side entry points through the relocated thunk when the
+     * private CodeHeap is registered so HotSpot's find_blob_at(thunk_pc) sees a
+     * valid synthetic BufferBlob. Leave _from_compiled_entry untouched: HotSpot's
+     * c2i adapter is an AdapterBlob with VM-owned IC/stack-map invariants and it
+     * repacks compiled callers into the interpreter protocol before jumping to
+     * Method::_i2i_entry. */
     void *i2i = real_i2i;
-    void *c2i = real_c2i;
     if (g_neko_priv_heap.registered) {
         void *t_i2i = neko_priv_get_thunk(real_i2i);
         if (t_i2i != NULL) i2i = t_i2i;
-        void *t_c2i = neko_priv_get_thunk(real_c2i);
-        if (t_c2i != NULL) c2i = t_c2i;
     }
     __atomic_store_n((void**)((uint8_t*)method_star + g_neko_method_layout.off_method_i2i_entry), i2i, __ATOMIC_RELEASE);
     __atomic_store_n((void**)((uint8_t*)method_star + g_neko_method_layout.off_method_from_interpreted_entry), i2i, __ATOMIC_RELEASE);
-    __atomic_store_n((void**)((uint8_t*)method_star + g_neko_method_layout.off_method_from_compiled_entry), c2i, __ATOMIC_RELEASE);
     NEKO_PATCH_LOG("patched %s.%s%s sig=%u method=%p", entry->owner_internal, entry->method_name, entry->method_desc, entry->signature_id, method_star);
     return JNI_TRUE;
 }
