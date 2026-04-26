@@ -74,6 +74,38 @@ typedef struct {
     ptrdiff_t off_jnih_block_handles;
     ptrdiff_t off_jnih_block_next;
     int32_t   jnih_block_capacity;
+    /* === CodeCache / CodeHeap / VirtualSpace / GrowableArray / CodeBlob ===
+     * Discovered via VMStructs so we can register our own CodeHeap into
+     * HotSpot's _heaps list, making our trampoline PCs visible to
+     * CodeCache::find_blob_at(). Phase 1 is read-only walking; Phase 2 will
+     * allocate. */
+    void *addr_codecache_heaps;          /* address of CodeCache::_heaps (a static field; deref to GrowableArray<CodeHeap*>*) */
+    ptrdiff_t off_growable_array_len;    /* GrowableArrayBase::_len */
+    ptrdiff_t off_growable_array_capacity;
+    ptrdiff_t off_growable_array_data;   /* GrowableArray<E>::_data (we use the int specialization's offset) */
+    ptrdiff_t off_codeheap_memory;       /* CodeHeap::_memory (VirtualSpace) */
+    ptrdiff_t off_codeheap_segmap;       /* CodeHeap::_segmap (VirtualSpace) */
+    ptrdiff_t off_codeheap_log2_segment_size;
+    ptrdiff_t off_virtualspace_low_boundary;
+    ptrdiff_t off_virtualspace_high_boundary;
+    ptrdiff_t off_virtualspace_low;
+    ptrdiff_t off_virtualspace_high;
+    ptrdiff_t off_codeblob_name;
+    ptrdiff_t off_codeblob_size;
+    ptrdiff_t off_codeblob_header_size;
+    ptrdiff_t off_codeblob_frame_complete_offset;
+    ptrdiff_t off_codeblob_data_offset;
+    ptrdiff_t off_codeblob_frame_size;
+    ptrdiff_t off_codeblob_code_begin;
+    ptrdiff_t off_codeblob_code_end;
+    ptrdiff_t off_codeblob_content_begin;
+    ptrdiff_t off_codeblob_data_end;
+    size_t    sizeof_CodeHeap;           /* total size of CodeHeap object */
+    size_t    sizeof_BufferBlob;
+    size_t    sizeof_VirtualSpace;
+    /* Vtable pointer harvested from a known existing BufferBlob in the cache.
+     * Required to construct our own BufferBlob in-place. */
+    void *bufferblob_vtable;
 } neko_method_layout_t;
 
 static neko_method_layout_t g_neko_method_layout = {0};
@@ -203,6 +235,8 @@ static jboolean neko_walk_vm_structs(void *jvm) {
     int *type_off  = (int*)neko_dlsym(jvm, "gHotSpotVMStructEntryTypeNameOffset");
     int *field_off = (int*)neko_dlsym(jvm, "gHotSpotVMStructEntryFieldNameOffset");
     int *offset_off = (int*)neko_dlsym(jvm, "gHotSpotVMStructEntryOffsetOffset");
+    int *isstatic_off = (int*)neko_dlsym(jvm, "gHotSpotVMStructEntryIsStaticOffset");
+    int *address_off = (int*)neko_dlsym(jvm, "gHotSpotVMStructEntryAddressOffset");
     int *stride_p   = (int*)neko_dlsym(jvm, "gHotSpotVMStructEntryArrayStride");
     if (vmstructs == NULL || type_off == NULL || field_off == NULL || offset_off == NULL || stride_p == NULL) {
         return JNI_FALSE;
@@ -214,6 +248,8 @@ static jboolean neko_walk_vm_structs(void *jvm) {
         const char *type_name = *(const char* const*)(e + *type_off);
         const char *field_name = *(const char* const*)(e + *field_off);
         uintptr_t off_value = *(const uintptr_t*)(e + *offset_off);
+        int32_t is_static = (isstatic_off != NULL) ? *(const int32_t*)(e + *isstatic_off) : 0;
+        void *static_addr = (is_static && address_off != NULL) ? *(void* const*)(e + *address_off) : NULL;
         if (type_name == NULL && field_name == NULL) break;
         if (NEKO_PATCH_DEBUG && neko_streq_safe(type_name, "Method")) {
             fprintf(stderr, "[neko-patch] vmstructs Method::%s @+%zu\\n", field_name ? field_name : "?", (size_t)off_value);
@@ -268,6 +304,35 @@ static jboolean neko_walk_vm_structs(void *jvm) {
             } else if (neko_streq_safe(field_name, "_last_Java_pc")) {
                 g_neko_method_layout.off_frame_anchor_pc = (ptrdiff_t)off_value;
             }
+        } else if (neko_streq_safe(type_name, "CodeCache")) {
+            if (neko_streq_safe(field_name, "_heaps") && is_static) {
+                g_neko_method_layout.addr_codecache_heaps = static_addr;
+            }
+        } else if (neko_streq_safe(type_name, "CodeHeap")) {
+            if (neko_streq_safe(field_name, "_memory")) g_neko_method_layout.off_codeheap_memory = (ptrdiff_t)off_value;
+            else if (neko_streq_safe(field_name, "_segmap")) g_neko_method_layout.off_codeheap_segmap = (ptrdiff_t)off_value;
+            else if (neko_streq_safe(field_name, "_log2_segment_size")) g_neko_method_layout.off_codeheap_log2_segment_size = (ptrdiff_t)off_value;
+        } else if (neko_streq_safe(type_name, "VirtualSpace")) {
+            if (neko_streq_safe(field_name, "_low_boundary")) g_neko_method_layout.off_virtualspace_low_boundary = (ptrdiff_t)off_value;
+            else if (neko_streq_safe(field_name, "_high_boundary")) g_neko_method_layout.off_virtualspace_high_boundary = (ptrdiff_t)off_value;
+            else if (neko_streq_safe(field_name, "_low")) g_neko_method_layout.off_virtualspace_low = (ptrdiff_t)off_value;
+            else if (neko_streq_safe(field_name, "_high")) g_neko_method_layout.off_virtualspace_high = (ptrdiff_t)off_value;
+        } else if (neko_streq_safe(type_name, "GrowableArrayBase")) {
+            if (neko_streq_safe(field_name, "_len")) g_neko_method_layout.off_growable_array_len = (ptrdiff_t)off_value;
+            else if (neko_streq_safe(field_name, "_capacity")) g_neko_method_layout.off_growable_array_capacity = (ptrdiff_t)off_value;
+        } else if (neko_streq_safe(type_name, "GrowableArray<int>")) {
+            if (neko_streq_safe(field_name, "_data")) g_neko_method_layout.off_growable_array_data = (ptrdiff_t)off_value;
+        } else if (neko_streq_safe(type_name, "CodeBlob")) {
+            if (neko_streq_safe(field_name, "_name")) g_neko_method_layout.off_codeblob_name = (ptrdiff_t)off_value;
+            else if (neko_streq_safe(field_name, "_size")) g_neko_method_layout.off_codeblob_size = (ptrdiff_t)off_value;
+            else if (neko_streq_safe(field_name, "_header_size")) g_neko_method_layout.off_codeblob_header_size = (ptrdiff_t)off_value;
+            else if (neko_streq_safe(field_name, "_frame_complete_offset")) g_neko_method_layout.off_codeblob_frame_complete_offset = (ptrdiff_t)off_value;
+            else if (neko_streq_safe(field_name, "_data_offset")) g_neko_method_layout.off_codeblob_data_offset = (ptrdiff_t)off_value;
+            else if (neko_streq_safe(field_name, "_frame_size")) g_neko_method_layout.off_codeblob_frame_size = (ptrdiff_t)off_value;
+            else if (neko_streq_safe(field_name, "_code_begin")) g_neko_method_layout.off_codeblob_code_begin = (ptrdiff_t)off_value;
+            else if (neko_streq_safe(field_name, "_code_end")) g_neko_method_layout.off_codeblob_code_end = (ptrdiff_t)off_value;
+            else if (neko_streq_safe(field_name, "_content_begin")) g_neko_method_layout.off_codeblob_content_begin = (ptrdiff_t)off_value;
+            else if (neko_streq_safe(field_name, "_data_end")) g_neko_method_layout.off_codeblob_data_end = (ptrdiff_t)off_value;
         }
     }
     return JNI_TRUE;
@@ -288,6 +353,9 @@ static jboolean neko_walk_vm_types(void *jvm) {
         uint64_t sz = *(const uint64_t*)(e + *size_off);
         if (neko_streq_safe(type_name, "Method")) g_neko_method_layout.method_size = (size_t)sz;
         else if (neko_streq_safe(type_name, "AccessFlags")) g_neko_method_layout.access_flags_size = (size_t)sz;
+        else if (neko_streq_safe(type_name, "CodeHeap")) g_neko_method_layout.sizeof_CodeHeap = (size_t)sz;
+        else if (neko_streq_safe(type_name, "BufferBlob")) g_neko_method_layout.sizeof_BufferBlob = (size_t)sz;
+        else if (neko_streq_safe(type_name, "VirtualSpace")) g_neko_method_layout.sizeof_VirtualSpace = (size_t)sz;
     }
     return JNI_TRUE;
 }
@@ -324,6 +392,169 @@ static void neko_walk_vm_int_constants(void *jvm) {
 static void* neko_jmethodid_to_method_star(jmethodID mid) {
     if (mid == NULL) return NULL;
     return *(void**)mid;
+}
+
+/* === Phase 1: CodeCache discovery ===
+ * Read-only walk of HotSpot's CodeCache::_heaps. Validates every layout
+ * offset before any allocation. Also harvests a BufferBlob vtable pointer
+ * from an existing blob (so we can construct our own BufferBlob in-place
+ * later without dlsym'ing internal libjvm symbols, which JDK 21 strips).
+ *
+ * The segmap is a byte array indexed by segment number. A non-zero entry
+ * means "this segment is N segments away from a block header" (with 0xFE
+ * meaning "skip 254"). Following the trail to 0 lands on a HeapBlock.
+ * For a forward walk we use HeapBlock::Header::_length (in segments) to
+ * advance directly, which is simpler. */
+
+static jboolean neko_codecache_layout_ready(void) {
+    /* GrowableArrayBase::_len sits at offset 0 (no vtable on AnyObj base);
+     * CodeHeap::_memory likewise at 0. All offsets must be non-negative
+     * and the static-field address must be resolved. */
+    return (g_neko_method_layout.addr_codecache_heaps != NULL
+        && g_neko_method_layout.off_growable_array_len >= 0
+        && g_neko_method_layout.off_growable_array_data > 0
+        && g_neko_method_layout.off_codeheap_memory >= 0
+        && g_neko_method_layout.off_codeheap_segmap > 0
+        && g_neko_method_layout.off_codeheap_log2_segment_size > 0
+        && g_neko_method_layout.off_virtualspace_low > 0
+        && g_neko_method_layout.off_virtualspace_high > 0
+        && g_neko_method_layout.off_codeblob_name > 0
+        && g_neko_method_layout.off_codeblob_size > 0
+        && g_neko_method_layout.off_codeblob_code_begin > 0
+        && g_neko_method_layout.off_codeblob_code_end > 0)
+        ? JNI_TRUE : JNI_FALSE;
+}
+
+static void* neko_virtualspace_low(void *vspace) {
+    return *(void**)((char*)vspace + g_neko_method_layout.off_virtualspace_low);
+}
+static void* neko_virtualspace_high(void *vspace) {
+    return *(void**)((char*)vspace + g_neko_method_layout.off_virtualspace_high);
+}
+
+/* HeapBlock layout (matches hotspot/share/memory/heap.hpp):
+ *   struct Header { size_t _length; bool _used; };
+ *   union { Header _header; int64_t _padding[(sizeof(Header)+7)/8]; };
+ *
+ * On x86_64 with 8-byte size_t and 1-byte bool, the union is padded to
+ * 16 bytes (2 int64_t slots). _length is at +0, _used at +8. */
+typedef struct {
+    size_t length;
+    int    used;
+} neko_heapblock_info_t;
+
+static int neko_read_heapblock(void *block, neko_heapblock_info_t *out) {
+    if (block == NULL) return 0;
+    out->length = *(size_t*)block;
+    out->used = *((char*)block + sizeof(size_t)) ? 1 : 0;
+    return 1;
+}
+
+static const char *neko_codeblob_name(void *blob) {
+    if (blob == NULL) return NULL;
+    return *(const char**)((char*)blob + g_neko_method_layout.off_codeblob_name);
+}
+static int neko_codeblob_size(void *blob) {
+    if (blob == NULL) return 0;
+    return *(int*)((char*)blob + g_neko_method_layout.off_codeblob_size);
+}
+static void* neko_codeblob_code_begin(void *blob) {
+    if (blob == NULL) return NULL;
+    return *(void**)((char*)blob + g_neko_method_layout.off_codeblob_code_begin);
+}
+
+/* Walk one CodeHeap's blocks. Each block starts with a HeapBlock header
+ * (16 bytes on x86_64) followed by a CodeBlob (if used). Block size is
+ * length * segment_size, where segment_size = 1 << _log2_segment_size. */
+static void neko_walk_codeheap(void *heap, void (*visitor)(void *blob, const char *name, void *cookie), void *cookie) {
+    void *vspace = (char*)heap + g_neko_method_layout.off_codeheap_memory;
+    int log2_seg = *(int*)((char*)heap + g_neko_method_layout.off_codeheap_log2_segment_size);
+    size_t seg_size = (size_t)1u << (log2_seg & 31);
+    if (seg_size == 0) return;
+    void *low = neko_virtualspace_low(vspace);
+    void *high = neko_virtualspace_high(vspace);
+    if (low == NULL || high == NULL || low >= high) return;
+    /* HeapBlock header occupies 16 bytes (rounded up to 8-aligned slot pair).
+     * CodeBlob immediately follows the header. */
+    const size_t header_size = 16;
+    char *p = (char*)low;
+    int safety_iter = 0;
+    while (p < (char*)high && safety_iter++ < 1000000) {
+        neko_heapblock_info_t info;
+        if (!neko_read_heapblock(p, &info)) break;
+        if (info.length == 0) break;
+        size_t block_bytes = info.length * seg_size;
+        if (info.used) {
+            void *blob = (void*)(p + header_size);
+            const char *name = neko_codeblob_name(blob);
+            if (visitor) visitor(blob, name, cookie);
+        }
+        p += block_bytes;
+    }
+}
+
+typedef struct {
+    void *target_vtable;
+    int   limit_logged;
+} neko_blob_visit_ctx_t;
+
+static void neko_blob_visit_log(void *blob, const char *name, void *cookie) {
+    neko_blob_visit_ctx_t *ctx = (neko_blob_visit_ctx_t*)cookie;
+    /* Always log anything that looks like an adapter / buffer / vtable / stub
+     * so we can spot vtable-eligible candidates in the noise of nmethods. */
+    int interesting = name != NULL && (strstr(name, "adapt") != NULL
+                                    || strstr(name, "I2C/C2I") != NULL
+                                    || strstr(name, "MethodHandle") != NULL
+                                    || strstr(name, "vtable") != NULL
+                                    || strstr(name, "stub") != NULL
+                                    || strstr(name, "Stub") != NULL
+                                    || strstr(name, "Buffer") != NULL);
+    if (NEKO_PATCH_DEBUG && (interesting || ctx->limit_logged < 16)) {
+        fprintf(stderr, "[neko-patch] blob %p name=%s size=%d code=%p\\n",
+            blob, name ? name : "?", neko_codeblob_size(blob), neko_codeblob_code_begin(blob));
+        ctx->limit_logged++;
+    }
+    /* Harvest vtable from the first BufferBlob/AdapterBlob we see. Adapter
+     * blobs are created at JVM startup so they always exist by JNI_OnLoad. */
+    if (ctx->target_vtable == NULL && name != NULL
+        && (strstr(name, "I2C/C2I") != NULL || strstr(name, "adapter") != NULL)) {
+        ctx->target_vtable = *(void**)blob;
+        if (NEKO_PATCH_DEBUG) {
+            fprintf(stderr, "[neko-patch] harvested vtable %p from blob %p (%s)\\n",
+                ctx->target_vtable, blob, name);
+        }
+    }
+}
+
+static jboolean neko_codecache_walk(void) {
+    if (!neko_codecache_layout_ready()) {
+        NEKO_PATCH_LOG("codecache walk: layout not ready");
+        return JNI_FALSE;
+    }
+    void *heaps_array = *(void**)g_neko_method_layout.addr_codecache_heaps;
+    if (heaps_array == NULL) {
+        NEKO_PATCH_LOG("codecache walk: _heaps is NULL");
+        return JNI_FALSE;
+    }
+    int len = *(int*)((char*)heaps_array + g_neko_method_layout.off_growable_array_len);
+    void **data = *(void***)((char*)heaps_array + g_neko_method_layout.off_growable_array_data);
+    NEKO_PATCH_LOG("codecache walk: heaps=%p len=%d data=%p", heaps_array, len, data);
+    if (data == NULL || len <= 0) return JNI_FALSE;
+    neko_blob_visit_ctx_t ctx = {0};
+    for (int i = 0; i < len; i++) {
+        void *heap = data[i];
+        if (heap == NULL) continue;
+        void *mem_low = neko_virtualspace_low((char*)heap + g_neko_method_layout.off_codeheap_memory);
+        void *mem_high = neko_virtualspace_high((char*)heap + g_neko_method_layout.off_codeheap_memory);
+        int log2_seg = *(int*)((char*)heap + g_neko_method_layout.off_codeheap_log2_segment_size);
+        NEKO_PATCH_LOG("codeheap[%d]=%p memory=[%p..%p) log2_seg=%d", i, heap, mem_low, mem_high, log2_seg);
+        neko_walk_codeheap(heap, neko_blob_visit_log, &ctx);
+    }
+    g_neko_method_layout.bufferblob_vtable = ctx.target_vtable;
+    NEKO_PATCH_LOG("codecache walk: harvested vtable=%p sizeof(CodeHeap)=%zu sizeof(BufferBlob)=%zu sizeof(VirtualSpace)=%zu",
+        ctx.target_vtable, g_neko_method_layout.sizeof_CodeHeap,
+        g_neko_method_layout.sizeof_BufferBlob, g_neko_method_layout.sizeof_VirtualSpace);
+    return ctx.target_vtable != NULL ? JNI_TRUE : JNI_FALSE;
 }
 
 static jboolean neko_method_layout_init(JNIEnv *env) {
@@ -433,6 +664,24 @@ static jboolean neko_method_layout_init(JNIEnv *env) {
     NEKO_PATCH_LOG("handles: th_active=%td blk_top=%td blk_handles=%td ready=%d",
         g_neko_off_thread_active_handles, g_neko_off_jnih_block_top,
         g_neko_off_jnih_block_handles, (int)g_neko_handle_push_ready);
+    NEKO_PATCH_LOG("codecache layout: heaps=%p ga_len=%td ga_data=%td ch_mem=%td ch_seg=%td ch_log2=%td vs_low=%td vs_high=%td blob_name=%td blob_size=%td blob_code_begin=%td",
+        g_neko_method_layout.addr_codecache_heaps,
+        g_neko_method_layout.off_growable_array_len,
+        g_neko_method_layout.off_growable_array_data,
+        g_neko_method_layout.off_codeheap_memory,
+        g_neko_method_layout.off_codeheap_segmap,
+        g_neko_method_layout.off_codeheap_log2_segment_size,
+        g_neko_method_layout.off_virtualspace_low,
+        g_neko_method_layout.off_virtualspace_high,
+        g_neko_method_layout.off_codeblob_name,
+        g_neko_method_layout.off_codeblob_size,
+        g_neko_method_layout.off_codeblob_code_begin);
+    /* Phase 1 only walks when debug is on, so a layout mismatch can't hurt
+     * production runs. Phase 2 will gate trampoline relocation behind the
+     * walk's success. */
+    if (NEKO_PATCH_DEBUG) {
+        (void)neko_codecache_walk();
+    }
     g_neko_method_layout.usable = JNI_TRUE;
     return JNI_TRUE;
 }
