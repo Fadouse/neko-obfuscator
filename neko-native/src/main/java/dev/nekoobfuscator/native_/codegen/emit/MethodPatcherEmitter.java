@@ -496,15 +496,13 @@ static jboolean neko_apply_no_compile_flags(void *method_star) {
         if (width == 4) __atomic_fetch_or((uint32_t*)addr, mask, __ATOMIC_SEQ_CST);
         else if (width == 2) __atomic_fetch_or((uint16_t*)addr, (uint16_t)mask, __ATOMIC_SEQ_CST);
     }
-    /* Set Method::_flags bit 2 (_dont_inline) on JDK 21+. _flags is u2, so
-     * we OR 16-bit not 32-bit. Writing 32 bits would clobber the next field
-     * (some method-identity slot) and trip MethodHandle's "method not
-     * verified" check on the first reflective invoke. */
-    if (g_neko_method_layout.java_spec_version >= 21
-        && g_neko_method_layout.off_method_flags_status >= 0) {
-        uint16_t *slot = (uint16_t*)((uint8_t*)method_star + g_neko_method_layout.off_method_flags_status);
-        __atomic_fetch_or(slot, (uint16_t)NEKO_METHOD_FLAG_DONT_INLINE, __ATOMIC_SEQ_CST);
-    }
+    /* DontInline: rely on bytecode inflation in NativeCompilationStage to
+     * lift the LinkageError-stub past MaxInlineSize, instead of poking
+     * Method::_flags. JIT-compiled callers' inline-cache resolution reads
+     * _flags during resolve_virtual_call, and a wrong-shaped write there
+     * trips a libjvm-internal SIGSEGV (saw at libjvm+0x2f5167) on
+     * ForkJoin-pool-driven hot loops. The bytecode-size route is robust
+     * across JDKs and doesn't depend on getting the bit layout right. */
     return JNI_TRUE;
 }
 
