@@ -96,9 +96,21 @@ GC walker 走到 BufferBlob → `sender_for_compiled_frame`：
 - 直接解释器调用：`prepare_invoke` 推入 invoke_return_entry table PC
 - HotSpot c2i adapter（`sharedRuntime_x86_64.cpp::gen_c2i_adapter`）：先 `pop rax; sub rsp, extraspace; push rax` 保留原 PC
 
-但实际为 NULL，说明存在第三种入口路径（可能与 inline cache、virtual dispatch、或 c2i_unverified_entry barrier 链路相关），目前还没有定位。
+**2026-04-26 GDB core 取证更正**：失败的 transition **不是** BufferBlob → accept（这一步成功，因为 *(naked_rbp + 24) = c2i adapter 重新 push 的 post_call_pc，非 NULL，HotSpot 顺利构造 accept frame），而是 **accept → 它的 sender** 这一步。原因：accept 的 `_sp` 被我们的 anchor 错误地设成了 `T_entry + 8 = caller_pre_call_rsp - extraspace`，导致 `accept_sender_sp = accept._sp + accept_frame_size*8` 落在错误位置。详细取证写在 `problems.md` P1。
 
-### 当前阻塞：obfusjack microbench 期间在 GC stack walk 中触发 SIGSEGV (libjvm+0x2f5167)
+— 旧推测“存在第三种入口路径”不正确，根因是 c2i adapter `extraspace` shift 让 `accept._sp` 偏离 `caller_pre_call_rsp` 一个 extraspace。
+
+### 当前阻塞：obfusjack microbench 期间在 GC stack walk 中触发 SIGSEGV / `ShouldNotReachHere` / `assert(pc != nullptr)`
+
+**2026-04-26 SESSION 末尾的最新认知（与 P1 同步）**：
+- 真实 root cause：HotSpot 的 c2i adapter 把 rsp 向下偏 `extraspace = align_up(args_total_slots*8, 16)` 后才 jmp 到我们的 `_i2i_entry`（因为 stale call site）。我们的 anchor sp = `naked_rbp + 8` 在 BufferBlob 里使 `accept._sp = T_entry + 8`，但 accept 真实 `_sp = caller_pre_call_rsp = T_entry + extraspace + 8`。差 extraspace 字节，导致 walking accept → its sender 时 `*(sender_sp - 8)` 读到 NULL / 错位。
+- 两个可信但都失败的 fix（详见 problems.md P1 方案 H/I）：
+  - **H**：anchor sp 用 `r13 - 24`。GDB 实测 r13 = T_entry（**而非源码暗示的 T_entry + 8**），导致 `r13 - 24 = naked_rbp`，`*(sender_sp - 8) = stack 地址`，`jni_FindClass → security_get_caller_class` 在 release & fastdebug 都崩。
+  - **I**：每签名定制 BufferBlob `_frame_size = (extraspace + 24) / 8`。c2i adapter 路径 ✓，但解释器 / call_stub 路径 `*(T_entry + extraspace)` 不是 PC 直接 `find_blob` 返回 NULL。
+
+下面这一段保留作历史推测，但 root cause 已经更精确了。
+
+
 
 - 复现路径：`Platform vs Virtual Threads` microbench 起步即崩；`MethodHandle.invokeWithArguments → call_stub → ~BufferBlob::neko_trampoline → IntPipeline$1$1.accept` 之后 GC Thread 在 libjvm 内部某个 frame validator 处 NULL 解引用（指令 `cmpl $0x841f0f,(%r14)`，`r14=0`）。
 - 该指令在 `libjvm.so+0x2f4ed1..0x2f51xx` 区域，位于一个内部 frame walker 函数（与 `AsyncGetCallTrace`-类签名，其实是 GC 路径里被复用的 walker），会校验候选 PC 处是否为 HotSpot patchable NOP（`0F 1F 84 00`）作为 inline-cache call site fingerprint。
