@@ -482,13 +482,12 @@ __attribute__((visibility("hidden"))) void *neko_handle_push(void *thread, void 
 }
 
 static jboolean neko_apply_no_compile_flags(void *method_star) {
-    if (g_neko_method_layout.java_spec_version >= 21 && g_neko_method_layout.off_method_flags_status >= 0) {
-        uint32_t mask = (g_neko_method_layout.method_flag_not_c1_compilable
-            | g_neko_method_layout.method_flag_not_c2_compilable
-            | g_neko_method_layout.method_flag_not_osr_compilable);
-        uint32_t *slot = (uint32_t*)((uint8_t*)method_star + g_neko_method_layout.off_method_flags_status);
-        if (mask != 0u) __atomic_fetch_or(slot, mask, __ATOMIC_SEQ_CST);
-    }
+    /* Only apply the well-defined JVM_ACC_NOT_C[12]_COMPILABLE bits in
+     * Method::_access_flags. Touching MethodFlags::_status without an
+     * authoritative bit layout (JDK 21 doesn't expose it via VMStructs)
+     * risks setting orthogonal bits like _caller_sensitive, which then
+     * trips MethodHandle's "illegal bytecode sequence - method not
+     * verified" stop during reflective invokes. */
     {
         uint32_t mask = g_neko_method_layout.access_not_c1_compilable
             | g_neko_method_layout.access_not_c2_compilable
@@ -529,10 +528,15 @@ static jboolean neko_patch_method_entry(void *method_star, void *manifest_entry)
     }
     (void)neko_apply_no_compile_flags(method_star);
     void *i2i = g_neko_sig_table[entry->signature_id].i2i;
-    void *c2i = g_neko_sig_table[entry->signature_id].c2i;
+    /* Patch _i2i_entry and _from_interpreted_entry to our naked-asm trampoline.
+     * Leave _from_compiled_entry alone: HotSpot's existing c2i adapter at that
+     * slot bridges JIT→interpreter calling conventions and lands on _i2i_entry,
+     * which is exactly what we want. Patching c2i ourselves would break
+     * MethodHandle / reflection paths that come in through JIT-compiled
+     * adapter frames. (void *)g_neko_sig_table[entry->signature_id].c2i is no
+     * longer applied for this reason. */
     __atomic_store_n((void**)((uint8_t*)method_star + g_neko_method_layout.off_method_i2i_entry), i2i, __ATOMIC_RELEASE);
     __atomic_store_n((void**)((uint8_t*)method_star + g_neko_method_layout.off_method_from_interpreted_entry), i2i, __ATOMIC_RELEASE);
-    __atomic_store_n((void**)((uint8_t*)method_star + g_neko_method_layout.off_method_from_compiled_entry), c2i, __ATOMIC_RELEASE);
     NEKO_PATCH_LOG("patched %s.%s%s sig=%u method=%p", entry->owner_internal, entry->method_name, entry->method_desc, entry->signature_id, method_star);
     return JNI_TRUE;
 }

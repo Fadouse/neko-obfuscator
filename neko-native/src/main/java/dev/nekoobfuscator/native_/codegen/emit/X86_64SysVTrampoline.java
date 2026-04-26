@@ -5,10 +5,13 @@ package dev.nekoobfuscator.native_.codegen.emit;
  *
  * HotSpot interpreter calling convention at {@code _i2i_entry} entry:
  *   rbx  = Method*
- *   r13  = sender_sp (interpreter stack just before args)
+ *   r13  = sender_sp (caller's rsp before the call instruction; points at the
+ *          top-of-operand-stack arg)
  *   r15  = JavaThread*
- *   args = on the interpreter expression stack at addresses below r13;
- *          arg0 occupies the highest slot (r13 - 8*totalSlots).
+ *   args = at POSITIVE offsets from r13, with the last-pushed (rightmost) arg
+ *          at [r13 + 0] and the first-pushed (receiver, for instance methods)
+ *          at the highest offset. Long/double values occupy 2 slots but the
+ *          64-bit value lives in the lower-index slot.
  *   The return address is on the C stack at (rsp).
  *
  * On {@code _from_compiled_entry} the JIT delivers args in the SysV C ABI
@@ -34,6 +37,24 @@ public final class X86_64SysVTrampoline {
         int receiverSlot = shape.isStatic() ? 0 : 1;
         int totalSlots = receiverSlot;
         for (char a : args) totalSlots += (a == 'J' || a == 'D') ? 2 : 1;
+
+        // HotSpot interpreter slot indexing: walk left-to-right, peel slots
+        // off the top. First arg (receiver, if instance) gets the HIGHEST
+        // slot index; last arg gets index 0 (top of operand stack).
+        int[] argSlotIndex = new int[args.length];
+        int receiverIndex = -1;
+        {
+            int remaining = totalSlots;
+            if (!shape.isStatic()) {
+                receiverIndex = remaining - 1;
+                remaining -= 1;
+            }
+            for (int i = 0; i < args.length; i++) {
+                int slots = (args[i] == 'J' || args[i] == 'D') ? 2 : 1;
+                argSlotIndex[i] = remaining - slots;
+                remaining -= slots;
+            }
+        }
 
         sb.append("/* sig ").append(sigId).append(" i2i (").append(shape.isStatic() ? "static" : "instance")
           .append(", args=\"");
@@ -84,16 +105,13 @@ public final class X86_64SysVTrampoline {
         int xmmUsed = 0;
         int extraStackSlot = 0;
         if (!shape.isStatic()) {
-            int slotOffset = -8 * totalSlots;
+            int slotOffset = receiverIndex * 8;
             sb.append("        \"leaq  ").append(slotOffset).append("(%%r13), %").append(gpReg(gpUsed)).append("\\n\"\n");
             gpUsed++;
         }
-        int slotsConsumed = receiverSlot;
         for (int i = 0; i < args.length; i++) {
             char a = args[i];
-            int slotsForArg = (a == 'J' || a == 'D') ? 2 : 1;
-            int slotIndex = totalSlots - slotsConsumed - slotsForArg;
-            int slotOffset = -8 * (totalSlots - slotIndex);
+            int slotOffset = argSlotIndex[i] * 8;
             if (a == 'F' || a == 'D') {
                 if (xmmUsed < 8) {
                     if (a == 'F') sb.append("        \"movss ");
@@ -126,7 +144,6 @@ public final class X86_64SysVTrampoline {
                     extraStackSlot++;
                 }
             }
-            slotsConsumed += slotsForArg;
         }
         // Frame anchor: write last_Java_sp = sender_sp(r13), fp = saved rbp, pc = ret addr.
         // The original return addr is at [rbp + 8]. Saved rbp is in [rbp].

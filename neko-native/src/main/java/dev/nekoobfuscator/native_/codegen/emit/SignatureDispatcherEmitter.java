@@ -109,6 +109,17 @@ public final class SignatureDispatcherEmitter {
         }
         sb.append(");\n");
 
+        // If impl_fn left an exception pending, do not feed __ret to
+        // PopLocalFrame — it may be a NULL or invalid handle, and
+        // PopLocalFrame's handle conversion does not null-check on every JDK.
+        sb.append("    if ((*env)->ExceptionCheck(env)) {\n");
+        sb.append("        (void)(*env)->PopLocalFrame(env, NULL);\n");
+        sb.append("        neko_handle_restore(&__hsave);\n");
+        if (ret == 'V') sb.append("        return;\n");
+        else if (ret == 'L') sb.append("        return NULL;\n");
+        else sb.append("        return (").append(retC).append(")0;\n");
+        sb.append("    }\n");
+
         // return + pop
         if (ret == 'V') {
             sb.append("    (void)(*env)->PopLocalFrame(env, NULL);\n");
