@@ -355,19 +355,16 @@ static jboolean neko_method_layout_init(JNIEnv *env) {
     if (g_neko_method_layout.method_flag_not_c1_compilable == 0u)  g_neko_method_layout.method_flag_not_c1_compilable  = 0x1u;
     if (g_neko_method_layout.method_flag_not_c2_compilable == 0u)  g_neko_method_layout.method_flag_not_c2_compilable  = 0x2u;
     if (g_neko_method_layout.method_flag_not_osr_compilable == 0u) g_neko_method_layout.method_flag_not_osr_compilable = 0x4u | 0x8u;
-    /* JDK 21+ does not expose Method::_flags via VMStructs. Derive its
-     * offset from neighbours: _flags (MethodFlags, u4) sits 4 bytes before
-     * _intrinsic_id (u2) on JDK 21 builds. If that fails, fall back to
-     * _vtable_index (int) + 8 (skipping intrinsic_id + itable_index pair). */
+    /* JDK 21+ does not expose Method::_flags via VMStructs. The actual layout
+     * (verified against openjdk-21.0.10 method.hpp) is:
+     *   ... _access_flags (u4) | _vtable_index (i4) | _intrinsic_id (u2) | _flags (u2) ...
+     * So _flags is _intrinsic_id + 2. The earlier "intrinsic_id - 4" guess
+     * pointed at unknown bytes (likely method identity/index padding) and
+     * silently corrupted state. */
     if (g_neko_method_layout.off_method_flags_status < 0
         && g_neko_method_layout.off_method_intrinsic_id > 0) {
         g_neko_method_layout.off_method_flags_status =
-            g_neko_method_layout.off_method_intrinsic_id - (ptrdiff_t)4;
-    }
-    if (g_neko_method_layout.off_method_flags_status < 0
-        && g_neko_method_layout.off_method_vtable_index > 0) {
-        g_neko_method_layout.off_method_flags_status =
-            g_neko_method_layout.off_method_vtable_index + (ptrdiff_t)8;
+            g_neko_method_layout.off_method_intrinsic_id + (ptrdiff_t)2;
     }
     if (!neko_resolve_jnihandles(jvm)) {
         NEKO_PATCH_LOG("JNIHandles symbols not resolvable; dispatch will use jobject fallback");
@@ -499,13 +496,14 @@ static jboolean neko_apply_no_compile_flags(void *method_star) {
         if (width == 4) __atomic_fetch_or((uint32_t*)addr, mask, __ATOMIC_SEQ_CST);
         else if (width == 2) __atomic_fetch_or((uint16_t*)addr, (uint16_t)mask, __ATOMIC_SEQ_CST);
     }
-    /* Set Method::_flags bit 2 (_dont_inline) on JDK 21+. This is well-defined
-     * unlike the _status / no-compile bits, and stops JIT-compiled callers
-     * from inlining the LinkageError-stub body. */
+    /* Set Method::_flags bit 2 (_dont_inline) on JDK 21+. _flags is u2, so
+     * we OR 16-bit not 32-bit. Writing 32 bits would clobber the next field
+     * (some method-identity slot) and trip MethodHandle's "method not
+     * verified" check on the first reflective invoke. */
     if (g_neko_method_layout.java_spec_version >= 21
         && g_neko_method_layout.off_method_flags_status >= 0) {
-        uint32_t *slot = (uint32_t*)((uint8_t*)method_star + g_neko_method_layout.off_method_flags_status);
-        __atomic_fetch_or(slot, NEKO_METHOD_FLAG_DONT_INLINE, __ATOMIC_SEQ_CST);
+        uint16_t *slot = (uint16_t*)((uint8_t*)method_star + g_neko_method_layout.off_method_flags_status);
+        __atomic_fetch_or(slot, (uint16_t)NEKO_METHOD_FLAG_DONT_INLINE, __ATOMIC_SEQ_CST);
     }
     return JNI_TRUE;
 }
