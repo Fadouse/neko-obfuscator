@@ -221,9 +221,9 @@ class OpcodeTranslatorUnitTest {
         ));
 
         assertContains(code,
-            "return POP_I();",
-            "return POP_L();",
-            "return;",
+            "{ jint __ret = POP_I(); neko_shadow_pop(); return __ret; }",
+            "{ jlong __ret = POP_L(); neko_shadow_pop(); return __ret; }",
+            "neko_shadow_pop(); return;",
             "/* nop */",
             "locals[4].i += 3;"
         );

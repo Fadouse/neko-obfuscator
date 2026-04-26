@@ -181,7 +181,39 @@ GC walker 走到 BufferBlob → `sender_for_compiled_frame`：
 - `NEKO_PATCH_DEBUG=1` 证明 patch 成功，相关 microbench methods/lambdas 都 patch 了。
 - 但 crash 的 Java frames 中没有 libneko/BufferBlob，说明当前 fatal 是 JavaCall/call_stub 使用复制的 direct anchor 回到 compiled caller 后缺 RegisterMap，而不是 compiled caller 没走 c2i。
 
+## 已尝试且经过 GDB 核心转储验证的假设（继续 debug 时不要重复）
+
+### H. r13-anchored anchor sp（i2i 改 `r13 - 24`）— 验证后 REVERTED
+
+- 改动：i2i naked `last_Java_sp = r13 - 24` 替代原 `naked_rbp + 8`。
+- 假设：r13 在调用 i2i thunk 前一定被 caller 设为 sender_sp（HotSpot 源码：`prepare_to_jump_from_interpreted` 做 `lea r13, [rsp + 8]`；call_stub 做 `mov r13, rsp`；c2i adapter 做 `lea r13, [rsp + 8]; pop; sub; push; jmp _i2i_entry`）。
+- **GDB core 验证（fastdebug build, /tmp/neko_fd_core2）**：
+  - last_Java_fp = `0x7f95d44e0120`（= thunk_rbp_value，由 thunk 的 `push rbp; mov rsp, rbp` 写入）。
+  - last_Java_pc = `0x7f9598029691`（= thunk after-call PC）。
+  - last_Java_sp = `0x7f95d44e0110`（= 我们写的 `r13 - 0x18`）。
+  - 反推：T_entry = naked_rbp + 24 = `0x7f95d44e0128`，r13 = anchor_sp + 24 = `0x7f95d44e0128`。
+  - **r13 实际 == T_entry**，并不是 HotSpot 源码看上去的 `T_entry + 8`。差 8 字节的来源还没定位（但 thunk 与 naked prologue 都未触碰 r13）。
+- 结果：对 GC walker 路径（compiled accept 经 c2i adapter 进入 i2i）**有所改善**（progress 通过 `Files.mismatch`），但同步路径中 `jni_FindClass` 内部 `JavaThread::security_get_caller_class` 走 `sender_for_compiled_frame` 时读 `*(sender_sp - 8)` 拿到 stack 地址（不是 PC），命中 `assert(cb != nullptr) failed: must be`。
+- 结论：基于 r13 的方案不能同时兼顾 GC walker 与 FindClass walker 两条路径，已回退。
+
+### I. 更改 BufferBlob `_frame_size` 以补偿 c2i extraspace（理论分析后弃用）
+
+- 想法：每个签名按 `extraspace = align_up(args_total_slots * 8, 16)` 计算 `_frame_size = (extraspace + 24) / 8`，让 sender_sp = naked_rbp + 8 + frame_size*8 = T_entry + extraspace + 8 = caller_pre_call_rsp（路径 2 正确）。
+- 路径分析：
+  - 路径 2（c2i adapter）：✓ 修复。
+  - 解释器：`*(T_entry + extraspace)` 落在 args 区上方的解释器 operand stack，**不是** PC，`find_blob` 返回 NULL → assert 触发。
+  - call_stub：`*(T_entry + extraspace)` 落在 call_stub 的 push args 循环之上，同样**不是** PC。
+- 结论：除非能在 runtime 区分调用路径，否则修一个会破坏其它两个，因此弃用。
+
 ## 当前假设 / 下一步只应该围绕这些方向
+
+### 假设 0（NEW）：在 i2i naked function 里 runtime 检测路径，仅对 c2i-adapter 路径调整 anchor sp
+
+- 通过 `extraspace_dynamic = r13 - naked_rbp - 32` 估算 c2i adapter shift。
+- 解释器 / call_stub：理论上 `extraspace_dynamic == 0`，anchor 走原 `naked_rbp + 8`。
+- c2i adapter：`extraspace_dynamic == extraspace`，anchor 改为 `naked_rbp + 8 + extraspace`。
+- **但 GDB 验证表明 r13 实际 = T_entry（不是 T_entry + 8）**，即上式算出的 `extraspace_dynamic = -8`。也就是说当前观测到的 r13 不符合 HotSpot 源码 `lea r13, [rsp + 8]` 的预期。
+- 下一步：在 fastdebug 内部用 GDB 对解释器 invokestatic 模板的实际机器码进行 disasm，确认 `prepare_to_jump_from_interpreted` 实际生成了什么；如果 r13 真的是 `T_entry`，则改用 `extraspace_dynamic = r13 - naked_rbp - 24` 重试。
 
 ### 假设 1：需要给 JavaCallWrapper 保存一个“可 seed RegisterMap 的 anchor”，但不能破坏真实 return chain
 
