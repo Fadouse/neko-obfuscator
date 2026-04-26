@@ -60,14 +60,17 @@ public final class SignatureDispatcherEmitter {
         sb.append("    }\n");
         sb.append("    if ((*env)->PushLocalFrame(env, 16) != 0) ").append(returnZero(ret)).append(";\n");
 
+        // raw_recv and reference args arrive from the trampoline as POINTERS
+        // into the interpreter slot array. Each pointer is already a valid
+        // jobject (JNI handle) under HotSpot's resolve-by-deref convention.
         if (isStatic) {
             sb.append("    jclass owner_cls = neko_find_class(env, entry->owner_internal);\n");
         } else {
-            sb.append("    jobject self = neko_raw_to_jobject(env, raw_recv);\n");
+            sb.append("    jobject self = (jobject)raw_recv;\n");
         }
         for (int i = 0; i < args.length; i++) {
             if (args[i] == 'L') {
-                sb.append("    jobject ja").append(i).append(" = neko_raw_to_jobject(env, a").append(i).append(");\n");
+                sb.append("    jobject ja").append(i).append(" = (jobject)a").append(i).append(";\n");
             }
         }
 
@@ -93,14 +96,16 @@ public final class SignatureDispatcherEmitter {
         }
         sb.append(");\n");
 
-        // return + pop
+        // return + pop. For ref returns, PopLocalFrame's second arg is the
+        // jobject we want surviving past the pop — its raw oop survives in
+        // the caller's local frame, and we then deref to a raw oop pointer
+        // for the interpreter return slot.
         if (ret == 'V') {
             sb.append("    (void)(*env)->PopLocalFrame(env, NULL);\n");
             sb.append("    return;\n");
         } else if (ret == 'L') {
-            sb.append("    void *raw_ret = neko_jobject_to_raw(__ret);\n");
-            sb.append("    (void)(*env)->PopLocalFrame(env, NULL);\n");
-            sb.append("    return raw_ret;\n");
+            sb.append("    jobject __surviving = (*env)->PopLocalFrame(env, __ret);\n");
+            sb.append("    return __surviving == NULL ? NULL : *(void**)__surviving;\n");
         } else {
             sb.append("    (void)(*env)->PopLocalFrame(env, NULL);\n");
             sb.append("    return (").append(retC).append(")__ret;\n");

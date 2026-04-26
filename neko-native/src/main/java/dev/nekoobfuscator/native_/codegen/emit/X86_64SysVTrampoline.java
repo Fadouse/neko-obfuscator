@@ -72,12 +72,18 @@ public final class X86_64SysVTrampoline {
         sb.append("        \"addq  %%rcx, %%rdi\\n\"\n");
 
         // Shuffle args from interpreter slots into SysV C ABI
-        int gpUsed = 1; // rdi
+        // For reference args (and the receiver), pass the ADDRESS of the
+        // interpreter slot rather than its contents. HotSpot's JNI handle
+        // representation is a pointer to an oop cell, and JNIHandles::resolve
+        // is a single deref — making &locals[i] a perfectly valid jobject.
+        // This avoids needing libjvm-internal JNIHandles::make_local symbols
+        // (which are stripped from JDK 21+ release builds).
+        int gpUsed = 1; // rdi = entry
         int xmmUsed = 0;
         int extraStackSlot = 0;
         if (!shape.isStatic()) {
             int slotOffset = -8 * totalSlots;
-            sb.append("        \"movq  ").append(slotOffset).append("(%%r13), %%rsi\\n\"\n");
+            sb.append("        \"leaq  ").append(slotOffset).append("(%%r13), %%rsi\\n\"\n");
             gpUsed++;
         }
         int slotsConsumed = receiverSlot;
@@ -97,7 +103,18 @@ public final class X86_64SysVTrampoline {
                     sb.append("        \"movq  %%rax, ").append(extraStackSlot * 8).append("(%%rsp)\\n\"\n");
                     extraStackSlot++;
                 }
+            } else if (a == 'L') {
+                // Reference arg: pass slot address as jobject.
+                if (gpUsed < 6) {
+                    sb.append("        \"leaq  ").append(slotOffset).append("(%%r13), %").append(gpReg(gpUsed)).append("\\n\"\n");
+                    gpUsed++;
+                } else {
+                    sb.append("        \"leaq  ").append(slotOffset).append("(%%r13), %%rax\\n\"\n");
+                    sb.append("        \"movq  %%rax, ").append(extraStackSlot * 8).append("(%%rsp)\\n\"\n");
+                    extraStackSlot++;
+                }
             } else {
+                // Primitive (I/J): pass slot value.
                 if (gpUsed < 6) {
                     sb.append("        \"movq  ").append(slotOffset).append("(%%r13), %").append(gpReg(gpUsed)).append("\\n\"\n");
                     gpUsed++;
