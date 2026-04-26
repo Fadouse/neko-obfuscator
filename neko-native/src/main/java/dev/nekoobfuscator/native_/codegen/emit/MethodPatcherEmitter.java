@@ -283,6 +283,9 @@ static void neko_walk_vm_int_constants(void *jvm) {
         const char *name = *(const char* const*)(e + *name_off);
         if (name == NULL) break;
         int32_t value = *(const int32_t*)(e + *val_off);
+        if (NEKO_PATCH_DEBUG && (neko_strstr_safe(name, "compilable") || neko_strstr_safe(name, "_thread_in"))) {
+            fprintf(stderr, "[neko-patch] vmconst %s = 0x%x\\n", name, (unsigned)value);
+        }
         if (neko_streq_safe(name, "JVM_ACC_NOT_C1_COMPILABLE")) g_neko_method_layout.access_not_c1_compilable = (uint32_t)value;
         else if (neko_streq_safe(name, "JVM_ACC_NOT_C2_COMPILABLE")) g_neko_method_layout.access_not_c2_compilable = (uint32_t)value;
         else if (neko_streq_safe(name, "JVM_ACC_NOT_OSR_COMPILABLE")) g_neko_method_layout.access_not_osr_compilable = (uint32_t)value;
@@ -323,6 +326,13 @@ static jboolean neko_method_layout_init(JNIEnv *env) {
     if (g_neko_method_layout.access_not_c1_compilable == 0u) g_neko_method_layout.access_not_c1_compilable = NEKO_ACC_NOT_C1_COMPILABLE_FALLBACK;
     if (g_neko_method_layout.access_not_c2_compilable == 0u) g_neko_method_layout.access_not_c2_compilable = NEKO_ACC_NOT_C2_COMPILABLE_FALLBACK;
     if (g_neko_method_layout.access_not_osr_compilable == 0u) g_neko_method_layout.access_not_osr_compilable = NEKO_ACC_NOT_OSR_COMPILABLE_FALLBACK;
+    /* MethodFlags::_status bit positions on JDK 21+ (not exposed via
+     * VMIntConstants, but stable in OpenJDK source). Bit 0 = NOT_C1_COMPILABLE,
+     * bit 1 = NOT_C2_COMPILABLE, bit 2 = NOT_C1_OSR_COMPILABLE,
+     * bit 3 = NOT_C2_OSR_COMPILABLE. */
+    if (g_neko_method_layout.method_flag_not_c1_compilable == 0u)  g_neko_method_layout.method_flag_not_c1_compilable  = 0x1u;
+    if (g_neko_method_layout.method_flag_not_c2_compilable == 0u)  g_neko_method_layout.method_flag_not_c2_compilable  = 0x2u;
+    if (g_neko_method_layout.method_flag_not_osr_compilable == 0u) g_neko_method_layout.method_flag_not_osr_compilable = 0x4u | 0x8u;
     /* JDK 21+ does not expose Method::_flags via VMStructs. Derive its
      * offset from neighbours: _flags (MethodFlags, u4) sits 4 bytes before
      * _intrinsic_id (u2) on JDK 21 builds. If that fails, fall back to
