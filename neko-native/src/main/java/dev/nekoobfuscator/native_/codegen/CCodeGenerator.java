@@ -1225,11 +1225,18 @@ static jobject neko_impl_lookup(JNIEnv *env) {
     return neko_get_static_object_field(env, lookupClass, fid);
 }
 
+static jobject neko_lookup_for_jclass(JNIEnv *env, jclass ownerClass);
+
 static jobject neko_lookup_for_class(JNIEnv *env, const char *owner) {
+    jclass ownerClass = neko_find_class(env, owner);
+    return neko_lookup_for_jclass(env, ownerClass);
+}
+
+static jobject neko_lookup_for_jclass(JNIEnv *env, jclass ownerClass) {
     jclass mhClass = neko_find_class(env, "java/lang/invoke/MethodHandles");
     jmethodID mid = neko_get_static_method_id(env, mhClass, "privateLookupIn", "(Ljava/lang/Class;Ljava/lang/invoke/MethodHandles$Lookup;)Ljava/lang/invoke/MethodHandles$Lookup;");
     jvalue args[2];
-    args[0].l = neko_find_class(env, owner);
+    args[0].l = ownerClass;
     args[1].l = neko_impl_lookup(env);
     return neko_call_static_object_method_a(env, mhClass, mid, args);
 }

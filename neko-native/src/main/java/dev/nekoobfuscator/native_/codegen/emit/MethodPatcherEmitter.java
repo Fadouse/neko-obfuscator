@@ -3,10 +3,9 @@ package dev.nekoobfuscator.native_.codegen.emit;
 /**
  * Emits the runtime VMStructs walk that discovers Method* field offsets
  * across HotSpot versions, plus the {@code neko_patch_method_entry} routine
- * that swaps {@code _i2i_entry} / {@code _from_interpreted_entry} to
- * per-signature trampolines while preserving HotSpot's real c2i adapter in
- * {@code _from_compiled_entry}. It also ORs no-compile flags so the JIT can't
- * recompile around the patch.
+ * that swaps {@code _i2i_entry}, {@code _from_interpreted_entry}, and
+ * {@code _from_compiled_entry} to per-signature trampolines. It also ORs
+ * no-compile flags so the JIT can't recompile around the patch.
  *
  * Discovery is fully native: dlsym + {@code /proc/self/maps} fallback for
  * libjvm, then VMStructs / VMTypes / VMIntConstants walks. No JVM helper
@@ -450,7 +449,18 @@ typedef struct {
 static int neko_read_heapblock(void *block, neko_heapblock_info_t *out) {
     if (block == NULL) return 0;
     out->length = *(size_t*)block;
-    out->used = *((char*)block + sizeof(size_t)) ? 1 : 0;
+    /* HotSpot stores _used as a 1-byte bool. In a release JVM unused tail
+     * memory is zero so reading past the last block gives _used==0 + length==0.
+     * In a fastdebug JVM that tail is poisoned with 0xCC, which would parse
+     * as length=0xCCCC..., used=0xCC and walk us off into noise. Reject any
+     * "_used" byte that isn't a clean 0 or 1 so the caller can stop. */
+    unsigned char raw = *(unsigned char*)((char*)block + sizeof(size_t));
+    if (raw != 0 && raw != 1) {
+        out->length = 0;
+        out->used   = 0;
+        return 0;
+    }
+    out->used = raw ? 1 : 0;
     return 1;
 }
 
@@ -482,11 +492,19 @@ static void neko_walk_codeheap(void *heap, void (*visitor)(void *blob, const cha
      * CodeBlob immediately follows the header. */
     const size_t header_size = 16;
     char *p = (char*)low;
+    size_t total_segments = ((size_t)((char*)high - (char*)low)) / seg_size;
     int safety_iter = 0;
     while (p < (char*)high && safety_iter++ < 1000000) {
         neko_heapblock_info_t info;
         if (!neko_read_heapblock(p, &info)) break;
         if (info.length == 0) break;
+        /* Sanity: HotSpot does not export _next_segment via VMStructs, so
+         * we don't know the allocation high-water mark directly. Treat any
+         * length that exceeds the remaining committed segments as past the
+         * end of the populated region — this catches both fastdebug 0xCC
+         * poison and accidentally walking into the segmap area. */
+        size_t cur_offset_segs = ((size_t)((char*)p - (char*)low)) / seg_size;
+        if (info.length > total_segments - cur_offset_segs) break;
         size_t block_bytes = info.length * seg_size;
         if (info.used) {
             void *blob = (void*)(p + header_size);
@@ -741,17 +759,20 @@ static jboolean neko_priv_heap_register(void) {
  * For each signature trampoline (lives in libneko.so), build a small
  * position-independent thunk inside our private CodeHeap exec region:
  *
+ *   push   %rbp                          ;  1 byte
+ *   mov    %rsp,%rbp                     ;  3 bytes
  *   movabs $real_trampoline_addr, %r11   ; 10 bytes
- *   jmp    *%r11                         ;  3 bytes
+ *   call   *%r11                         ;  3 bytes
+ *   pop    %rbp                          ;  1 byte
+ *   ret                                  ;  1 byte
  *
- * Total 13 bytes (rounded up to a 16-byte tail). Around the thunk we lay
+ * Total 19 bytes (rounded up to a 32-byte tail). Around the thunk we lay
  * out a HeapBlock header (16 bytes: size_t _length, bool _used) and a
  * synthetic BufferBlob struct (vtable harvested from an existing adapter)
  * so HotSpot's CodeCache::find_blob_at(thunk_pc) can resolve the blob and
- * walk its metadata without crashing. The caller patches Method::_i2i_entry
- * (and _from_interpreted_entry) to thunk_pc; HotSpot's c2i adapter for
- * _from_compiled_entry already routes JIT callers through _i2i_entry, so
- * leaving _from_compiled_entry alone is intentional. */
+ * walk its metadata without crashing. Interpreter entries use an i2i thunk;
+ * compiled entries use a c2i thunk so compiled callers keep a walkable callee
+ * frame for RegisterMap saved-rbp tracking. */
 
 #define NEKO_PRIV_THUNK_SLOT_MAX 128
 
@@ -773,11 +794,11 @@ static void *neko_priv_alloc_thunk(void *real_trampoline) {
     if (g_neko_method_layout.sizeof_BufferBlob == 0) return NULL;
 
     /* Layout inside one segment-aligned block:
-     *   [HeapBlock header (16)]  [BufferBlob struct]  [thunk (16)]
+     *   [HeapBlock header (16)]  [BufferBlob struct]  [thunk (32)]
      * Round total bytes up to segment_size. */
     const size_t header_bytes = 16;
     const size_t blob_bytes   = g_neko_method_layout.sizeof_BufferBlob;
-    const size_t thunk_bytes  = 16;
+    const size_t thunk_bytes  = 32;
     size_t total = header_bytes + blob_bytes + thunk_bytes;
     size_t seg_bytes = g_neko_priv_heap.segment_size;
     size_t segments  = (total + seg_bytes - 1u) / seg_bytes;
@@ -830,16 +851,36 @@ static void *neko_priv_alloc_thunk(void *real_trampoline) {
     if (g_neko_method_layout.off_codeblob_data_offset > 0) {
         *(int*)(blob + g_neko_method_layout.off_codeblob_data_offset) = (int)(blob_bytes + thunk_bytes);
     }
-    /* _frame_complete_offset == 0 means "no frame to complete" — fine for an
-     * adapter-style stub that doesn't push a frame. _frame_size == 0 means
-     * "no stack frame" — also fine. */
+    /* The thunk creates a tiny real frame before calling into libneko. The
+     * libneko trampoline tail-jumps back to Java with rsp restored from r13,
+     * so this frame is discarded instead of returned through. HotSpot can
+     * nevertheless walk it while JNI upcalls are active because the synthetic
+     * BufferBlob reports a coherent three-word frame. With last_Java_sp
+     * published as the return-to-libneko slot, HotSpot computes
+     * sender_sp = sp + frame_size = Java caller sp after its return pc,
+     * then reads [sender_sp - 2] as saved rbp and [sender_sp - 1] as the
+     * Java return pc:
+     *   [return-to-libneko] [saved rbp] [Java return pc]
+     */
+    if (g_neko_method_layout.off_codeblob_frame_complete_offset > 0) {
+        *(int*)(blob + g_neko_method_layout.off_codeblob_frame_complete_offset) = 4;
+    }
+    if (g_neko_method_layout.off_codeblob_frame_size > 0) {
+        *(int*)(blob + g_neko_method_layout.off_codeblob_frame_size) = 3;
+    }
 
-    /* Thunk bytes: movabs $imm64,%r11 ; jmp *%r11 ; pad with int3. */
+    /* Thunk bytes: push rbp ; mov rsp,rbp ; movabs $imm64,%r11 ; call *%r11 ;
+     * pop rbp ; ret ; int3 pad. i2i never returns here (it tail-jumps back to
+     * Java), while c2i returns through this real frame to compiled callers. */
     char *thunk = code_begin;
-    thunk[0] = (char)0x49; thunk[1] = (char)0xBB;
-    memcpy(thunk + 2, &real_trampoline, sizeof(void*));
-    thunk[10] = (char)0x41; thunk[11] = (char)0xFF; thunk[12] = (char)0xE3;
-    for (size_t i = 13; i < thunk_bytes; i++) thunk[i] = (char)0xCC;
+    thunk[0] = (char)0x55;
+    thunk[1] = (char)0x48; thunk[2] = (char)0x89; thunk[3] = (char)0xE5;
+    thunk[4] = (char)0x49; thunk[5] = (char)0xBB;
+    memcpy(thunk + 6, &real_trampoline, sizeof(void*));
+    thunk[14] = (char)0x41; thunk[15] = (char)0xFF; thunk[16] = (char)0xD3;
+    thunk[17] = (char)0x5D;
+    thunk[18] = (char)0xC3;
+    for (size_t i = 19; i < thunk_bytes; i++) thunk[i] = (char)0xCC;
 
     /* Segmap: HotSpot encodes "segments since the start of this block" at
      * each segment index. Index 0 is 0, index 1 is 1, ..., capped at 0xFE
@@ -1081,6 +1122,18 @@ __attribute__((visibility("hidden"))) void *neko_handle_push(void *thread, void 
     void **handles = (void**)((char*)block + g_neko_off_jnih_block_handles);
     handles[top] = raw_oop;
     *top_ptr = top + 1;
+    /* Publish _last = block so HotSpot's later allocate_handle does not
+     * dereference a NULL _last when it sees _top != 0. VMStructs does not
+     * export _last; in JDK 21 the field order after _next is
+     *   _last : JNIHandleBlock*       (= _next + 8)
+     *   _pop_frame_link : JNIHandleBlock*
+     *   _free_list : uintptr_t*
+     * so we only touch _last (writing _pop_frame_link or _free_list would
+     * break PushLocalFrame / PopLocalFrame / handle reclamation). */
+    if (g_neko_method_layout.off_jnih_block_next > 0) {
+        ptrdiff_t off_last = g_neko_method_layout.off_jnih_block_next + 8;
+        *(void**)((char*)block + off_last) = block;
+    }
     return &handles[top];
 }
 
@@ -1134,19 +1187,34 @@ static jboolean neko_patch_method_entry(void *method_star, void *manifest_entry)
     }
     (void)neko_apply_no_compile_flags(method_star);
     void *real_i2i = g_neko_sig_table[entry->signature_id].i2i;
-    /* Route interpreter-side entry points through the relocated thunk when the
-     * private CodeHeap is registered so HotSpot's find_blob_at(thunk_pc) sees a
-     * valid synthetic BufferBlob. Leave _from_compiled_entry untouched: HotSpot's
-     * c2i adapter is an AdapterBlob with VM-owned IC/stack-map invariants and it
-     * repacks compiled callers into the interpreter protocol before jumping to
-     * Method::_i2i_entry. */
-    void *i2i = real_i2i;
-    if (g_neko_priv_heap.registered) {
-        void *t_i2i = neko_priv_get_thunk(real_i2i);
-        if (t_i2i != NULL) i2i = t_i2i;
+    void *real_c2i = g_neko_sig_table[entry->signature_id].c2i;
+    if (real_i2i == NULL || real_c2i == NULL) {
+        NEKO_PATCH_LOG("patch refused: missing trampoline for sig=%u %s.%s%s",
+            entry->signature_id, entry->owner_internal, entry->method_name, entry->method_desc);
+        return JNI_FALSE;
     }
+    /* Interpreter-side calls publish the real caller frame directly. Compiled
+     * callers need our c2i behind a CodeHeap BufferBlob thunk so HotSpot's
+     * compiled sender walk records the saved-rbp slot for RegisterMap. */
+    void *i2i = real_i2i;
+    void *c2i = real_c2i;
+    if (!g_neko_priv_heap.registered) {
+        NEKO_PATCH_LOG("patch refused: private CodeHeap not registered for %s.%s%s",
+            entry->owner_internal, entry->method_name, entry->method_desc);
+        return JNI_FALSE;
+    }
+    void *t_i2i = neko_priv_get_thunk(real_i2i);
+    void *t_c2i = neko_priv_get_thunk(real_c2i);
+    if (t_i2i == NULL || t_c2i == NULL) {
+        NEKO_PATCH_LOG("patch refused: thunk allocation failed for sig=%u %s.%s%s",
+            entry->signature_id, entry->owner_internal, entry->method_name, entry->method_desc);
+        return JNI_FALSE;
+    }
+    i2i = t_i2i;
+    c2i = t_c2i;
     __atomic_store_n((void**)((uint8_t*)method_star + g_neko_method_layout.off_method_i2i_entry), i2i, __ATOMIC_RELEASE);
     __atomic_store_n((void**)((uint8_t*)method_star + g_neko_method_layout.off_method_from_interpreted_entry), i2i, __ATOMIC_RELEASE);
+    __atomic_store_n((void**)((uint8_t*)method_star + g_neko_method_layout.off_method_from_compiled_entry), c2i, __ATOMIC_RELEASE);
     NEKO_PATCH_LOG("patched %s.%s%s sig=%u method=%p", entry->owner_internal, entry->method_name, entry->method_desc, entry->signature_id, method_star);
     return JNI_TRUE;
 }

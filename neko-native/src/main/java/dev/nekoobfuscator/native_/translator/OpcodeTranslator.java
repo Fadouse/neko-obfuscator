@@ -414,6 +414,12 @@ public final class OpcodeTranslator {
     }
 
     private String translateIntrinsicMethodInvoke(MethodInsnNode mi, int opcode) {
+        if (opcode == Opcodes.INVOKESTATIC) {
+            if ("java/lang/invoke/MethodHandles".equals(mi.owner) && "lookup".equals(mi.name) && "()Ljava/lang/invoke/MethodHandles$Lookup;".equals(mi.desc)) {
+                String callerClass = currentMethodStatic ? "clazz" : "neko_get_object_class(env, self)";
+                return "{ jclass __callerCls = " + callerClass + "; jobject __lookup = __callerCls == NULL ? NULL : neko_lookup_for_jclass(env, __callerCls); if (!neko_exception_check(env)) { PUSH_O(__lookup); } }";
+            }
+        }
         if (opcode == Opcodes.INVOKEVIRTUAL || opcode == Opcodes.INVOKESPECIAL) {
             if ("java/lang/String".equals(mi.owner) && "length".equals(mi.name) && "()I".equals(mi.desc)) {
                 return "{ jstring obj = (jstring)POP_O(); if (obj == NULL) { jclass exc = "
@@ -515,6 +521,10 @@ public final class OpcodeTranslator {
     }
 
     private String translateStaticInvoke(MethodInsnNode mi) {
+        String intrinsic = intrinsicsEnabled() ? translateIntrinsicMethodInvoke(mi, Opcodes.INVOKESTATIC) : null;
+        if (intrinsic != null) {
+            return intrinsic;
+        }
         NativeMethodBinding binding = translatedBindings.get(bindingKey(mi.owner, mi.name, mi.desc));
         if (binding != null && binding.isStatic()) {
             return translateDirectInvoke(mi, binding, true, false);

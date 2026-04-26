@@ -124,7 +124,7 @@ public final class X86_64SysVTrampoline {
         int extraStackSlot = 0;
         if (!shape.isStatic()) {
             int slotOffset = receiverIndex * 8;
-            sb.append("        \"leaq  ").append(slotOffset + 16).append("(%%rbp), %").append(gpReg(gpUsed)).append("\\n\"\n");
+            sb.append("        \"leaq  ").append(slotOffset + 32).append("(%%rbp), %").append(gpReg(gpUsed)).append("\\n\"\n");
             gpUsed++;
         }
         for (int i = 0; i < args.length; i++) {
@@ -134,46 +134,53 @@ public final class X86_64SysVTrampoline {
                 if (xmmUsed < 8) {
                     if (a == 'F') sb.append("        \"movss ");
                     else sb.append("        \"movsd ");
-                    sb.append(slotOffset + 16).append("(%%rbp), %%xmm").append(xmmUsed).append("\\n\"\n");
+                    sb.append(slotOffset + 32).append("(%%rbp), %%xmm").append(xmmUsed).append("\\n\"\n");
                     xmmUsed++;
                 } else {
-                    sb.append("        \"movq  ").append(slotOffset + 16).append("(%%rbp), %%rax\\n\"\n");
+                    sb.append("        \"movq  ").append(slotOffset + 32).append("(%%rbp), %%rax\\n\"\n");
                     sb.append("        \"movq  %%rax, ").append(extraStackSlot * 8).append("(%%rsp)\\n\"\n");
                     extraStackSlot++;
                 }
             } else if (a == 'L') {
                 // Reference arg: pass slot address as jobject.
                 if (gpUsed < 6) {
-                    sb.append("        \"leaq  ").append(slotOffset + 16).append("(%%rbp), %").append(gpReg(gpUsed)).append("\\n\"\n");
+                    sb.append("        \"leaq  ").append(slotOffset + 32).append("(%%rbp), %").append(gpReg(gpUsed)).append("\\n\"\n");
                     gpUsed++;
                 } else {
-                    sb.append("        \"leaq  ").append(slotOffset + 16).append("(%%rbp), %%rax\\n\"\n");
+                    sb.append("        \"leaq  ").append(slotOffset + 32).append("(%%rbp), %%rax\\n\"\n");
                     sb.append("        \"movq  %%rax, ").append(extraStackSlot * 8).append("(%%rsp)\\n\"\n");
                     extraStackSlot++;
                 }
             } else {
                 // Primitive (I/J): pass slot value.
                 if (gpUsed < 6) {
-                    sb.append("        \"movq  ").append(slotOffset + 16).append("(%%rbp), %").append(gpReg(gpUsed)).append("\\n\"\n");
+                    sb.append("        \"movq  ").append(slotOffset + 32).append("(%%rbp), %").append(gpReg(gpUsed)).append("\\n\"\n");
                     gpUsed++;
                 } else {
-                    sb.append("        \"movq  ").append(slotOffset + 16).append("(%%rbp), %%rax\\n\"\n");
+                    sb.append("        \"movq  ").append(slotOffset + 32).append("(%%rbp), %%rax\\n\"\n");
                     sb.append("        \"movq  %%rax, ").append(extraStackSlot * 8).append("(%%rsp)\\n\"\n");
                     extraStackSlot++;
                 }
             }
         }
-        // Frame anchor: write last_Java_sp = sender_sp(r13), fp = saved rbp, pc = ret addr.
-        // The original return addr is at [rbp + 8]. Saved rbp is in [rbp].
+        // Frame anchor: thunk-aware synthetic BufferBlob (frame_size=3) so
+        // sender_sp = rbp+8 + 24 = rbp+32 = caller's pre-call sp; saved fp
+        // at rbp+16 is what the thunk pushed; return pc at rbp+24 is what
+        // the interpreter's prepare_invoke / compiled `call` left on the
+        // stack. NOTE: in the rare path where this i2i thunk is reached via
+        // HotSpot's c2i adapter (extraspace > 0), naked_rbp+32 is shifted
+        // by extraspace and the GC walker reads a wrong sender_pc — that
+        // case is documented in todo.md (microbench-only failure).
         sb.append("        \"cmpb $0, g_neko_frame_anchor_ready(%%rip)\\n\"\n");
         sb.append("        \"je   7f\\n\"\n");
-        sb.append("        \"movq g_neko_off_last_Java_sp(%%rip), %%r10\\n\"\n");
-        sb.append("        \"movq %%r13, (%%r15, %%r10, 1)\\n\"\n");
         sb.append("        \"movq g_neko_off_last_Java_fp(%%rip), %%r10\\n\"\n");
         sb.append("        \"movq (%%rbp), %%r11\\n\"\n");
         sb.append("        \"movq %%r11, (%%r15, %%r10, 1)\\n\"\n");
         sb.append("        \"movq g_neko_off_last_Java_pc(%%rip), %%r10\\n\"\n");
         sb.append("        \"movq 8(%%rbp), %%r11\\n\"\n");
+        sb.append("        \"movq %%r11, (%%r15, %%r10, 1)\\n\"\n");
+        sb.append("        \"movq g_neko_off_last_Java_sp(%%rip), %%r10\\n\"\n");
+        sb.append("        \"leaq 8(%%rbp), %%r11\\n\"\n");
         sb.append("        \"movq %%r11, (%%r15, %%r10, 1)\\n\"\n");
         sb.append("        \"7:\\n\"\n");
         // Thread-state transition: _thread_in_Java -> _thread_in_native.
@@ -210,21 +217,26 @@ public final class X86_64SysVTrampoline {
         sb.append("        \"movl g_neko_thread_state_in_java(%%rip), %%r11d\\n\"\n");
         sb.append("        \"movl %%r11d, (%%r15, %%r10, 1)\\n\"\n");
         sb.append("        \"5:\\n\"\n");
-        // Clear the frame anchor (only sp matters for HotSpot's "last_Java_sp != 0" tests).
+        // Clear the full frame anchor: clear sp first (valid flag), then fp/pc
+        // so a later HotSpot resolve stub never inherits our stale pc.
         sb.append("        \"cmpb $0, g_neko_frame_anchor_ready(%%rip)\\n\"\n");
         sb.append("        \"je   8f\\n\"\n");
         sb.append("        \"movq g_neko_off_last_Java_sp(%%rip), %%r10\\n\"\n");
+        sb.append("        \"movq $0, (%%r15, %%r10, 1)\\n\"\n");
+        sb.append("        \"movq g_neko_off_last_Java_fp(%%rip), %%r10\\n\"\n");
+        sb.append("        \"movq $0, (%%r15, %%r10, 1)\\n\"\n");
+        sb.append("        \"movq g_neko_off_last_Java_pc(%%rip), %%r10\\n\"\n");
         sb.append("        \"movq $0, (%%r15, %%r10, 1)\\n\"\n");
         sb.append("        \"8:\\n\"\n");
         sb.append("        \"movq -8(%%rbp), %%rax\\n\"\n");
         sb.append("        \"movq -16(%%rbp), %%xmm0\\n\"\n");
         sb.append("        \"9:\\n\"\n");
-        // Restore rsp via rbp (we may have re-aligned).
-        sb.append("        \"movq  %%rbp, %%rsp\\n\"\n");
-        sb.append("        \"popq  %%rbp\\n\"\n");
         // Return to interpreter caller: save return pc, restore rsp from the
         // HotSpot-provided sender_sp in r13, and tail-jump to the continuation.
-        sb.append("        \"movq  (%%rsp), %%r10\\n\"\n");
+        sb.append("        \"movq  %%rbp, %%rsp\\n\"\n");
+        sb.append("        \"popq  %%rbp\\n\"\n");
+        sb.append("        \"movq  16(%%rsp), %%r10\\n\"\n");
+        sb.append("        \"movq  (%%rbp), %%rbp\\n\"\n");
         sb.append("        \"movq  %%r13, %%rsp\\n\"\n");
         sb.append("        \"jmp   *%%r10\\n\"\n");
         sb.append("        :\n        :\n        : \"memory\"\n");
@@ -237,10 +249,10 @@ public final class X86_64SysVTrampoline {
      * compiled callers via {@code call _from_compiled_entry}. On entry:
      *
      *   rbx              = Method*
-     *   rdi/rsi/rdx/rcx/r8/r9 = JIT GP args (rdi = receiver for instance,
-     *                          else rdi = first arg)
+     *   rsi/rdx/rcx/r8/r9/rdi = JIT GP args (rsi = receiver for instance,
+     *                          else rsi = first arg)
      *   xmm0..xmm7       = JIT FP args (xmm0 = first FP arg, etc.)
-     *   [rbp + 16 + i*8] = stack-spilled args (when GP/FP regs exhausted)
+     *   [rbp + 32 + i*8] = stack-spilled args (when GP/FP regs exhausted)
      *   (rsp)            = JIT return PC
      *
      * Strategy: standalone function. The dispatcher signature matches i2i's,
@@ -310,7 +322,7 @@ public final class X86_64SysVTrampoline {
         // registers (for example arg0 rdi -> rdx can clobber arg2), so all GP
         // loads below read from these stable copies.
         for (int i = 0; i < 6; i++) {
-            sb.append("        \"movq  %").append(gpReg(i)).append(", ")
+            sb.append("        \"movq  %").append(javaGpReg(i)).append(", ")
                 .append(gpSaveBase + i * 8).append("(%%rsp)\\n\"\n");
         }
 
@@ -343,14 +355,14 @@ public final class X86_64SysVTrampoline {
                 if (xmmSrc < 8) {
                     jitXmmReg[i] = xmmSrc++;
                 } else {
-                    jitStackOff[i] = 16 + stackSrc * 8;
+                    jitStackOff[i] = 32 + stackSrc * 8;
                     stackSrc++;
                 }
             } else {
                 if (gpSrc < 6) {
                     jitGpReg[i] = gpSrc++;
                 } else {
-                    jitStackOff[i] = 16 + stackSrc * 8;
+                    jitStackOff[i] = 32 + stackSrc * 8;
                     stackSrc++;
                 }
             }
@@ -497,18 +509,19 @@ public final class X86_64SysVTrampoline {
         // Finally load rdi = entry.
         sb.append("        \"movq  ").append(entryOffset).append("(%%rsp), %%rdi\\n\"\n");
 
-        // Frame anchor: last_Java_sp is the compiled caller's pre-call rsp
-        // (rbp + 16); fp/pc identify that compiled Java frame.
+        // Frame anchor: same private-CodeHeap thunk frame as i2i. The custom
+        // c2i path is not installed into Method::_from_compiled_entry today,
+        // but keep its anchor coherent for diagnostics/future use.
         sb.append("        \"cmpb $0, g_neko_frame_anchor_ready(%%rip)\\n\"\n");
         sb.append("        \"je   7f\\n\"\n");
-        sb.append("        \"leaq 16(%%rbp), %%r11\\n\"\n");
-        sb.append("        \"movq g_neko_off_last_Java_sp(%%rip), %%r10\\n\"\n");
-        sb.append("        \"movq %%r11, (%%r15, %%r10, 1)\\n\"\n");
         sb.append("        \"movq g_neko_off_last_Java_fp(%%rip), %%r10\\n\"\n");
         sb.append("        \"movq (%%rbp), %%r11\\n\"\n");
         sb.append("        \"movq %%r11, (%%r15, %%r10, 1)\\n\"\n");
         sb.append("        \"movq g_neko_off_last_Java_pc(%%rip), %%r10\\n\"\n");
         sb.append("        \"movq 8(%%rbp), %%r11\\n\"\n");
+        sb.append("        \"movq %%r11, (%%r15, %%r10, 1)\\n\"\n");
+        sb.append("        \"movq g_neko_off_last_Java_sp(%%rip), %%r10\\n\"\n");
+        sb.append("        \"leaq 8(%%rbp), %%r11\\n\"\n");
         sb.append("        \"movq %%r11, (%%r15, %%r10, 1)\\n\"\n");
         sb.append("        \"7:\\n\"\n");
         // Transition _thread_in_Java -> _thread_in_native before C/JNI calls.
@@ -551,6 +564,10 @@ public final class X86_64SysVTrampoline {
         sb.append("        \"je   8f\\n\"\n");
         sb.append("        \"movq g_neko_off_last_Java_sp(%%rip), %%r10\\n\"\n");
         sb.append("        \"movq $0, (%%r15, %%r10, 1)\\n\"\n");
+        sb.append("        \"movq g_neko_off_last_Java_fp(%%rip), %%r10\\n\"\n");
+        sb.append("        \"movq $0, (%%r15, %%r10, 1)\\n\"\n");
+        sb.append("        \"movq g_neko_off_last_Java_pc(%%rip), %%r10\\n\"\n");
+        sb.append("        \"movq $0, (%%r15, %%r10, 1)\\n\"\n");
         sb.append("        \"8:\\n\"\n");
         sb.append("        \"movq ").append(retRaxOffset).append("(%%rsp), %%rax\\n\"\n");
         sb.append("        \"movq ").append(retXmmOffset).append("(%%rsp), %%xmm0\\n\"\n");
@@ -575,6 +592,18 @@ public final class X86_64SysVTrampoline {
             case 4 -> "%r8";
             case 5 -> "%r9";
             default -> throw new IllegalStateException("gp regs exhausted: " + idx);
+        };
+    }
+
+    private String javaGpReg(int idx) {
+        return switch (idx) {
+            case 0 -> "%rsi";
+            case 1 -> "%rdx";
+            case 2 -> "%rcx";
+            case 3 -> "%r8";
+            case 4 -> "%r9";
+            case 5 -> "%rdi";
+            default -> throw new IllegalStateException("java gp regs exhausted: " + idx);
         };
     }
 }
