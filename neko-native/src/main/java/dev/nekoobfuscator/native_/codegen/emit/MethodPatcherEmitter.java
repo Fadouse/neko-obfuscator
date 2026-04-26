@@ -67,6 +67,13 @@ typedef struct {
     ptrdiff_t off_thread_last_Java_sp_direct;
     ptrdiff_t off_thread_last_Java_fp_direct;
     ptrdiff_t off_thread_last_Java_pc_direct;
+    /* JNIHandleBlock plumbing: our dispatcher pushes ref args into the
+     * thread's _active_handles so GC tracks them as roots. */
+    ptrdiff_t off_thread_active_handles;
+    ptrdiff_t off_jnih_block_top;
+    ptrdiff_t off_jnih_block_handles;
+    ptrdiff_t off_jnih_block_next;
+    int32_t   jnih_block_capacity;
 } neko_method_layout_t;
 
 static neko_method_layout_t g_neko_method_layout = {0};
@@ -86,6 +93,11 @@ __attribute__((visibility("hidden"))) ptrdiff_t g_neko_off_last_Java_sp = 0;
 __attribute__((visibility("hidden"))) ptrdiff_t g_neko_off_last_Java_fp = 0;
 __attribute__((visibility("hidden"))) ptrdiff_t g_neko_off_last_Java_pc = 0;
 __attribute__((visibility("hidden"))) jboolean  g_neko_frame_anchor_ready = JNI_FALSE;
+__attribute__((visibility("hidden"))) ptrdiff_t g_neko_off_thread_active_handles = 0;
+__attribute__((visibility("hidden"))) ptrdiff_t g_neko_off_jnih_block_top      = 0;
+__attribute__((visibility("hidden"))) ptrdiff_t g_neko_off_jnih_block_handles  = 0;
+__attribute__((visibility("hidden"))) int32_t   g_neko_jnih_block_capacity     = 32;
+__attribute__((visibility("hidden"))) jboolean  g_neko_handle_push_ready = JNI_FALSE;
 
 #define NEKO_PATCH_DEBUG (getenv("NEKO_PATCH_DEBUG") != NULL)
 #define NEKO_PATCH_LOG(fmt, ...) do { if (NEKO_PATCH_DEBUG) { fprintf(stderr, "[neko-patch] " fmt "\\n", ##__VA_ARGS__); fflush(stderr); } } while (0)
@@ -228,6 +240,8 @@ static jboolean neko_walk_vm_structs(void *jvm) {
                 g_neko_method_layout.off_thread_polling_word = (ptrdiff_t)off_value;
             } else if (neko_streq_safe(field_name, "_anchor")) {
                 g_neko_method_layout.off_thread_anchor = (ptrdiff_t)off_value;
+            } else if (neko_streq_safe(field_name, "_active_handles")) {
+                g_neko_method_layout.off_thread_active_handles = (ptrdiff_t)off_value;
             } else if (neko_streq_safe(field_name, "_anchor._last_Java_sp")
                     || neko_streq_safe(field_name, "_last_Java_sp")) {
                 g_neko_method_layout.off_thread_last_Java_sp_direct = (ptrdiff_t)off_value;
@@ -237,6 +251,14 @@ static jboolean neko_walk_vm_structs(void *jvm) {
             } else if (neko_streq_safe(field_name, "_anchor._last_Java_pc")
                     || neko_streq_safe(field_name, "_last_Java_pc")) {
                 g_neko_method_layout.off_thread_last_Java_pc_direct = (ptrdiff_t)off_value;
+            }
+        } else if (neko_streq_safe(type_name, "JNIHandleBlock")) {
+            if (neko_streq_safe(field_name, "_top")) {
+                g_neko_method_layout.off_jnih_block_top = (ptrdiff_t)off_value;
+            } else if (neko_streq_safe(field_name, "_handles")) {
+                g_neko_method_layout.off_jnih_block_handles = (ptrdiff_t)off_value;
+            } else if (neko_streq_safe(field_name, "_next")) {
+                g_neko_method_layout.off_jnih_block_next = (ptrdiff_t)off_value;
             }
         } else if (neko_streq_safe(type_name, "JavaFrameAnchor")) {
             if (neko_streq_safe(field_name, "_last_Java_sp")) {
@@ -403,8 +425,60 @@ static jboolean neko_method_layout_init(JNIEnv *env) {
     NEKO_PATCH_LOG("anchor: sp=%td fp=%td pc=%td ready=%d",
         g_neko_off_last_Java_sp, g_neko_off_last_Java_fp, g_neko_off_last_Java_pc,
         (int)g_neko_frame_anchor_ready);
+    g_neko_off_thread_active_handles = g_neko_method_layout.off_thread_active_handles;
+    g_neko_off_jnih_block_top        = g_neko_method_layout.off_jnih_block_top;
+    g_neko_off_jnih_block_handles    = g_neko_method_layout.off_jnih_block_handles;
+    g_neko_handle_push_ready =
+        (g_neko_off_thread_active_handles > 0
+         && g_neko_off_jnih_block_top >= 0
+         && g_neko_off_jnih_block_handles >= 0)
+        ? JNI_TRUE : JNI_FALSE;
+    NEKO_PATCH_LOG("handles: th_active=%td blk_top=%td blk_handles=%td ready=%d",
+        g_neko_off_thread_active_handles, g_neko_off_jnih_block_top,
+        g_neko_off_jnih_block_handles, (int)g_neko_handle_push_ready);
     g_neko_method_layout.usable = JNI_TRUE;
     return JNI_TRUE;
+}
+
+/* === JNIHandleBlock push/pop helpers ===
+ * Push raw oop into the thread's _active_handles, return its handle slot
+ * pointer. If the block is full or layout is unknown, fall back to the
+ * slot-address-as-jobject scheme (less GC-safe but still functional for
+ * short JNI calls). neko_handle_save / neko_handle_restore bracket a
+ * dispatcher invocation so its pushes are popped on return.
+ * The typedef neko_handle_save_t is forward-declared in the prelude. */
+
+__attribute__((visibility("hidden"))) void neko_handle_save(void *thread, neko_handle_save_t *save) {
+    save->block = NULL;
+    save->saved_top = 0;
+    if (!g_neko_handle_push_ready || thread == NULL) return;
+    void *block = *(void**)((char*)thread + g_neko_off_thread_active_handles);
+    if (block == NULL) return;
+    save->block = block;
+    save->saved_top = *(int32_t*)((char*)block + g_neko_off_jnih_block_top);
+}
+
+__attribute__((visibility("hidden"))) void neko_handle_restore(neko_handle_save_t *save) {
+    if (save->block == NULL) return;
+    *(int32_t*)((char*)save->block + g_neko_off_jnih_block_top) = save->saved_top;
+}
+
+__attribute__((visibility("hidden"))) void *neko_handle_push(void *thread, void *raw_oop) {
+    if (raw_oop == NULL) return NULL;
+    if (!g_neko_handle_push_ready || thread == NULL) return raw_oop; /* fallback */
+    void *block = *(void**)((char*)thread + g_neko_off_thread_active_handles);
+    if (block == NULL) return raw_oop;
+    int32_t *top_ptr = (int32_t*)((char*)block + g_neko_off_jnih_block_top);
+    int32_t top = *top_ptr;
+    if (top >= g_neko_jnih_block_capacity) {
+        /* Block full — would need to allocate a new block. Bail to
+         * fallback (slot-address as jobject). Short calls usually work. */
+        return raw_oop;
+    }
+    void **handles = (void**)((char*)block + g_neko_off_jnih_block_handles);
+    handles[top] = raw_oop;
+    *top_ptr = top + 1;
+    return &handles[top];
 }
 
 static jboolean neko_apply_no_compile_flags(void *method_star) {

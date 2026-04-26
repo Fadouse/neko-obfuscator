@@ -78,12 +78,14 @@ public final class X86_64SysVTrampoline {
         // is a single deref — making &locals[i] a perfectly valid jobject.
         // This avoids needing libjvm-internal JNIHandles::make_local symbols
         // (which are stripped from JDK 21+ release builds).
-        int gpUsed = 1; // rdi = entry
+        // Args layout to dispatcher: rdi=entry, rsi=thread (=r15), then receiver (if any), then args.
+        sb.append("        \"movq  %%r15, %%rsi\\n\"\n");
+        int gpUsed = 2; // rdi = entry, rsi = thread
         int xmmUsed = 0;
         int extraStackSlot = 0;
         if (!shape.isStatic()) {
             int slotOffset = -8 * totalSlots;
-            sb.append("        \"leaq  ").append(slotOffset).append("(%%r13), %%rsi\\n\"\n");
+            sb.append("        \"leaq  ").append(slotOffset).append("(%%r13), %").append(gpReg(gpUsed)).append("\\n\"\n");
             gpUsed++;
         }
         int slotsConsumed = receiverSlot;

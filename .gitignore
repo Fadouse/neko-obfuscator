@@ -74,3 +74,6 @@ native-build/
 # ──────────────────────────────────────────
 _reference_native_obfuscator/
 _refs/
+
+# embedded dev-impl worktree (reference only — not part of main)
+worktree/

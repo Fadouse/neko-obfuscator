@@ -217,7 +217,12 @@ public final class CCodeGenerator {
         sb.append("__attribute__((visibility(\"hidden\"))) extern ptrdiff_t g_neko_off_last_Java_fp;\n");
         sb.append("__attribute__((visibility(\"hidden\"))) extern ptrdiff_t g_neko_off_last_Java_pc;\n");
         sb.append("__attribute__((visibility(\"hidden\"))) extern jboolean  g_neko_frame_anchor_ready;\n");
+        sb.append("__attribute__((visibility(\"hidden\"))) extern jboolean  g_neko_handle_push_ready;\n");
         sb.append("__attribute__((visibility(\"hidden\"))) void neko_handle_safepoint_poll(void);\n");
+        sb.append("typedef struct { void *block; int32_t saved_top; } neko_handle_save_t;\n");
+        sb.append("__attribute__((visibility(\"hidden\"))) void neko_handle_save(void *thread, neko_handle_save_t *save);\n");
+        sb.append("__attribute__((visibility(\"hidden\"))) void neko_handle_restore(neko_handle_save_t *save);\n");
+        sb.append("__attribute__((visibility(\"hidden\"))) void *neko_handle_push(void *thread, void *raw_oop);\n");
         sb.append("static jboolean neko_resolve_jnihandles(void *jvm);\n");
         sb.append("static void *neko_dlsym(void *h, const char *name);\n\n");
         sb.append(renderResolutionCaches());

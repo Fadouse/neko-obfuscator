@@ -45,9 +45,11 @@ public final class SignatureDispatcherEmitter {
         sb.append(");\n");
 
         // dispatcher — hidden visibility (not static) so the naked-asm trampoline can call it.
+        // The trampoline passes the JavaThread as the second arg (after entry)
+        // so we can push ref args to the active handle block (GC tracking).
         sb.append("__attribute__((visibility(\"hidden\"))) ").append(retC)
-            .append(" neko_sig_").append(sigId).append("_dispatch(NekoManifestMethod *entry");
-        if (!isStatic) sb.append(", void *raw_recv");
+            .append(" neko_sig_").append(sigId).append("_dispatch(NekoManifestMethod *entry, void *thread");
+        if (!isStatic) sb.append(", void *raw_recv_slot");
         for (int i = 0; i < args.length; i++) {
             sb.append(", ").append(SignaturePlan.cAbiType(args[i])).append(" a").append(i);
         }
@@ -58,19 +60,30 @@ public final class SignatureDispatcherEmitter {
         sb.append("        if (g_neko_java_vm != NULL) (*g_neko_java_vm)->AttachCurrentThread(g_neko_java_vm, (void**)&env, NULL);\n");
         sb.append("        if (env == NULL) ").append(returnZero(ret)).append(";\n");
         sb.append("    }\n");
-        sb.append("    if ((*env)->PushLocalFrame(env, 16) != 0) ").append(returnZero(ret)).append(";\n");
+        sb.append("    NEKO_PATCH_LOG(\"sig").append(sigId).append(" enter %s.%s%s\", entry->owner_internal, entry->method_name, entry->method_desc);\n");
+        sb.append("    if ((*env)->PushLocalFrame(env, 16) != 0) {\n");
+        sb.append("        NEKO_PATCH_LOG(\"sig").append(sigId).append(" PushLocalFrame failed\");\n");
+        sb.append("        ").append(returnZero(ret)).append(";\n");
+        sb.append("    }\n");
 
-        // raw_recv and reference args arrive from the trampoline as POINTERS
-        // into the interpreter slot array. Each pointer is already a valid
-        // jobject (JNI handle) under HotSpot's resolve-by-deref convention.
+        // Push ref args + receiver into the JavaThread's _active_handles
+        // so the GC tracks them as roots during the JNI call. raw_*_slot
+        // values are pointers into the interpreter slot array — deref to
+        // get the raw oop, then push.
+        sb.append("    neko_handle_save_t __hsave;\n");
+        sb.append("    neko_handle_save(thread, &__hsave);\n");
         if (isStatic) {
             sb.append("    jclass owner_cls = neko_find_class(env, entry->owner_internal);\n");
         } else {
-            sb.append("    jobject self = (jobject)raw_recv;\n");
+            sb.append("    void *__recv_oop = raw_recv_slot != NULL ? *(void**)raw_recv_slot : NULL;\n");
+            sb.append("    jobject self = (jobject)neko_handle_push(thread, __recv_oop);\n");
         }
         for (int i = 0; i < args.length; i++) {
             if (args[i] == 'L') {
-                sb.append("    jobject ja").append(i).append(" = (jobject)a").append(i).append(";\n");
+                sb.append("    void *__a").append(i).append("_oop = a").append(i)
+                    .append(" != NULL ? *(void**)a").append(i).append(" : NULL;\n");
+                sb.append("    jobject ja").append(i).append(" = (jobject)neko_handle_push(thread, __a")
+                    .append(i).append("_oop);\n");
             }
         }
 
@@ -96,18 +109,19 @@ public final class SignatureDispatcherEmitter {
         }
         sb.append(");\n");
 
-        // return + pop. For ref returns, PopLocalFrame's second arg is the
-        // jobject we want surviving past the pop — its raw oop survives in
-        // the caller's local frame, and we then deref to a raw oop pointer
-        // for the interpreter return slot.
+        // return + pop
         if (ret == 'V') {
             sb.append("    (void)(*env)->PopLocalFrame(env, NULL);\n");
+            sb.append("    neko_handle_restore(&__hsave);\n");
             sb.append("    return;\n");
         } else if (ret == 'L') {
             sb.append("    jobject __surviving = (*env)->PopLocalFrame(env, __ret);\n");
-            sb.append("    return __surviving == NULL ? NULL : *(void**)__surviving;\n");
+            sb.append("    void *__raw_ret = __surviving == NULL ? NULL : *(void**)__surviving;\n");
+            sb.append("    neko_handle_restore(&__hsave);\n");
+            sb.append("    return __raw_ret;\n");
         } else {
             sb.append("    (void)(*env)->PopLocalFrame(env, NULL);\n");
+            sb.append("    neko_handle_restore(&__hsave);\n");
             sb.append("    return (").append(retC).append(")__ret;\n");
         }
         sb.append("}\n\n");
