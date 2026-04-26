@@ -19,6 +19,8 @@ import org.objectweb.asm.tree.AnnotationNode;
 import org.objectweb.asm.tree.ClassNode;
 import org.objectweb.asm.tree.InsnList;
 import org.objectweb.asm.tree.InsnNode;
+import org.objectweb.asm.tree.JumpInsnNode;
+import org.objectweb.asm.tree.LabelNode;
 import org.objectweb.asm.tree.LdcInsnNode;
 import org.objectweb.asm.tree.MethodInsnNode;
 import org.objectweb.asm.tree.MethodNode;
@@ -278,6 +280,18 @@ public final class NativeCompilationStage {
         methodNode.access &= ~(Opcodes.ACC_NATIVE | Opcodes.ACC_STRICT);
 
         InsnList body = methodNode.instructions;
+        // Inflate the body above HotSpot's MaxInlineSize (35 bytes by default)
+        // so JIT-compiled callers don't bake the LinkageError-throw into their
+        // inlined output, which would bypass our _i2i_entry trampoline. Each
+        // ICONST_0 + IFEQ pair is 4 bytes; 12 of them keep the body comfortably
+        // above the threshold without affecting runtime semantics (control
+        // always falls through).
+        LabelNode exitLabel = new LabelNode();
+        for (int i = 0; i < 12; i++) {
+            body.add(new InsnNode(Opcodes.ICONST_0));
+            body.add(new JumpInsnNode(Opcodes.IFEQ, exitLabel));
+        }
+        body.add(exitLabel);
         body.add(new TypeInsnNode(Opcodes.NEW, LINKAGE_ERROR_INTERNAL));
         body.add(new InsnNode(Opcodes.DUP));
         body.add(new LdcInsnNode(LINKAGE_ERROR_MESSAGE));

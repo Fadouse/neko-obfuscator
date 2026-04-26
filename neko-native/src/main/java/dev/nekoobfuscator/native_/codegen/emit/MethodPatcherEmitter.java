@@ -481,13 +481,15 @@ __attribute__((visibility("hidden"))) void *neko_handle_push(void *thread, void 
     return &handles[top];
 }
 
+/* JDK 21+ MethodFlags layout (hotspot/share/oops/method.hpp).
+ * Setting _dont_inline prevents JIT from inlining the (about-to-be-patched)
+ * bytecode body, which would otherwise bake the LinkageError-throw into hot
+ * callers' compiled code and bypass our _i2i_entry trampoline entirely. */
+#define NEKO_METHOD_FLAG_DONT_INLINE  (1u << 2)
+
 static jboolean neko_apply_no_compile_flags(void *method_star) {
-    /* Only apply the well-defined JVM_ACC_NOT_C[12]_COMPILABLE bits in
-     * Method::_access_flags. Touching MethodFlags::_status without an
-     * authoritative bit layout (JDK 21 doesn't expose it via VMStructs)
-     * risks setting orthogonal bits like _caller_sensitive, which then
-     * trips MethodHandle's "illegal bytecode sequence - method not
-     * verified" stop during reflective invokes. */
+    /* JVM_ACC_NOT_C[12]_COMPILABLE bits in Method::_access_flags (well-defined
+     * across JDKs). */
     {
         uint32_t mask = g_neko_method_layout.access_not_c1_compilable
             | g_neko_method_layout.access_not_c2_compilable
@@ -496,6 +498,14 @@ static jboolean neko_apply_no_compile_flags(void *method_star) {
         void *addr = (uint8_t*)method_star + g_neko_method_layout.off_method_access_flags;
         if (width == 4) __atomic_fetch_or((uint32_t*)addr, mask, __ATOMIC_SEQ_CST);
         else if (width == 2) __atomic_fetch_or((uint16_t*)addr, (uint16_t)mask, __ATOMIC_SEQ_CST);
+    }
+    /* Set Method::_flags bit 2 (_dont_inline) on JDK 21+. This is well-defined
+     * unlike the _status / no-compile bits, and stops JIT-compiled callers
+     * from inlining the LinkageError-stub body. */
+    if (g_neko_method_layout.java_spec_version >= 21
+        && g_neko_method_layout.off_method_flags_status >= 0) {
+        uint32_t *slot = (uint32_t*)((uint8_t*)method_star + g_neko_method_layout.off_method_flags_status);
+        __atomic_fetch_or(slot, NEKO_METHOD_FLAG_DONT_INLINE, __ATOMIC_SEQ_CST);
     }
     return JNI_TRUE;
 }
