@@ -35,6 +35,8 @@ typedef struct {
     ptrdiff_t off_method_from_interpreted_entry;
     ptrdiff_t off_method_from_compiled_entry;
     ptrdiff_t off_method_flags_status;
+    ptrdiff_t off_method_intrinsic_id;
+    ptrdiff_t off_method_vtable_index;
     size_t method_size;
     size_t access_flags_size;
     uint32_t access_not_c1_compilable;
@@ -201,6 +203,9 @@ static jboolean neko_walk_vm_structs(void *jvm) {
         const char *field_name = *(const char* const*)(e + *field_off);
         uintptr_t off_value = *(const uintptr_t*)(e + *offset_off);
         if (type_name == NULL && field_name == NULL) break;
+        if (NEKO_PATCH_DEBUG && neko_streq_safe(type_name, "Method")) {
+            fprintf(stderr, "[neko-patch] vmstructs Method::%s @+%zu\\n", field_name ? field_name : "?", (size_t)off_value);
+        }
         if (neko_streq_safe(type_name, "Method")) {
             if (neko_streq_safe(field_name, "_access_flags")) g_neko_method_layout.off_method_access_flags = (ptrdiff_t)off_value;
             else if (neko_streq_safe(field_name, "_code")) g_neko_method_layout.off_method_code = (ptrdiff_t)off_value;
@@ -210,6 +215,8 @@ static jboolean neko_walk_vm_structs(void *jvm) {
             else if (neko_streq_safe(field_name, "_flags") || neko_streq_safe(field_name, "_flags._status") || neko_streq_safe(field_name, "_flags._flags")) {
                 g_neko_method_layout.off_method_flags_status = (ptrdiff_t)off_value;
             }
+            else if (neko_streq_safe(field_name, "_intrinsic_id")) g_neko_method_layout.off_method_intrinsic_id = (ptrdiff_t)off_value;
+            else if (neko_streq_safe(field_name, "_vtable_index")) g_neko_method_layout.off_method_vtable_index = (ptrdiff_t)off_value;
         } else if (neko_streq_safe(type_name, "Thread") || neko_streq_safe(type_name, "JavaThread")) {
             if (neko_streq_safe(field_name, "_thread_state")) {
                 if (g_neko_method_layout.off_thread_state == 0
@@ -304,6 +311,8 @@ static jboolean neko_method_layout_init(JNIEnv *env) {
     g_neko_method_layout.off_method_from_interpreted_entry = -1;
     g_neko_method_layout.off_method_from_compiled_entry = -1;
     g_neko_method_layout.off_method_flags_status = -1;
+    g_neko_method_layout.off_method_intrinsic_id = -1;
+    g_neko_method_layout.off_method_vtable_index = -1;
     g_neko_method_layout.java_spec_version = neko_detect_java_spec_version_from_env(env);
     void *jvm = neko_resolve_libjvm_handle();
     NEKO_PATCH_LOG("layout_init: jdk=%d libjvm=%p", g_neko_method_layout.java_spec_version, jvm);
@@ -314,6 +323,20 @@ static jboolean neko_method_layout_init(JNIEnv *env) {
     if (g_neko_method_layout.access_not_c1_compilable == 0u) g_neko_method_layout.access_not_c1_compilable = NEKO_ACC_NOT_C1_COMPILABLE_FALLBACK;
     if (g_neko_method_layout.access_not_c2_compilable == 0u) g_neko_method_layout.access_not_c2_compilable = NEKO_ACC_NOT_C2_COMPILABLE_FALLBACK;
     if (g_neko_method_layout.access_not_osr_compilable == 0u) g_neko_method_layout.access_not_osr_compilable = NEKO_ACC_NOT_OSR_COMPILABLE_FALLBACK;
+    /* JDK 21+ does not expose Method::_flags via VMStructs. Derive its
+     * offset from neighbours: _flags (MethodFlags, u4) sits 4 bytes before
+     * _intrinsic_id (u2) on JDK 21 builds. If that fails, fall back to
+     * _vtable_index (int) + 8 (skipping intrinsic_id + itable_index pair). */
+    if (g_neko_method_layout.off_method_flags_status < 0
+        && g_neko_method_layout.off_method_intrinsic_id > 0) {
+        g_neko_method_layout.off_method_flags_status =
+            g_neko_method_layout.off_method_intrinsic_id - (ptrdiff_t)4;
+    }
+    if (g_neko_method_layout.off_method_flags_status < 0
+        && g_neko_method_layout.off_method_vtable_index > 0) {
+        g_neko_method_layout.off_method_flags_status =
+            g_neko_method_layout.off_method_vtable_index + (ptrdiff_t)8;
+    }
     if (!neko_resolve_jnihandles(jvm)) {
         NEKO_PATCH_LOG("JNIHandles symbols not resolvable; dispatch will use jobject fallback");
     }
