@@ -83,7 +83,7 @@ public final class ManifestEmitter {
         return sb.toString();
     }
 
-    public String renderDiscoveryDriver(List<NativeMethodBinding> bindings) {
+    public String renderDiscoveryDriver(List<NativeMethodBinding> bindings, Map<String, Integer> ownerBindIds) {
         Map<String, List<Integer>> byOwner = new LinkedHashMap<>();
         for (int i = 0; i < bindings.size(); i++) {
             byOwner.computeIfAbsent(bindings.get(i).ownerInternalName(), ignored -> new ArrayList<>()).add(i);
@@ -126,6 +126,11 @@ public final class ManifestEmitter {
             sb.append("    if (owner_cls == NULL || neko_exception_check(env)) {\n");
             sb.append("        if (neko_exception_check(env)) neko_exception_clear(env);\n");
             sb.append("    } else {\n");
+            Integer bindId = ownerBindIds.get(e.getKey());
+            if (bindId != null) {
+                sb.append("        /* Bind this owner's per-class JNI cache (formerly via bindClass). */\n");
+                sb.append("        neko_bind_owner_").append(bindId).append("(env, owner_cls);\n");
+            }
             for (int idx : e.getValue()) {
                 sb.append("        (void)neko_manifest_resolve_one(env, ").append(idx).append("u, owner_cls);\n");
             }

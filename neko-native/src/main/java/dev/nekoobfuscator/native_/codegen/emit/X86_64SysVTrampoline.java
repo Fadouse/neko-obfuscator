@@ -44,7 +44,11 @@ public final class X86_64SysVTrampoline {
         sb.append("    __asm__ volatile (\n");
         sb.append("        \"pushq %%rbp\\n\"\n");
         sb.append("        \"movq  %%rsp, %%rbp\\n\"\n");
-        sb.append("        \"subq  $128, %%rsp\\n\"\n");
+        // HotSpot's interpreter does not guarantee 16-byte rsp alignment,
+        // but SysV C ABI does. Reserve 256 bytes (overshoots 128 to allow
+        // alignment plus arg-spill region) and force 16-byte alignment.
+        sb.append("        \"subq  $256, %%rsp\\n\"\n");
+        sb.append("        \"andq  $-16, %%rsp\\n\"\n");
         // scan g_neko_manifest_method_stars for matching rbx
         sb.append("        \"leaq  g_neko_manifest_method_stars(%%rip), %%r10\\n\"\n");
         sb.append("        \"movl  g_neko_manifest_method_count(%%rip), %%r11d\\n\"\n");
@@ -161,7 +165,8 @@ public final class X86_64SysVTrampoline {
         sb.append("        \"movq -8(%%rbp), %%rax\\n\"\n");
         sb.append("        \"movq -16(%%rbp), %%xmm0\\n\"\n");
         sb.append("        \"9:\\n\"\n");
-        sb.append("        \"addq  $128, %%rsp\\n\"\n");
+        // Restore rsp via rbp (we may have re-aligned).
+        sb.append("        \"movq  %%rbp, %%rsp\\n\"\n");
         sb.append("        \"popq  %%rbp\\n\"\n");
         // Return to interpreter caller: pop return address, restore rsp from r13, jmp via rax.
         sb.append("        \"movq  (%%rsp), %%r10\\n\"\n");

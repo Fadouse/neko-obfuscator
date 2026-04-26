@@ -234,7 +234,7 @@ public final class CCodeGenerator {
         sb.append(manifestEmitter.renderTables(bindings, signaturePlan));
         sb.append(signatureDispatcherEmitter.render(signaturePlan));
         sb.append(trampolineEmitter.render(signaturePlan));
-        sb.append(manifestEmitter.renderDiscoveryDriver(bindings));
+        sb.append(manifestEmitter.renderDiscoveryDriver(bindings, ownerBindIndex));
         sb.append(jniOnLoadEmitter.renderJniOnLoadAndBootstrap());
         return sb.toString();
     }
