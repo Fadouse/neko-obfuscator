@@ -478,12 +478,6 @@ __attribute__((visibility("hidden"))) void *neko_handle_push(void *thread, void 
     return &handles[top];
 }
 
-/* JDK 21+ MethodFlags layout (hotspot/share/oops/method.hpp).
- * Setting _dont_inline prevents JIT from inlining the (about-to-be-patched)
- * bytecode body, which would otherwise bake the LinkageError-throw into hot
- * callers' compiled code and bypass our _i2i_entry trampoline entirely. */
-#define NEKO_METHOD_FLAG_DONT_INLINE  (1u << 2)
-
 static jboolean neko_apply_no_compile_flags(void *method_star) {
     /* JVM_ACC_NOT_C[12]_COMPILABLE bits in Method::_access_flags (well-defined
      * across JDKs). */
