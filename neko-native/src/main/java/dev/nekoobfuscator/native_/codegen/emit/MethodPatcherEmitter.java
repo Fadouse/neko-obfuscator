@@ -74,6 +74,7 @@ typedef struct {
     ptrdiff_t off_thread_last_Java_sp_direct;
     ptrdiff_t off_thread_last_Java_fp_direct;
     ptrdiff_t off_thread_last_Java_pc_direct;
+    ptrdiff_t off_thread_jni_environment;
     /* JNIHandleBlock plumbing: our dispatcher pushes ref args into the
      * thread's _active_handles so GC tracks them as roots. */
     ptrdiff_t off_thread_active_handles;
@@ -294,6 +295,8 @@ static jboolean neko_walk_vm_structs(void *jvm) {
             } else if (neko_streq_safe(field_name, "_anchor._last_Java_pc")
                     || neko_streq_safe(field_name, "_last_Java_pc")) {
                 g_neko_method_layout.off_thread_last_Java_pc_direct = (ptrdiff_t)off_value;
+            } else if (neko_streq_safe(field_name, "_jni_environment")) {
+                g_neko_method_layout.off_thread_jni_environment = (ptrdiff_t)off_value;
             }
         } else if (neko_streq_safe(type_name, "JNIHandleBlock")) {
             if (neko_streq_safe(field_name, "_top")) {
@@ -1074,6 +1077,7 @@ static jboolean neko_method_layout_init(JNIEnv *env) {
     NEKO_PATCH_LOG("handles: th_active=%td blk_top=%td blk_handles=%td ready=%d",
         g_neko_off_thread_active_handles, g_neko_off_jnih_block_top,
         g_neko_off_jnih_block_handles, (int)g_neko_handle_push_ready);
+    NEKO_PATCH_LOG("jni env: off=%td", g_neko_method_layout.off_thread_jni_environment);
     NEKO_PATCH_LOG("codecache layout: heaps=%p ga_len=%td ga_data=%td ch_mem=%td ch_seg=%td ch_log2=%td vs_low=%td vs_high=%td blob_name=%td blob_size=%td blob_code_begin=%td",
         g_neko_method_layout.addr_codecache_heaps,
         g_neko_method_layout.off_growable_array_len,
@@ -1125,6 +1129,21 @@ __attribute__((visibility("hidden"))) void neko_handle_save(void *thread, neko_h
 __attribute__((visibility("hidden"))) void neko_handle_restore(neko_handle_save_t *save) {
     if (save->block == NULL) return;
     *(int32_t*)((char*)save->block + g_neko_off_jnih_block_top) = save->saved_top;
+}
+
+__attribute__((visibility("hidden"))) JNIEnv *neko_thread_jni_env(void *thread) {
+    JNIEnv *env = NULL;
+    if (thread != NULL && g_neko_method_layout.off_thread_jni_environment > 0) {
+        return (JNIEnv*)((char*)thread + g_neko_method_layout.off_thread_jni_environment);
+    }
+    if (g_neko_java_vm == NULL) return NULL;
+    if ((*g_neko_java_vm)->GetEnv(g_neko_java_vm, (void**)&env, JNI_VERSION_1_6) != JNI_OK) return NULL;
+    return env;
+}
+
+__attribute__((visibility("hidden"))) void *neko_jni_env_to_thread(JNIEnv *env) {
+    if (env == NULL || g_neko_method_layout.off_thread_jni_environment <= 0) return NULL;
+    return (void*)((char*)env - g_neko_method_layout.off_thread_jni_environment);
 }
 
 __attribute__((visibility("hidden"))) void *neko_handle_push(void *thread, void *raw_oop) {

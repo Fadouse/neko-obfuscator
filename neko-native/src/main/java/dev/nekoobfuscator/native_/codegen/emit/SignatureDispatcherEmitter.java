@@ -3,19 +3,16 @@ package dev.nekoobfuscator.native_.codegen.emit;
 /**
  * Emits one C dispatcher per unique {@link SignaturePlan.Shape}.
  *
- * The dispatcher is the JNI-shim glue between the per-arch trampoline (which
- * delivers raw interpreter args) and main's existing {@code JNICALL}
- * {@code Java_owner_method} implementation symbol.
+ * The dispatcher is the glue between the per-arch trampoline (which delivers
+ * raw interpreter args) and the generated raw translated-body implementation.
  *
  * Per call:
- *   1. Acquire {@code JNIEnv*} via the cached {@code g_neko_java_vm} (attaching
- *      if needed).
- *   2. {@code PushLocalFrame(env, 16)}.
- *   3. For reference args (incl. receiver): {@code raw oop -> jobject} via
- *      {@code neko_raw_to_jobject}.
- *   4. Call the JNI-style impl_fn through {@code entry->impl_fn}.
- *   5. For reference return: {@code jobject -> raw oop} via {@code neko_jobject_to_raw}.
- *   6. {@code PopLocalFrame}.
+ *   1. Recover the embedded {@code JNIEnv*} from the active {@code JavaThread}.
+ *   2. Save the current {@code JNIHandleBlock} top.
+ *   3. Push raw oop receiver / reference args into the active handle block.
+ *   4. Call the generated raw translated-body impl through {@code entry->impl_fn}.
+ *   5. For reference return: resolve the returned handle to raw oop before
+ *      restoring the handle-block top.
  */
 public final class SignatureDispatcherEmitter {
 
@@ -37,9 +34,9 @@ public final class SignatureDispatcherEmitter {
         String retJ = SignaturePlan.jniArgType(ret);
         boolean isStatic = shape.isStatic();
 
-        // typedef for impl_fn signature (matches main's JNICALL Java_... emission)
+        // typedef for impl_fn signature (matches the generated raw body)
         sb.append("typedef ").append(retJ)
-            .append(" (JNICALL *neko_sig_").append(sigId).append("_impl_t)(JNIEnv*, ")
+            .append(" (*neko_sig_").append(sigId).append("_impl_t)(void*, JNIEnv*, ")
             .append(isStatic ? "jclass" : "jobject");
         for (char a : args) sb.append(", ").append(SignaturePlan.jniArgType(a));
         sb.append(");\n");
@@ -54,17 +51,10 @@ public final class SignatureDispatcherEmitter {
             sb.append(", ").append(SignaturePlan.cAbiType(args[i])).append(" a").append(i);
         }
         sb.append(") {\n");
-        sb.append("    JNIEnv *env = NULL;\n");
-        sb.append("    if (g_neko_java_vm == NULL) ").append(returnZero(ret)).append(";\n");
-        sb.append("    if ((*g_neko_java_vm)->GetEnv(g_neko_java_vm, (void**)&env, JNI_VERSION_1_6) != JNI_OK || env == NULL) {\n");
-        sb.append("        if (g_neko_java_vm != NULL) (*g_neko_java_vm)->AttachCurrentThread(g_neko_java_vm, (void**)&env, NULL);\n");
-        sb.append("        if (env == NULL) ").append(returnZero(ret)).append(";\n");
-        sb.append("    }\n");
+        sb.append("    JNIEnv *env = neko_thread_jni_env(thread);\n");
+        sb.append("    if (env == NULL) ").append(returnZero(ret)).append(";\n");
         sb.append("    NEKO_PATCH_LOG(\"sig").append(sigId).append(" enter %s.%s%s\", entry->owner_internal, entry->method_name, entry->method_desc);\n");
-        sb.append("    if ((*env)->PushLocalFrame(env, 16) != 0) {\n");
-        sb.append("        NEKO_PATCH_LOG(\"sig").append(sigId).append(" PushLocalFrame failed\");\n");
-        sb.append("        ").append(returnZero(ret)).append(";\n");
-        sb.append("    }\n");
+        sb.append("    if ((*env)->PushLocalFrame(env, 16) != 0) ").append(returnZero(ret)).append(";\n");
 
         // Push ref args + receiver into the JavaThread's _active_handles
         // so the GC tracks them as roots during the JNI call. raw_*_slot
@@ -95,7 +85,7 @@ public final class SignatureDispatcherEmitter {
         } else {
             sb.append("    ").append(retJ).append(" __ret = ");
         }
-        sb.append("((neko_sig_").append(sigId).append("_impl_t)entry->impl_fn)(env, ")
+        sb.append("((neko_sig_").append(sigId).append("_impl_t)entry->impl_fn)(thread, env, ")
             .append(isStatic ? "owner_cls" : "self");
         for (int i = 0; i < args.length; i++) {
             sb.append(", ");
@@ -110,8 +100,7 @@ public final class SignatureDispatcherEmitter {
         sb.append(");\n");
 
         // If impl_fn left an exception pending, do not feed __ret to
-        // PopLocalFrame — it may be a NULL or invalid handle, and
-        // PopLocalFrame's handle conversion does not null-check on every JDK.
+        // any handle restore path.
         sb.append("    if ((*env)->ExceptionCheck(env)) {\n");
         sb.append("        (void)(*env)->PopLocalFrame(env, NULL);\n");
         sb.append("        neko_handle_restore(&__hsave);\n");
@@ -120,14 +109,14 @@ public final class SignatureDispatcherEmitter {
         else sb.append("        return (").append(retC).append(")0;\n");
         sb.append("    }\n");
 
-        // return + pop
+        // return + restore
         if (ret == 'V') {
             sb.append("    (void)(*env)->PopLocalFrame(env, NULL);\n");
             sb.append("    neko_handle_restore(&__hsave);\n");
             sb.append("    return;\n");
         } else if (ret == 'L') {
             sb.append("    jobject __surviving = (*env)->PopLocalFrame(env, __ret);\n");
-            sb.append("    void *__raw_ret = __surviving == NULL ? NULL : *(void**)__surviving;\n");
+            sb.append("    void *__raw_ret = __surviving == NULL ? NULL : neko_jobject_to_raw(__surviving);\n");
             sb.append("    neko_handle_restore(&__hsave);\n");
             sb.append("    return __raw_ret;\n");
         } else {

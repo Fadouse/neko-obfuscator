@@ -63,6 +63,12 @@ public final class NativeTranslator {
                     selection.method().descriptor(),
                     overloadCounts.getOrDefault(selection.owner().name() + '#' + selection.method().name(), 0) > 1
                 ),
+                jniFunctionName(
+                    selection.owner().name(),
+                    selection.method().name(),
+                    selection.method().descriptor(),
+                    overloadCounts.getOrDefault(selection.owner().name() + '#' + selection.method().name(), 0) > 1
+                ) + "__neko_raw",
                 null,
                 null,
                 selection.method().isStatic(),
@@ -93,6 +99,7 @@ public final class NativeTranslator {
         CType cReturnType = mapType(returnType);
 
         List<CVariable> params = new ArrayList<>();
+        params.add(new CVariable("thread", CType.JOBJECT, 0));
         params.add(new CVariable("env", CType.JOBJECT, 0));
         params.add(new CVariable(method.isStatic() ? "clazz" : "self", method.isStatic() ? CType.JCLASS : CType.JOBJECT, 1));
 
@@ -104,7 +111,7 @@ public final class NativeTranslator {
             argsLocalsSize += argTypes[i].getSize();
         }
 
-        CFunction fn = new CFunction(binding.cFunctionName(), cReturnType, params);
+        CFunction fn = new CFunction(binding.rawFunctionName(), cReturnType, params);
         fn.setMaxStack(Math.max(method.maxStack(), 16));
         fn.setMaxLocals(Math.max(method.maxLocals(), argsLocalsSize));
 
@@ -551,6 +558,7 @@ public final class NativeTranslator {
         String methodName,
         String descriptor,
         String cFunctionName,
+        String rawFunctionName,
         String helperMethodName,
         String helperDescriptor,
         boolean isStatic,

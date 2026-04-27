@@ -26,6 +26,7 @@ import org.objectweb.asm.tree.VarInsnNode;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -429,7 +430,7 @@ class OpcodeTranslatorUnitTest {
         );
         String body = translatedBodySection(source, "Java_pkg_MultiTargetCaller_run");
 
-        assertContains(body, "Java_pkg_MultiTargetHelper_staticValue", "Java_pkg_MultiTargetBase_baseValue", "Java_pkg_MultiTargetFinal_finalValue");
+        assertContains(body, "Java_pkg_MultiTargetHelper_staticValue__neko_raw", "Java_pkg_MultiTargetBase_baseValue__neko_raw", "Java_pkg_MultiTargetFinal_finalValue__neko_raw");
         assertFalse(body.contains("neko_receiver_key("), body);
         assertFalse(body.contains("neko_icache_"), body);
     }
@@ -456,15 +457,16 @@ class OpcodeTranslatorUnitTest {
     }
 
     private static String translatedBodySection(String source) {
-        int functionIndex = source.indexOf("JNIEXPORT ");
-        assertTrue(functionIndex >= 0, () -> "Missing translated function in generated C.\n" + source);
-        return source.substring(functionIndex);
+        Matcher matcher = Pattern.compile("static\\s+\\S+\\s+\\w+__neko_raw\\([^)]*\\) \\{").matcher(source);
+        assertTrue(matcher.find(), () -> "Missing translated raw function in generated C.\n" + source);
+        return source.substring(matcher.start());
     }
 
     private static String translatedBodySection(String source, String functionName) {
-        int functionIndex = source.indexOf("JNIEXPORT jint JNICALL " + functionName);
-        assertTrue(functionIndex >= 0, () -> "Missing translated function `" + functionName + "` in generated C.\n" + source);
-        return source.substring(functionIndex);
+        String rawName = functionName + "__neko_raw";
+        Matcher matcher = Pattern.compile("static\\s+\\S+\\s+" + Pattern.quote(rawName) + "\\([^)]*\\) \\{").matcher(source);
+        assertTrue(matcher.find(), () -> "Missing translated raw function `" + rawName + "` in generated C.\n" + source);
+        return source.substring(matcher.start());
     }
 
     private static TranslationArtifact translateSingleMethodArtifact(ClassNode classNode) {

@@ -189,7 +189,7 @@ public final class CCodeGenerator {
     public String generateSource(List<CFunction> functions, List<NativeMethodBinding> bindings) {
         StringBuilder body = new StringBuilder();
         for (CFunction function : functions) {
-            body.append(renderFunction(function)).append("\n");
+            body.append(renderRawFunction(function)).append("\n");
         }
 
         StringBuilder sb = new StringBuilder();
@@ -228,6 +228,7 @@ public final class CCodeGenerator {
         sb.append("static jboolean neko_resolve_jnihandles(void *jvm);\n");
         sb.append("static void *neko_dlsym(void *h, const char *name);\n\n");
         sb.append(renderResolutionCaches());
+        sb.append(renderRawFunctionPrototypes(bindings));
         sb.append(renderRuntimeSupport());
         sb.append(renderHotSpotSupport());
         sb.append(methodPatcherEmitter.render());
@@ -238,6 +239,7 @@ public final class CCodeGenerator {
         sb.append(renderIcacheDirectStubs());
         sb.append(renderIcacheMetas());
         sb.append(body);
+        sb.append(renderExportWrappers(bindings));
         sb.append(manifestEmitter.renderTables(bindings, signaturePlan));
         sb.append(signatureDispatcherEmitter.render(signaturePlan));
         sb.append(trampolineEmitter.render(signaturePlan));
@@ -260,9 +262,9 @@ public final class CCodeGenerator {
         return sb.toString();
     }
 
-    private String renderFunction(CFunction fn) {
+    private String renderRawFunction(CFunction fn) {
         StringBuilder sb = new StringBuilder();
-        sb.append("JNIEXPORT ").append(fn.returnType().jniName()).append(" JNICALL ").append(fn.name()).append('(');
+        sb.append("static ").append(fn.returnType().jniName()).append(' ').append(fn.name()).append('(');
         for (int i = 0; i < fn.params().size(); i++) {
             if (i > 0) {
                 sb.append(", ");
@@ -280,6 +282,58 @@ public final class CCodeGenerator {
         for (CStatement statement : fn.body()) {
             sb.append(renderStatement(statement));
         }
+        sb.append("}\n");
+        return sb.toString();
+    }
+
+    private String renderRawFunctionPrototypes(List<NativeMethodBinding> bindings) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("// === Raw translated-body prototypes ===\n");
+        for (NativeMethodBinding binding : bindings) {
+            sb.append("static ").append(jniType(Type.getReturnType(binding.descriptor()))).append(' ')
+                .append(binding.rawFunctionName()).append("(void *thread, JNIEnv *env, ")
+                .append(binding.isStatic() ? "jclass clazz" : "jobject self");
+            Type[] args = Type.getArgumentTypes(binding.descriptor());
+            for (int i = 0; i < args.length; i++) {
+                sb.append(", ").append(jniType(args[i])).append(" p").append(i);
+            }
+            sb.append(");\n");
+        }
+        sb.append('\n');
+        return sb.toString();
+    }
+
+    private String renderExportWrappers(List<NativeMethodBinding> bindings) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("// === Exported JNI wrappers ===\n");
+        for (NativeMethodBinding binding : bindings) {
+            sb.append(renderExportWrapper(binding)).append('\n');
+        }
+        return sb.toString();
+    }
+
+    private String renderExportWrapper(NativeMethodBinding binding) {
+        StringBuilder sb = new StringBuilder();
+        Type returnType = Type.getReturnType(binding.descriptor());
+        sb.append("JNIEXPORT ").append(jniType(returnType)).append(" JNICALL ")
+            .append(binding.cFunctionName()).append("(JNIEnv *env, ")
+            .append(binding.isStatic() ? "jclass clazz" : "jobject self");
+        Type[] args = Type.getArgumentTypes(binding.descriptor());
+        for (int i = 0; i < args.length; i++) {
+            sb.append(", ").append(jniType(args[i])).append(" p").append(i);
+        }
+        sb.append(") {\n");
+        if (returnType.getSort() == Type.VOID) {
+            sb.append("    ").append(binding.rawFunctionName()).append("(neko_jni_env_to_thread(env), env, ")
+                .append(binding.isStatic() ? "clazz" : "self");
+        } else {
+            sb.append("    return ").append(binding.rawFunctionName()).append("(neko_jni_env_to_thread(env), env, ")
+                .append(binding.isStatic() ? "clazz" : "self");
+        }
+        for (int i = 0; i < args.length; i++) {
+            sb.append(", p").append(i);
+        }
+        sb.append(");\n");
         sb.append("}\n");
         return sb.toString();
     }
@@ -773,14 +827,14 @@ static void neko_bind_static_field_metadata(JNIEnv *env, jobject *baseSlot, jlon
 
     private String renderIcacheDirectStub(IcacheDirectStubRef stub) {
         StringBuilder sb = new StringBuilder();
-        sb.append("static jvalue ").append(stub.symbol()).append("(JNIEnv *env, jobject receiver, const jvalue *args) {\n");
+        sb.append("static jvalue ").append(stub.symbol()).append("(void *thread, JNIEnv *env, jobject receiver, const jvalue *args) {\n");
         sb.append("    jvalue result = {0};\n");
         if (stub.returnType().getSort() != Type.VOID) {
             sb.append("    result").append(jvalueAccessor(stub.returnType())).append(" = ");
         } else {
             sb.append("    ");
         }
-        sb.append(stub.binding().cFunctionName()).append("(env, receiver");
+        sb.append(stub.binding().rawFunctionName()).append("(thread, env, receiver");
         for (int i = 0; i < stub.args().length; i++) {
             sb.append(", ");
             if (stub.args()[i].getSort() == Type.ARRAY) {
@@ -1928,7 +1982,7 @@ NEKO_FAST_INLINE uintptr_t neko_receiver_key(jobject obj) {
     return *(uintptr_t*)klassAddr;
 }
 
-typedef jvalue (*neko_icache_direct_stub)(JNIEnv *env, jobject receiver, const jvalue *args);
+typedef jvalue (*neko_icache_direct_stub)(void *thread, JNIEnv *env, jobject receiver, const jvalue *args);
 
 typedef struct {
     const char *name;
@@ -2011,6 +2065,7 @@ NEKO_FAST_INLINE jboolean neko_icache_note_miss(JNIEnv *env, neko_icache_site *s
 }
 
 static jvalue neko_icache_dispatch(
+    void *thread,
     JNIEnv *env,
     neko_icache_site *site,
     const neko_icache_meta *meta,
@@ -2026,7 +2081,7 @@ static jvalue neko_icache_dispatch(
         if (receiverKey != 0 && site->target_kind != NEKO_ICACHE_MEGA) {
             if (receiverKey == site->receiver_key) {
                 if (site->target_kind == NEKO_ICACHE_DIRECT_C && site->target != NULL) {
-                    return ((neko_icache_direct_stub)site->target)(env, receiver, args);
+                    return ((neko_icache_direct_stub)site->target)(thread, env, receiver, args);
                 }
                 if (site->target_kind == NEKO_ICACHE_NONVIRT_MID && site->cached_class != NULL && site->target != NULL) {
                     return neko_icache_call_nonvirtual(env, receiver, site->cached_class, (jmethodID)site->target, args, meta != NULL ? meta->desc : NULL);
@@ -2044,7 +2099,7 @@ static jvalue neko_icache_dispatch(
                         }
                         neko_icache_store_direct(env, site, receiverKey, cachedExactClass, (void*)meta->translated_stub);
                         neko_delete_local_ref(env, exactClass);
-                        return meta->translated_stub(env, receiver, args);
+                        return meta->translated_stub(thread, env, receiver, args);
                     }
                     jmethodID exactMid = neko_get_method_id(env, exactClass, meta != NULL ? meta->name : NULL, meta != NULL ? meta->desc : NULL);
                     if (exactMid != NULL && !neko_exception_check(env)) {
@@ -2200,6 +2255,9 @@ static jvalue neko_icache_dispatch(
     private String renderParam(CVariable variable) {
         if ("env".equals(variable.name())) {
             return "JNIEnv *env";
+        }
+        if ("thread".equals(variable.name())) {
+            return "void *thread";
         }
         return variable.declaration();
     }

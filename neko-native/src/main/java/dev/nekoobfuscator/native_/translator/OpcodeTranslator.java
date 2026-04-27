@@ -393,10 +393,10 @@ public final class OpcodeTranslator {
         sb.append("jobject __recv = POP_O(); ");
         sb.append("jmethodID mid = ").append(cachedMethodExpression(mi.owner, mi.name, mi.desc, false)).append("; ");
         if (ret.getSort() == Type.VOID) {
-            sb.append("neko_icache_dispatch(env, &").append(cacheSite).append(", &")
+            sb.append("neko_icache_dispatch(thread, env, &").append(cacheSite).append(", &")
                 .append(metaSite).append(", __recv, mid, __args); ");
         } else {
-            sb.append("jvalue __ic_result = neko_icache_dispatch(env, &").append(cacheSite).append(", &")
+            sb.append("jvalue __ic_result = neko_icache_dispatch(thread, env, &").append(cacheSite).append(", &")
                 .append(metaSite).append(", __recv, mid, __args); ");
             sb.append("if (!neko_exception_check(env)) { ").append(pushForType(ret, "__ic_result" + jvalueAccessor(ret))).append(" } ");
         }
@@ -562,13 +562,13 @@ public final class OpcodeTranslator {
             if (guardExpr != null) {
                 sb.append("if (").append(guardExpr).append(") ");
             }
-            sb.append(binding.cFunctionName()).append("(env, ").append(receiverExpr);
+            sb.append(binding.rawFunctionName()).append("(thread, env, ").append(receiverExpr);
         } else {
             sb.append(jniTypeName(ret)).append(" result = (").append(jniTypeName(ret)).append(")0; ");
             if (guardExpr != null) {
                 sb.append("if (").append(guardExpr).append(") ");
             }
-            sb.append("result = ").append(binding.cFunctionName()).append("(env, ").append(receiverExpr);
+            sb.append("result = ").append(binding.rawFunctionName()).append("(thread, env, ").append(receiverExpr);
         }
         for (int i = 0; i < args.length; i++) {
             sb.append(", arg").append(i);

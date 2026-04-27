@@ -41,9 +41,13 @@ class CCodeGeneratorTest {
         L1Class owner = new L1Class(classNode);
 
         CFunction function = new CFunction(
-            "Java_pkg_ProbeOwner_demo",
+            "Java_pkg_ProbeOwner_demo__neko_raw",
             CType.VOID,
-            List.of(new CVariable("env", CType.JOBJECT, 0), new CVariable("self", CType.JOBJECT, 1))
+            List.of(
+                new CVariable("thread", CType.JOBJECT, 0),
+                new CVariable("env", CType.JOBJECT, 1),
+                new CVariable("self", CType.JOBJECT, 2)
+            )
         );
         function.setMaxStack(0);
         function.setMaxLocals(1);
@@ -53,6 +57,7 @@ class CCodeGeneratorTest {
             owner.name(),
             "demo",
             "()V",
+            "Java_pkg_ProbeOwner_demo",
             function.name(),
             "neko_binding_demo",
             "()V",
@@ -161,9 +166,10 @@ class CCodeGeneratorTest {
     }
 
     private static String translatedBodySection(String source, String functionName) {
-        int functionIndex = source.indexOf("JNIEXPORT jobject JNICALL " + functionName);
-        assertTrue(functionIndex >= 0, () -> "Missing translated function `" + functionName + "` in generated C.\n" + source);
-        return source.substring(functionIndex);
+        String rawName = functionName + "__neko_raw";
+        Matcher matcher = Pattern.compile("static\\s+\\S+\\s+" + Pattern.quote(rawName) + "\\([^)]*\\) \\{").matcher(source);
+        assertTrue(matcher.find(), () -> "Missing translated raw function `" + rawName + "` in generated C.\n" + source);
+        return source.substring(matcher.start());
     }
 
     private static String failure(String needle, String text) {

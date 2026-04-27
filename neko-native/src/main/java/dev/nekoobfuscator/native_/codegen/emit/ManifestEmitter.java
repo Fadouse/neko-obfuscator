@@ -66,7 +66,7 @@ public final class ManifestEmitter {
                 .append(escape(b.ownerInternalName())).append("\", \"")
                 .append(escape(b.methodName())).append("\", \"")
                 .append(escape(b.descriptor())).append("\", (void*)&")
-                .append(b.cFunctionName()).append(", ")
+                .append(b.rawFunctionName()).append(", ")
                 .append(sigId).append("u, ")
                 .append(b.isStatic() ? '1' : '0').append(", NEKO_PATCH_STATE_NONE, 0, 0 },\n");
         }
