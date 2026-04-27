@@ -24,12 +24,27 @@ public final class X86_64SysVTrampoline {
 
     public String render(int sigId, SignaturePlan.Shape shape) {
         StringBuilder sb = new StringBuilder();
-        sb.append(renderI2i(sigId, shape));
+        sb.append(renderI2i(sigId, shape, false));
+        // Path 2 variant: HotSpot's c2i adapter shifts rsp by extraspace before
+        // tail-jumping to _i2i_entry. The interp variant's BB-style anchor
+        // would advertise a sender_sp matching caller_pre_call_rsp only if we
+        // bumped frame_size by extraspace_words; doing so makes
+        // saved_fp_addr = sender_sp - 16 read into the adapter's interpreter
+        // slot region (an arg, not a saved rbp), which then breaks accept's
+        // OopMap iteration with bogus narrow-oop derefs. The Path 2 naked
+        // sidesteps this by publishing a direct caller-frame anchor: GC walks
+        // call_stub's saved JavaCallWrapper anchor and jumps STRAIGHT to
+        // accept's frame, never visiting our BufferBlob, so HotSpot's
+        // sender_for_compiled_frame uses accept's real prologue layout for
+        // both _sp and _fp.
+        if (shape.extraspaceWords() > 0) {
+            sb.append(renderI2i(sigId, shape, true));
+        }
         sb.append(renderC2i(sigId, shape));
         return sb.toString();
     }
 
-    private String renderI2i(int sigId, SignaturePlan.Shape shape) {
+    private String renderI2i(int sigId, SignaturePlan.Shape shape, boolean compiledCallerMode) {
         StringBuilder sb = new StringBuilder();
         char ret = shape.returnKind();
         char[] args = shape.argKinds();
@@ -55,12 +70,20 @@ public final class X86_64SysVTrampoline {
             }
         }
 
-        sb.append("/* sig ").append(sigId).append(" i2i (").append(shape.isStatic() ? "static" : "instance")
+        String fnName = compiledCallerMode
+            ? ("neko_sig_" + sigId + "_i2i_path2")
+            : ("neko_sig_" + sigId + "_i2i");
+        sb.append("/* sig ").append(sigId).append(" ").append(compiledCallerMode ? "i2i_path2" : "i2i")
+          .append(" (").append(shape.isStatic() ? "static" : "instance")
           .append(", args=\"");
         for (char a : args) sb.append(a);
-        sb.append("\", ret=").append(ret).append(") */\n");
+        sb.append("\", ret=").append(ret);
+        if (compiledCallerMode) {
+            sb.append(", extraspace_bytes=").append(shape.extraspaceWords() * 8);
+        }
+        sb.append(") */\n");
         sb.append("__attribute__((naked, used, visibility(\"hidden\")))\n");
-        sb.append("void neko_sig_").append(sigId).append("_i2i(void) {\n");
+        sb.append("void ").append(fnName).append("(void) {\n");
         sb.append("    __asm__ volatile (\n");
         sb.append("        \"pushq %%rbp\\n\"\n");
         sb.append("        \"movq  %%rsp, %%rbp\\n\"\n");
@@ -118,13 +141,37 @@ public final class X86_64SysVTrampoline {
         // This avoids needing libjvm-internal JNIHandles::make_local symbols
         // (which are stripped from JDK 21+ release builds).
         // Args layout to dispatcher: rdi=entry, rsi=thread (=r15), then receiver (if any), then args.
+        //
+        // For compiledCallerMode (Path 2 thunk) we cannot pass interpreter
+        // slot addresses directly, because the rbp-stash below overwrites
+        // *(rbp + 16 + extraspace_bytes) — a slot that lies inside the c2i
+        // adapter's interpreter slot region. If that slot is a ref/receiver
+        // address the dispatcher will later dereference (via JNIHandles::
+        // resolve), the dispatcher would see our stashed rbp as the oop and
+        // either ArrayIndexOutOfBoundsException or assertion-fail in
+        // jni_GetObjectArrayElement. The fix is to spill ref/receiver oop
+        // VALUES to a stable region inside our naked frame (-32(%rbp) and
+        // below) and pass those spill slot addresses to the dispatcher.
         sb.append("        \"movq  %%r15, %%rsi\\n\"\n");
         int gpUsed = 2; // rdi = entry, rsi = thread
         int xmmUsed = 0;
         int extraStackSlot = 0;
+        // Local spill region for compiledCallerMode. Slots at -32(%rbp),
+        // -40(%rbp), ... are unused (above -16 used for return-value saves,
+        // and our 256-byte alignment block extends much further down).
+        int spillBase = -32;
+        int spillIndex = 0;
         if (!shape.isStatic()) {
             int slotOffset = receiverIndex * 8;
-            sb.append("        \"leaq  ").append(slotOffset + 32).append("(%%rbp), %").append(gpReg(gpUsed)).append("\\n\"\n");
+            if (compiledCallerMode) {
+                int spillOff = spillBase - spillIndex * 8;
+                sb.append("        \"movq  ").append(slotOffset + 32).append("(%%rbp), %%rax\\n\"\n");
+                sb.append("        \"movq  %%rax, ").append(spillOff).append("(%%rbp)\\n\"\n");
+                sb.append("        \"leaq  ").append(spillOff).append("(%%rbp), %").append(gpReg(gpUsed)).append("\\n\"\n");
+                spillIndex++;
+            } else {
+                sb.append("        \"leaq  ").append(slotOffset + 32).append("(%%rbp), %").append(gpReg(gpUsed)).append("\\n\"\n");
+            }
             gpUsed++;
         }
         for (int i = 0; i < args.length; i++) {
@@ -142,12 +189,27 @@ public final class X86_64SysVTrampoline {
                     extraStackSlot++;
                 }
             } else if (a == 'L') {
-                // Reference arg: pass slot address as jobject.
+                // Reference arg: pass slot address as jobject. For
+                // compiledCallerMode, spill the oop value to a stable
+                // -N(%rbp) slot first so the rbp-stash on args region is safe.
+                int handleAddrOffset;
+                String handleAddrBaseReg;
+                if (compiledCallerMode) {
+                    int spillOff = spillBase - spillIndex * 8;
+                    sb.append("        \"movq  ").append(slotOffset + 32).append("(%%rbp), %%rax\\n\"\n");
+                    sb.append("        \"movq  %%rax, ").append(spillOff).append("(%%rbp)\\n\"\n");
+                    handleAddrOffset = spillOff;
+                    handleAddrBaseReg = "%%rbp";
+                    spillIndex++;
+                } else {
+                    handleAddrOffset = slotOffset + 32;
+                    handleAddrBaseReg = "%%rbp";
+                }
                 if (gpUsed < 6) {
-                    sb.append("        \"leaq  ").append(slotOffset + 32).append("(%%rbp), %").append(gpReg(gpUsed)).append("\\n\"\n");
+                    sb.append("        \"leaq  ").append(handleAddrOffset).append("(").append(handleAddrBaseReg).append("), %").append(gpReg(gpUsed)).append("\\n\"\n");
                     gpUsed++;
                 } else {
-                    sb.append("        \"leaq  ").append(slotOffset + 32).append("(%%rbp), %%rax\\n\"\n");
+                    sb.append("        \"leaq  ").append(handleAddrOffset).append("(").append(handleAddrBaseReg).append("), %%rax\\n\"\n");
                     sb.append("        \"movq  %%rax, ").append(extraStackSlot * 8).append("(%%rsp)\\n\"\n");
                     extraStackSlot++;
                 }
@@ -163,14 +225,25 @@ public final class X86_64SysVTrampoline {
                 }
             }
         }
-        // Frame anchor: thunk-aware synthetic BufferBlob (frame_size=3) so
-        // sender_sp = rbp+8 + 24 = rbp+32 = caller's pre-call sp; saved fp
-        // at rbp+16 is what the thunk pushed; return pc at rbp+24 is what
-        // the interpreter's prepare_invoke / compiled `call` left on the
-        // stack. NOTE: in the rare path where this i2i thunk is reached via
-        // HotSpot's c2i adapter (extraspace > 0), naked_rbp+32 is shifted
-        // by extraspace and the GC walker reads a wrong sender_pc — that
-        // case is documented in todo.md (microbench-only failure).
+        // Frame anchor: thunk-aware BufferBlob, _frame_size = 3 (or 3 +
+        // extraspace_words for the path2 thunk). anchor_sp = rbp+8 keeps the
+        // BufferBlob visible to the walker; sender_for_entry_frame on
+        // call_stub then walks BB → accept and that step's
+        // update_map_with_saved_link seeds RegisterMap.rbp_location, which
+        // accept's OopMap iteration needs.
+        //
+        // For compiledCallerMode (Path 2) the path2 thunk's BufferBlob has
+        // _frame_size = 3 + extraspace_words, so sender_sp lands on the real
+        // caller_pre_call_rsp. saved_fp_addr (sender_sp - 16) for that case
+        // lies in the c2i adapter's interpreter slot region — by default it
+        // would hold a freshly-written arg value (e.g. 0x4724 on a small int
+        // arg), which propagates into accept._fp and breaks its OopMap. We
+        // therefore stash the thunk's saved rbp (== caller's real rbp value,
+        // i.e. the address of accept's saved-rbp slot) into that slot before
+        // the dispatcher call. We do this AFTER the dispatcher arg setup
+        // (which has already read the slot via &slot+32(rbp)), so the
+        // overwrite of an arg slot is safe — args are no longer needed once
+        // the JNI dispatcher has its addresses.
         sb.append("        \"cmpb $0, g_neko_frame_anchor_ready(%%rip)\\n\"\n");
         sb.append("        \"je   7f\\n\"\n");
         sb.append("        \"movq g_neko_off_last_Java_fp(%%rip), %%r10\\n\"\n");
@@ -182,6 +255,15 @@ public final class X86_64SysVTrampoline {
         sb.append("        \"movq g_neko_off_last_Java_sp(%%rip), %%r10\\n\"\n");
         sb.append("        \"leaq 8(%%rbp), %%r11\\n\"\n");
         sb.append("        \"movq %%r11, (%%r15, %%r10, 1)\\n\"\n");
+        if (compiledCallerMode) {
+            // saved_fp_addr that sender_for_compiled_frame computes is
+            // sender_sp - 16 = (rbp + 8) + (24 + extraspace_bytes) - 16
+            //                = rbp + 16 + extraspace_bytes.
+            // Stash thunk's pushed rbp value (at *(rbp + 16)) into that slot.
+            int extraspaceBytes = shape.extraspaceWords() * 8;
+            sb.append("        \"movq 16(%%rbp), %%r11\\n\"\n");
+            sb.append("        \"movq %%r11, ").append(16 + extraspaceBytes).append("(%%rbp)\\n\"\n");
+        }
         sb.append("        \"7:\\n\"\n");
         // Thread-state transition: _thread_in_Java -> _thread_in_native.
         // r15 holds the JavaThread*; off and state values come from runtime globals.
@@ -233,12 +315,42 @@ public final class X86_64SysVTrampoline {
         sb.append("        \"9:\\n\"\n");
         // Return to interpreter caller: save return pc, restore rsp from the
         // HotSpot-provided sender_sp in r13, and tail-jump to the continuation.
-        sb.append("        \"movq  %%rbp, %%rsp\\n\"\n");
-        sb.append("        \"popq  %%rbp\\n\"\n");
-        sb.append("        \"movq  16(%%rsp), %%r10\\n\"\n");
-        sb.append("        \"movq  (%%rbp), %%rbp\\n\"\n");
-        sb.append("        \"movq  %%r13, %%rsp\\n\"\n");
-        sb.append("        \"jmp   *%%r10\\n\"\n");
+        //
+        // RBP-as-oop hazard (matters only with -XX:-PreserveFramePointer, the
+        // default): C2 may use rbp as a general-purpose register and place an
+        // oop in it across a JavaCall. accept's compiled OopMap then declares
+        // rbp's saved location at saved_fp_addr = sender_sp - 16. During GC
+        // mid-trampoline, the collector dereferences map.rbp_location and
+        // rewrites *(saved_fp_addr) to the relocated oop. We must restore rbp
+        // from the SAME slot the GC updated, otherwise the compiled caller
+        // resumes with a stale (pre-GC) oop in rbp.
+        //
+        // For the BB-anchor (interp) variant: saved_fp_addr = naked_rbp + 16
+        //   (i.e., the slot the thunk's `push rbp` wrote). The existing
+        //   `movq (%rbp), %rbp` after `popq %rbp` reads exactly that slot via
+        //   thunk_rbp_value = naked_rbp + 16, so GC updates flow through.
+        //
+        // For the path2 variant: saved_fp_addr = naked_rbp + 16 + extraspace_bytes.
+        //   We pre-stashed caller's rbp value there before the dispatcher
+        //   call; restore from the same slot here.
+        if (compiledCallerMode) {
+            int extraspaceBytes = shape.extraspaceWords() * 8;
+            // Read GC-updatable caller's rbp from stash slot BEFORE we move rsp.
+            sb.append("        \"movq  ").append(16 + extraspaceBytes).append("(%%rbp), %%r11\\n\"\n");
+            sb.append("        \"movq  %%rbp, %%rsp\\n\"\n");
+            sb.append("        \"popq  %%rbp\\n\"\n");
+            sb.append("        \"movq  16(%%rsp), %%r10\\n\"\n");
+            sb.append("        \"movq  %%r11, %%rbp\\n\"\n");
+            sb.append("        \"movq  %%r13, %%rsp\\n\"\n");
+            sb.append("        \"jmp   *%%r10\\n\"\n");
+        } else {
+            sb.append("        \"movq  %%rbp, %%rsp\\n\"\n");
+            sb.append("        \"popq  %%rbp\\n\"\n");
+            sb.append("        \"movq  16(%%rsp), %%r10\\n\"\n");
+            sb.append("        \"movq  (%%rbp), %%rbp\\n\"\n");
+            sb.append("        \"movq  %%r13, %%rsp\\n\"\n");
+            sb.append("        \"jmp   *%%r10\\n\"\n");
+        }
         sb.append("        :\n        :\n        : \"memory\"\n");
         sb.append("    );\n}\n\n");
         return sb.toString();

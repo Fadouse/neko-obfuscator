@@ -40,6 +40,30 @@ public final class SignaturePlan {
         public int argCount() { return argKinds.length; }
         public boolean isStatic() { return isStatic; }
 
+        /**
+         * HotSpot's c2i adapter (sharedRuntime_x86_64.cpp::gen_c2i_adapter) shifts rsp
+         * by {@code align_up(total_args_passed * 8, 16)} bytes before tail-jumping to
+         * {@code _i2i_entry}. When a JIT-compiled caller reaches our patched method
+         * via a stale IC pointing at the shared adapter (Path 2), our BufferBlob
+         * frame's reported {@code sender_sp} therefore lands {@code extraspace} bytes
+         * below the true {@code caller_pre_call_rsp}, which trips
+         * {@code frame::sender_for_compiled_frame}'s {@code assert(pc != nullptr)}
+         * when the GC walker tries to advance from the compiled caller to its sender.
+         * Returning the byte count (in word units) lets the patcher build a Path-2
+         * specific thunk whose BufferBlob {@code _frame_size} compensates for the
+         * shift, so accept's {@code _sp} matches its real value.
+         *
+         * Returns the EXTRA words on top of the base 3-word thunk frame.
+         */
+        public int extraspaceWords() {
+            int totalArgsPassed = (isStatic ? 0 : 1);
+            for (char a : argKinds) totalArgsPassed += (a == 'J' || a == 'D') ? 2 : 1;
+            if (totalArgsPassed == 0) return 0;
+            int extraspaceBytes = totalArgsPassed * 8;
+            int aligned = (extraspaceBytes + 15) & ~15;
+            return aligned / 8;
+        }
+
         @Override
         public boolean equals(Object o) {
             if (!(o instanceof Shape s)) return false;

@@ -1,7 +1,19 @@
 # NekoObfuscator — Native Patcher Current TODO
 
-> 更新日期：2026-04-26  
+> 更新日期：2026-04-27  
 > 本文件记录当前 main 工作树的真实状态、已完成部分、失败尝试、假设和禁止重复试错的结论。
+
+## 2026-04-27 进度（Path 2 三元 thunk + RBP-as-oop 修复 = obfusjack 完整通过）
+
+- 引入 per-signature `extraspace_words = align_up(total_args_passed * 8, 16) / 8`（参见 `SignaturePlan.Shape.extraspaceWords()`）。
+- 拆分 `_i2i_entry`（Path 2，HotSpot c2i 适配器进我们 thunk）和 `_from_interpreted_entry`（解释器直跳）：前者指向**新增**的 `neko_sig_N_i2i_path2` naked，后者保留原 `neko_sig_N_i2i`。
+- Path 2 naked 改动：
+  - 把 receiver 与 ref 参数 **spill** 到自己的 stack 槽（`-32(%rbp), -40(%rbp), …`），dispatcher 收到的是 spill 槽地址，而不是解释器槽地址；
+  - 在 anchor 发布块尾把 **caller 的 rbp 值**（`*(naked_rbp + 16)`，即 thunk's `push rbp` 写下的值）**stash** 到 `(16 + extraspace_bytes)(%rbp)` —— 这就是 walker 之后会读的 `saved_fp_addr = sender_sp - 16`；
+  - BufferBlob 的 `_frame_size = 3 + extraspace_words`，使 `sender_sp = caller_pre_call_rsp`。
+  - **关键修正**：path 2 的 return tail 必须从 stash slot（`(16 + extraspace_bytes)(%rbp)`）读取 rbp 值再恢复，而不是仍按 path 1 的 `movq (%rbp), %rbp`（那读的是 thunk 的原 saved-rbp 槽，没被 GC 更新）。原因：默认 `-XX:-PreserveFramePointer` 下 C2 把 rbp 当通用寄存器，可能在 callsite 处持有 oop；GC 通过 accept 的 OopMap 把 `*(saved_fp_addr)` 改写为搬移后地址，我们必须从同一个 slot 恢复才能拿到最新地址，否则编译器侧 resume 时 rbp 是 stale oop，下游 sink 写到旧 array → 一次 GC 漏掉一项 → microbench 50000 元素只见 49999（release）/ deopt 阶段 OopMap 上的 narrowOop 槽不是合法 oop（fastdebug）。
+- 这四件事合在一起：`assert(pc != nullptr)`、`Universe::is_in_heap()`、`Streams.toList() End size 49999 < 50000`、fastdebug `oopDesc::is_oop_or_null` 全部修复。
+- **release JDK 21.0.10：obfusjack 完整跑到 `=== All tests completed ===`，5 次连续运行 100% 稳定；`./gradlew :neko-test:test` 全部 6 个 testsuite 49 个 testcase 0 failures 0 errors。**
 
 ## 用户硬约束
 
@@ -12,7 +24,7 @@
 - [x] **运行时逻辑迁移到 native C 层。** HotSpot probing、Unsafe/VM option/array/field offset helpers、manifest discovery 等均在 `JNI_OnLoad` / native runtime 内完成。
 - [x] **HotSpot 集成走 VMStructs。** 通过 `gHotSpotVMStructs` / `gHotSpotVMTypes` / `gHotSpotVMIntConstants` 解析 `Method`、`JavaThread`、`CodeCache`、`CodeHeap`、`CodeBlob`、`JNIHandleBlock` 等布局。
 - [x] **不使用 JVMTI。** 全仓库审计通过：`grep -rEn "jvmti|JVMTI|Agent_OnLoad|Agent_OnAttach|Agent_OnUnload|jvmtiEnv|jvmtiCapabilities|jvmtiEventCallbacks|JVMTI_VERSION|premain|agentmain|jdk\.internal\.agent"` 在所有模块 `src/` 树下零命中。Native runtime 只用 JNI（`JNI_OnLoad`、`GetEnv(JNI_VERSION_1_6)`、`AttachCurrentThread`）+ VMStructs 走 HotSpot 内部布局；不存在 `Agent_OnLoad`、`-agentlib`、`jvmtiEnv*` 任何形态。
-- [ ] **三个 test jar 100% native 覆盖且行为一致：** `TEST.jar`（✅）、`SnakeGame.jar`（✅）、`obfusjack-test21.jar`（❌）。obfusjack 已越过 `oopMap.inline.hpp:124 missing saved register oops reg: rbp` guarantee 失败，但仍在 microbench 阶段触发新 SIGSEGV（详见下文）。
+- [x] **三个 test jar 100% native 覆盖且行为一致：** `TEST.jar`（✅）、`SnakeGame.jar`（✅）、`obfusjack-test21.jar`（✅，2026-04-27 修复）。release JDK 21.0.10 不传任何 flag 完整跑通到 `=== All tests completed ===`。
 - [ ] **跨平台完成：** Windows x64 与 AArch64 SysV 的 trampoline Java 端已写出并编译通过；i2i + c2i 都做完了 anchor publication / thread state / safepoint poll / 与 SysV 一致的 thunk-aware synthetic frame。**剩余依赖**：`MethodPatcherEmitter` 中私有 CodeHeap 的 thunk 字节仍是 x86_64 (`push rbp; mov rsp,rbp; movabs r11; call *r11; pop rbp; ret`)，AArch64 后端运行时需要把它替换成 `stp x29,x30,[sp,#-16]!; mov x29,sp; movz/movk x16,…; blr x16; ldp x29,x30,[sp],#16; ret` 的 8-byte instruction stream。Windows 上 thunk 字节复用 SysV，但生成 libneko.dll 还需要 MinGW / Clang 等支持 `__asm__ volatile (…)` 的工具链，并且 `g_neko_off_*` 等全局符号链接方式不变。
 
 ## 已完成并验证过的部分

@@ -1,7 +1,38 @@
 # NekoObfuscator — Native Trampoline Open Problems
 
-> 最后更新：2026-04-26 (session 末)
+> 最后更新：2026-04-27（**release 上 obfusjack 完整通过**；P1/P5 全部修复）
 > 本文件聚焦“目前还没有干净修复”的具体技术问题：症状、根因、复现命令、已尝试方案与结论、关键内存/寄存器证据。所有结论都以 fastdebug build 的 GDB core 取证为依据。
+
+## 2026-04-27 P5 根因与修复
+
+P5 的真正根因不是 Path 2 stash/spill 副作用，而是 **`-XX:-PreserveFramePointer`（HotSpot 默认）下 C2 把 `rbp` 当通用寄存器，可能在 JavaCall 调用点把 oop 放进 rbp**。复现矩阵：
+
+| 配置 | 结果 |
+| --- | --- |
+| `-Xint` | ✅ 通过 |
+| `-XX:TieredStopAtLevel=1`（C1 only） | ✅ 通过 |
+| `-XX:-TieredCompilation`（C2 only） | ✅ 通过 |
+| `-XX:-Inline` | ✅ 通过 |
+| `-XX:+PreserveFramePointer` | ✅ 通过 |
+| 默认（C1+C2 tiered，无 PreserveFramePointer） | ❌ 49999/50000 |
+
+只有 tiered + 内联且 rbp 可作 oop 这条最全的路径才会触发，说明 bug 是 GC 期间 rbp 中的 oop 被搬移、但我们 trampoline 恢复 rbp 时取的是 thunk 自己 push 的旧地址（GC 没更新），导致 caller resume 时 rbp 为 stale oop。
+
+修复（`X86_64SysVTrampoline.java`）：path 2 i2i return tail 改成从 stash slot（`(16 + extraspace_bytes)(%rbp)`，正是 `saved_fp_addr = sender_sp - 16`）读取最新 caller rbp 值再恢复。GC 通过 accept 的 OopMap 把 `*saved_fp_addr` 重写为搬移后地址，我们读的是同一个 slot，自然拿到 GC 更新后的值。Path 1（解释器路径）走 `movq (%rbp), %rbp`，间接通过 thunk_rbp_value 读 `naked_rbp + 16`（== path 1 的 saved_fp_addr），同样跟 GC 同步，无需改动。
+
+修复后所有 6 个 testsuite 49 testcase pass，release JDK 5 次连跑 obfusjack 100% 稳定。
+
+## 2026-04-27 关键进展
+
+P1 已大幅推进（不再是 immediate 崩溃）：
+- 引入 `g_neko_sig_extraspace_words[]` 与 `g_neko_sig_i2i_path2[]`（per signature）。
+- `Method::_i2i_entry` 现在指向**专门为 Path 2 准备的 i2i thunk**（`neko_sig_N_i2i_path2`），其 `BufferBlob._frame_size = 3 + extraspace_words`。`Method::_from_interpreted_entry` 仍指向原 `neko_sig_N_i2i`（`_frame_size = 3`，无 stash），保证解释器直接路径不受影响。
+- Path 2 naked 内部多两步：(a) 把 receiver / 引用参数 spill 到 `-32(%rbp)`、`-40(%rbp)`、… 这些 naked 自有栈槽，dispatcher 读 spill 槽地址（绕开 args 区被 stash 覆盖）；(b) 在 anchor 发布块尾把 thunk 保存的 rbp 值写到 `(16 + extraspace_bytes)(%rbp)`，正好是 walker 计算出的 `saved_fp_addr = sender_sp - 16`。
+- 合在一起：accept._sp 等于 `caller_pre_call_rsp`（修好 P1 原始 `assert(pc != nullptr)`），同时 accept._fp 指向真实的 saved-rbp 槽（修好 `Universe::is_in_heap` decode 失败）；TEST/SnakeGame 全绿，obfusjack 已能跑过 `Platform threads: 50000 tasks` 这一段（之前在该处第一次崩）。
+
+新出现/未解决的问题（详见 P5）：
+- microbench 的 `lambda$microbenchThreads$10` 用 `IntStream.range(0,50000).mapToObj(...).toList()`，release JDK 抛 `IllegalStateException: End size 49999 is less than fixed size 50000`；
+- fastdebug 同一测试期间触发 `~UncommonTrapBlob` → `Deoptimization::create_vframeArray` → `StackValue::create_stack_value_from_narrowOop_location` 上的 `assert(oopDesc::is_oop_or_null(val))` 失败，该断言读取 accept compiledVFrame 的 expression slot；deopt 时机和我们 trampoline 之前的执行有耦合关系，但具体如何把 accept 的 expression 区污染掉还没定位。
 
 ## 环境
 
@@ -189,6 +220,82 @@ gdb --batch \
     -ex "x/16gx 0x<naked_rbp>" \
     $JAVA /tmp/neko_fd_core
 ```
+
+---
+
+## P5 — [已修复 2026-04-27] microbench 阶段 `IntStream.range(0,50000).mapToObj(::lambda$microbenchThreads$9).toList()` 少 1 个元素 + 同一时刻 fastdebug deopt 断言失败
+
+### 症状
+
+release JDK 21.0.10:
+```
+--- Microbench: Platform vs Virtual Threads ---
+Platform threads: 84 ms  (50000 tasks)
+Exception in thread "main" java.lang.IllegalStateException: End size 49999 is less than fixed size 50000
+    at java.base/java.util.stream.Nodes$FixedNodeBuilder.end(Nodes.java:1241)
+    at java.base/java.util.stream.Sink$ChainedInt.end(Sink.java:293)
+    ...
+    at java.base/java.util.stream.ReferencePipeline.toArray(ReferencePipeline.java:622)
+    at java.base/java.util.stream.ReferencePipeline.toList(ReferencePipeline.java:627)
+```
+
+fastdebug JDK 21u（同一测试位置）：
+```
+Internal Error (stackValue.cpp:145)
+assert(oopDesc::is_oop_or_null(val)) failed: bad oop found at 0x00007f0bee4df360 in_cont: 0 compressed: 0
+V  [libjvm.so+0x18510bb]  StackValue::create_stack_value_from_narrowOop_location(...)+0x38b
+V  [libjvm.so+0x1853765]  StackValue::create_stack_value<RegisterMap>(...)+0x395
+V  [libjvm.so+0x1a5c91d]  compiledVFrame::create_stack_value(ScopeValue*) const+0x10d
+V  [libjvm.so+0x1a5dde0]  compiledVFrame::expressions() const+0x130
+V  [libjvm.so+0x1a5888d]  vframeArrayElement::fill_in(compiledVFrame*, bool)+0x68d
+V  [libjvm.so+0x1a5a2d6]  vframeArray::fill_in(...)+0x66
+V  [libjvm.so+0x1a5a4da]  vframeArray::allocate(...)+0xfa
+V  [libjvm.so+0xb36af9]  Deoptimization::create_vframeArray(...)+0x139
+V  [libjvm.so+0xb373c2]  Deoptimization::fetch_unroll_info_helper(...)+0x572
+V  [libjvm.so+0xb3a83f]  Deoptimization::uncommon_trap(...)+0x2f
+
+Java frames:
+v  ~UncommonTrapBlob 0x00007f0bd7937e41
+J 1004 c2 java.util.stream.IntPipeline$1$1.accept(I)V
+j  java.util.stream.Streams$RangeIntSpliterator.forEachRemaining
+... ForkJoinTask chain ...
+```
+
+### 已知
+
+- `lambda$microbenchThreads$10` 字节码：用 `IntStream.range(0, totalTasks=50000).mapToObj(this::ld9).toList()` 创建 Callable 列表。`ld9` = `lambda$microbenchThreads$9(int)` 静态返回 Callable。
+- 对应的 obfuscated method 签名 `(I)Ljava/util/concurrent/Callable;` static → totalSlots=1, total_args_passed=1, extraspace_bytes=16, extraspace_words=2。
+- accept(I)V 是 java.base 内 stream sink，C2 编译。它 invokedynamic apply 里跳到我们的 trampoline（Path 2）。
+- Path 2 naked 没有 ref 参数（int 是基础类型），所以本签名只走 stash 不走 spill；stash 写到 `rbp + 32` = T_entry+8 = int 槽。dispatcher 早已把 int 值 load 到 rcx，stash 覆盖它无害。返回值 (Callable) 通过 `%rax` + `-8(%rbp)` 槽保存；目前未发现该槽与 stash/spill 冲突。
+- 在 release 上不崩，只是丢了一项；fastdebug 直接挂在 `compiledVFrame::expressions`/`StackValue::create_stack_value_from_narrowOop_location`。这意味着 accept 内某个被 OopMap 标为 narrowOop 的栈槽，被读出来不是合法 oop。
+- 之前 P1 的两次崩（`assert(pc != nullptr)` 和 `Universe::is_in_heap`）都是“GC walker → BB → accept”路径上的；P5 是 `Deoptimization` 路径，accept 自己运行时遇到 uncommon trap 才触发。两者都在同一段 microbench，且在同一行 `IntPipeline$1$1.accept` 上看到，但执行轨迹不同。
+
+### 候选解释（**未验证**）
+
+1. accept 在 deopt 时使用自己的 runtime 状态读 expression 区；如果该区某槽因为我们 trampoline 之前一次执行 corrupt 了 caller 一直没察觉的某个变量（例如 boxed Integer 的某个野值），后续走到这个 PC 时 assertion 失败。
+2. 我们的 spill 区在 `-32(%rbp)` 之后一连串负偏移；如果因为某段 inline asm 的 `subq $256` 后再做了一次 `andq $-16` 让 rsp 漂移到 spill 区上方（理论上不会），spill 写就有可能落在 caller 真正还在用的栈区。需要拿 release dump 验证 `naked_rbp - 32` 这段确实在 `subq $256` 里。
+3. 并行 stream 内部用 ForkJoinPool，多个 worker 同时跑 accept→our_trampoline。我们的 anchor / spill / stash 都依赖 per-thread `r15=JavaThread*` 与 per-thread stack，**理论上**没有共享状态；但 `g_neko_priv_thunks[]`（一个 process-wide 数组）是单线程在 `JNI_OnLoad` 阶段填充的，run 期间只读，应该 race-safe。再次确认。
+
+### 复现
+
+```bash
+# release JDK
+rm -f neko-test/build/test-native/obfusjack-native.jar
+./gradlew :neko-test:test --tests "NativeObfuscationIntegrationTest.nativeObfuscation_obfusjack_reachesCompletion" -q
+
+# fastdebug
+mkdir -p /tmp/neko_fd
+ulimit -c unlimited
+$(pwd)/tmp/openjdk-jdk21u/build/linux-x86_64-server-fastdebug/images/jdk/bin/java \
+  -XX:ErrorFile=/tmp/neko_fd/hs_err_%p.log \
+  -jar neko-test/build/test-native/obfusjack-native.jar
+```
+
+### 未尝试方向
+
+- 在 release 下用 `-XX:+UnlockDiagnosticVMOptions -XX:+TraceDeoptimization -XX:+PrintCompilation` 看 accept 在哪一处被 deopt；如果 PC=某个具体 bci，对照 accept 的 OopMap 找出哪个 stack slot 被认错。
+- 把 spill 区抬高到 `(rsp + 200)` 以下 absolute offsets，确保不和 `subq $256` reserved 区交错。
+- 临时把 `Method::_i2i_entry` 还原成 path-1 thunk（即 `t_i2i_interp = t_i2i_path2`），看 P5 是否消失（用以确认是 Path 2 stash/spill 的副作用，而不是 Path 1 / 解释器路径本身的回归）。
 
 ---
 

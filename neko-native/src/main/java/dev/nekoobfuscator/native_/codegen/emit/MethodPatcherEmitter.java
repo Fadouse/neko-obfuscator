@@ -14,6 +14,10 @@ package dev.nekoobfuscator.native_.codegen.emit;
 public final class MethodPatcherEmitter {
 
     public String render() {
+        return renderPart1() + renderPart2();
+    }
+
+    private static String renderPart1() {
         return """
 /* === Method* layout discovery + entry patcher === */
 #include <dlfcn.h>
@@ -598,6 +602,11 @@ static void *neko_alloc_exec_pages(size_t size) {
 #endif
 }
 
+""";
+    }
+
+    private static String renderPart2() {
+        return """
 static void *neko_alloc_rw_pages(size_t size) {
 #if defined(__linux__) || defined(__APPLE__)
     void *p = mmap(NULL, size, PROT_READ|PROT_WRITE,
@@ -774,10 +783,14 @@ static jboolean neko_priv_heap_register(void) {
  * compiled entries use a c2i thunk so compiled callers keep a walkable callee
  * frame for RegisterMap saved-rbp tracking. */
 
-#define NEKO_PRIV_THUNK_SLOT_MAX 128
+/* Up to 3 thunks per signature (interp i2i with frame_size=3, path-2 i2i with
+ * frame_size=3+extraspace, c2i with frame_size=3). 256 slots covers ~85
+ * signatures, well above any realistic obfuscation manifest. */
+#define NEKO_PRIV_THUNK_SLOT_MAX 256
 
 typedef struct {
     void *real_trampoline;   /* libneko.so trampoline PC */
+    int   frame_size_words;  /* BufferBlob _frame_size for this thunk */
     void *thunk_pc;          /* relocated thunk PC inside our exec heap */
 } neko_priv_thunk_slot_t;
 
@@ -787,7 +800,7 @@ static uint32_t g_neko_priv_thunk_count = 0;
 /* Round x up to multiple of n (n must be power-of-two). */
 #define NEKO_ROUND_UP(x, n) (((x) + ((n) - 1u)) & ~((typeof(x))(n) - 1u))
 
-static void *neko_priv_alloc_thunk(void *real_trampoline) {
+static void *neko_priv_alloc_thunk(void *real_trampoline, int frame_size_words) {
     if (g_neko_priv_heap.codeheap == NULL || !g_neko_priv_heap.registered) return NULL;
     if (real_trampoline == NULL) return NULL;
     if (g_neko_method_layout.bufferblob_vtable == NULL) return NULL;
@@ -866,7 +879,12 @@ static void *neko_priv_alloc_thunk(void *real_trampoline) {
         *(int*)(blob + g_neko_method_layout.off_codeblob_frame_complete_offset) = 4;
     }
     if (g_neko_method_layout.off_codeblob_frame_size > 0) {
-        *(int*)(blob + g_neko_method_layout.off_codeblob_frame_size) = 3;
+        /* Path-2-aware sizing. The base 3 words cover the thunk's own frame
+         * (thunk's saved-rbp + thunk_after_call_pc + naked's saved-rbp). For
+         * thunks installed as _i2i_entry (reached via HotSpot's c2i adapter),
+         * we add the adapter's extraspace shift in word units so
+         * sender_sp = caller_pre_call_rsp matches accept's true _sp. */
+        *(int*)(blob + g_neko_method_layout.off_codeblob_frame_size) = frame_size_words;
     }
 
     /* Thunk bytes: push rbp ; mov rsp,rbp ; movabs $imm64,%r11 ; call *%r11 ;
@@ -900,17 +918,19 @@ static void *neko_priv_alloc_thunk(void *real_trampoline) {
     return code_begin;
 }
 
-static void *neko_priv_get_thunk(void *real_trampoline) {
+static void *neko_priv_get_thunk(void *real_trampoline, int frame_size_words) {
     if (real_trampoline == NULL) return NULL;
     for (uint32_t i = 0; i < g_neko_priv_thunk_count; i++) {
-        if (g_neko_priv_thunks[i].real_trampoline == real_trampoline) {
+        if (g_neko_priv_thunks[i].real_trampoline == real_trampoline
+            && g_neko_priv_thunks[i].frame_size_words == frame_size_words) {
             return g_neko_priv_thunks[i].thunk_pc;
         }
     }
     if (g_neko_priv_thunk_count >= NEKO_PRIV_THUNK_SLOT_MAX) return NULL;
-    void *thunk = neko_priv_alloc_thunk(real_trampoline);
+    void *thunk = neko_priv_alloc_thunk(real_trampoline, frame_size_words);
     if (thunk == NULL) return NULL;
     g_neko_priv_thunks[g_neko_priv_thunk_count].real_trampoline = real_trampoline;
+    g_neko_priv_thunks[g_neko_priv_thunk_count].frame_size_words = frame_size_words;
     g_neko_priv_thunks[g_neko_priv_thunk_count].thunk_pc = thunk;
     g_neko_priv_thunk_count++;
     return thunk;
@@ -1193,29 +1213,56 @@ static jboolean neko_patch_method_entry(void *method_star, void *manifest_entry)
             entry->signature_id, entry->owner_internal, entry->method_name, entry->method_desc);
         return JNI_FALSE;
     }
-    /* Interpreter-side calls publish the real caller frame directly. Compiled
-     * callers need our c2i behind a CodeHeap BufferBlob thunk so HotSpot's
-     * compiled sender walk records the saved-rbp slot for RegisterMap. */
-    void *i2i = real_i2i;
-    void *c2i = real_c2i;
+    /* Three Method entry-point fields, three thunks:
+     *   _from_interpreted_entry  -> t_i2i_interp (BB-anchor, BufferBlob
+     *       walker visits our trampoline frame; works because interpreter
+     *       does not shift rsp before the jmp).
+     *   _from_compiled_entry     -> t_c2i (BB-anchor, frame_size=3; reached
+     *       only by direct-resolve callers, never by HotSpot's shared c2i
+     *       adapter, so no extraspace concern).
+     *   _i2i_entry               -> t_i2i_path2 (direct-anchor naked) when
+     *       the signature has args; otherwise reuses t_i2i_interp.
+     *
+     * The Path 2 hazard: HotSpot's c2i adapter at
+     *   sharedRuntime_x86_64.cpp::gen_c2i_adapter
+     * `pop rax; sub rsp, extraspace; push rax` then `jmp _i2i_entry` for
+     * IC-resolved stale call sites. The BB-anchor scheme cannot reconcile
+     * accept._sp (needs sender_sp = caller_pre_call_rsp) and accept._fp
+     * (needs saved_fp_addr = thunk's saved-rbp slot) simultaneously since
+     * sender_sp - saved_fp_addr is fixed at 16 but the slots differ by
+     * 16 + extraspace. The path2 naked therefore publishes a DIRECT
+     * caller-frame anchor (last_Java_pc = post_call_pc, last_Java_fp =
+     * caller's saved rbp value, last_Java_sp = caller_pre_call_rsp) so
+     * call_stub's saved JavaCallWrapper anchor jumps the GC walker
+     * straight to accept's real frame, bypassing our BufferBlob.
+     */
     if (!g_neko_priv_heap.registered) {
         NEKO_PATCH_LOG("patch refused: private CodeHeap not registered for %s.%s%s",
             entry->owner_internal, entry->method_name, entry->method_desc);
         return JNI_FALSE;
     }
-    void *t_i2i = neko_priv_get_thunk(real_i2i);
-    void *t_c2i = neko_priv_get_thunk(real_c2i);
-    if (t_i2i == NULL || t_c2i == NULL) {
+    int extraspace_words = (int)g_neko_sig_extraspace_words[entry->signature_id];
+    void *real_i2i_path2 = (extraspace_words > 0) ? g_neko_sig_i2i_path2[entry->signature_id] : NULL;
+    void *t_i2i_interp = neko_priv_get_thunk(real_i2i, 3);
+    /* path2 thunk: BufferBlob frame_size = 3 + extraspace_words so
+     * sender_sp = caller_pre_call_rsp; the path2 naked also stashes its
+     * pushed rbp into the slot saved_fp_addr will read so accept._fp
+     * resolves to the address of accept's saved-rbp slot. */
+    void *t_i2i_path2  = (real_i2i_path2 != NULL)
+        ? neko_priv_get_thunk(real_i2i_path2, 3 + extraspace_words)
+        : t_i2i_interp;
+    void *t_c2i        = neko_priv_get_thunk(real_c2i, 3);
+    if (t_i2i_interp == NULL || t_i2i_path2 == NULL || t_c2i == NULL) {
         NEKO_PATCH_LOG("patch refused: thunk allocation failed for sig=%u %s.%s%s",
             entry->signature_id, entry->owner_internal, entry->method_name, entry->method_desc);
         return JNI_FALSE;
     }
-    i2i = t_i2i;
-    c2i = t_c2i;
-    __atomic_store_n((void**)((uint8_t*)method_star + g_neko_method_layout.off_method_i2i_entry), i2i, __ATOMIC_RELEASE);
-    __atomic_store_n((void**)((uint8_t*)method_star + g_neko_method_layout.off_method_from_interpreted_entry), i2i, __ATOMIC_RELEASE);
-    __atomic_store_n((void**)((uint8_t*)method_star + g_neko_method_layout.off_method_from_compiled_entry), c2i, __ATOMIC_RELEASE);
-    NEKO_PATCH_LOG("patched %s.%s%s sig=%u method=%p", entry->owner_internal, entry->method_name, entry->method_desc, entry->signature_id, method_star);
+    __atomic_store_n((void**)((uint8_t*)method_star + g_neko_method_layout.off_method_i2i_entry), t_i2i_path2, __ATOMIC_RELEASE);
+    __atomic_store_n((void**)((uint8_t*)method_star + g_neko_method_layout.off_method_from_interpreted_entry), t_i2i_interp, __ATOMIC_RELEASE);
+    __atomic_store_n((void**)((uint8_t*)method_star + g_neko_method_layout.off_method_from_compiled_entry), t_c2i, __ATOMIC_RELEASE);
+    NEKO_PATCH_LOG("patched %s.%s%s sig=%u method=%p extraspace_words=%d path2=%p",
+        entry->owner_internal, entry->method_name, entry->method_desc,
+        entry->signature_id, method_star, extraspace_words, real_i2i_path2);
     return JNI_TRUE;
 }
 

@@ -25,6 +25,9 @@ public final class TrampolineEmitter {
         for (int i = 0; i < plan.shapes().size(); i++) {
             sb.append("extern void neko_sig_").append(i).append("_i2i(void);\n");
             sb.append("extern void neko_sig_").append(i).append("_c2i(void);\n");
+            if (plan.shapes().get(i).extraspaceWords() > 0) {
+                sb.append("extern void neko_sig_").append(i).append("_i2i_path2(void);\n");
+            }
         }
         /* struct neko_sig_entry is forward-declared in CCodeGenerator's prelude. */
         sb.append("__attribute__((visibility(\"hidden\"))) const struct neko_sig_entry g_neko_sig_table[] = {\n");
@@ -34,7 +37,27 @@ public final class TrampolineEmitter {
         if (plan.shapes().isEmpty()) sb.append("    { NULL, NULL }\n");
         sb.append("};\n");
         sb.append("__attribute__((visibility(\"hidden\"))) const uint32_t g_neko_sig_table_count = ")
-            .append(plan.shapes().size()).append("u;\n\n");
+            .append(plan.shapes().size()).append("u;\n");
+        // Per-signature extraspace words. Used by the patcher to size the
+        // Path-2-specific BufferBlob so accept._sp = caller_pre_call_rsp.
+        sb.append("__attribute__((visibility(\"hidden\"))) const uint32_t g_neko_sig_extraspace_words[] = {\n");
+        for (int i = 0; i < plan.shapes().size(); i++) {
+            sb.append("    ").append(plan.shapes().get(i).extraspaceWords()).append("u,\n");
+        }
+        if (plan.shapes().isEmpty()) sb.append("    0u\n");
+        sb.append("};\n");
+        // Per-signature direct-anchor (Path 2) i2i naked. NULL if the
+        // signature has zero args (no extraspace shift, BB-style i2i works).
+        sb.append("__attribute__((visibility(\"hidden\"))) void * const g_neko_sig_i2i_path2[] = {\n");
+        for (int i = 0; i < plan.shapes().size(); i++) {
+            if (plan.shapes().get(i).extraspaceWords() > 0) {
+                sb.append("    (void*)&neko_sig_").append(i).append("_i2i_path2,\n");
+            } else {
+                sb.append("    NULL,\n");
+            }
+        }
+        if (plan.shapes().isEmpty()) sb.append("    NULL\n");
+        sb.append("};\n\n");
 
         sb.append("#if defined(__x86_64__) && (defined(__linux__) || defined(__APPLE__))\n");
         for (int i = 0; i < plan.shapes().size(); i++) sb.append(x86_64SysV.render(i, plan.shapes().get(i)));
