@@ -528,7 +528,19 @@ public final class OpcodeTranslator {
         if (opcode == Opcodes.INVOKESTATIC) {
             if ("java/lang/invoke/MethodHandles".equals(mi.owner) && "lookup".equals(mi.name) && "()Ljava/lang/invoke/MethodHandles$Lookup;".equals(mi.desc)) {
                 String callerClass = currentMethodStatic ? "clazz" : "neko_fast_get_object_class(thread, self)";
-                return "{ jclass __callerCls = " + callerClass + "; jobject __lookup = __callerCls == NULL ? NULL : neko_lookup_for_jclass(env, __callerCls); if (!neko_exception_check(env)) { PUSH_O(__lookup); } }";
+                String privateLookupDesc = "(Ljava/lang/Class;Ljava/lang/invoke/MethodHandles$Lookup;)Ljava/lang/invoke/MethodHandles$Lookup;";
+                String dispatcher = codeGenerator.registerInvokeShape(true, 'L', new char[] { 'L', 'L' });
+                return "{ jclass __callerCls = " + callerClass + "; "
+                    + "jclass __lookupCls = " + cachedClassExpression("java/lang/invoke/MethodHandles$Lookup") + "; "
+                    + "jfieldID __implFid = " + cachedFieldExpression("java/lang/invoke/MethodHandles$Lookup", "IMPL_LOOKUP", "Ljava/lang/invoke/MethodHandles$Lookup;", true) + "; "
+                    + "jobject __implLookup = neko_fast_get_static_object_field(thread, env, __lookupCls, __implFid, "
+                    + codeGenerator.staticFieldBaseSlotName("java/lang/invoke/MethodHandles$Lookup", "IMPL_LOOKUP", "Ljava/lang/invoke/MethodHandles$Lookup;", true) + ", "
+                    + codeGenerator.staticFieldOffsetSlotName("java/lang/invoke/MethodHandles$Lookup", "IMPL_LOOKUP", "Ljava/lang/invoke/MethodHandles$Lookup;", true) + "); "
+                    + "jvalue __lookupArgs[2]; __lookupArgs[0].l = __callerCls; __lookupArgs[1].l = __implLookup; "
+                    + "jvalue __lookupRet = " + dispatcher + "(thread, env, "
+                    + cachedMethodPtrExpression("java/lang/invoke/MethodHandles", "privateLookupIn", privateLookupDesc, true) + ", "
+                    + cachedMethodIEntryExpression("java/lang/invoke/MethodHandles", "privateLookupIn", privateLookupDesc, true)
+                    + ", NULL, __lookupArgs); if (!neko_exception_check(env)) { PUSH_O(__lookupRet.l); } }";
             }
             if ("java/lang/Thread".equals(mi.owner) && "sleep".equals(mi.name) && "(J)V".equals(mi.desc)) {
                 String dispatcher = codeGenerator.registerInvokeShape(true, 'V', new char[] { 'J' });
@@ -562,7 +574,7 @@ public final class OpcodeTranslator {
             if ("java/lang/Throwable".equals(mi.owner) && "getStackTrace".equals(mi.name) && "()[Ljava/lang/StackTraceElement;".equals(mi.desc)) {
                 return "{ jobject obj = POP_O(); if (obj == NULL) { "
                     + raiseImplicitException("java/lang/NullPointerException")
-                    + "; } else { jobjectArray __trace = neko_shadow_stack_trace(env); if (!neko_exception_check(env)) { PUSH_O(__trace); } } }";
+                    + "; } else { jobjectArray __trace = neko_shadow_stack_trace(thread, env); if (!neko_exception_check(env)) { PUSH_O(__trace); } } }";
             }
             if ("java/util/concurrent/atomic/AtomicLong".equals(mi.owner) && "addAndGet".equals(mi.name) && "(J)J".equals(mi.desc)) {
                 return "{ jlong __delta = POP_L(); jobject obj = POP_O(); if (obj == NULL) { "
@@ -669,8 +681,7 @@ public final class OpcodeTranslator {
             return intrinsic;
         }
         NativeMethodBinding binding = translatedBindings.get(bindingKey(mi.owner, mi.name, mi.desc));
-        if (binding != null && binding.isStatic()
-            && (currentOwnerInternalName == null || !currentOwnerInternalName.contains("$NekoLambda$"))) {
+        if (binding != null && binding.isStatic()) {
             return translateDirectInvoke(mi, binding, true, false);
         }
 
@@ -899,7 +910,9 @@ public final class OpcodeTranslator {
         if (binding == null) {
             return false;
         }
-        if (currentOwnerInternalName != null && currentOwnerInternalName.contains("$NekoLambda$")) {
+        if (currentOwnerInternalName != null
+            && currentOwnerInternalName.contains("$NekoLambda$")
+            && opcode != Opcodes.INVOKESTATIC) {
             return false;
         }
         return switch (opcode) {
@@ -915,7 +928,7 @@ public final class OpcodeTranslator {
         String classLookupName = classLookupName(desc);
         if (classLookupName == null) {
             codeGenerator.registerOwnerPrimitiveClassReference(currentOwnerInternalName, desc);
-            return "neko_bound_class(env, " + codeGenerator.primitiveClassSlotName(desc) + ", \"" + cStringLiteral(desc) + "\")";
+            return "neko_bound_class(thread, env, " + codeGenerator.primitiveClassSlotName(desc) + ", \"" + cStringLiteral(desc) + "\")";
         }
         if (classLookupName.equals(currentOwnerInternalName)) {
             return "neko_bound_current_owner_class(thread, env, " + codeGenerator.classSlotName(classLookupName)
@@ -1389,7 +1402,7 @@ public final class OpcodeTranslator {
 
     private String cachedClassExpression(String owner) {
         codeGenerator.registerOwnerClassReference(currentOwnerInternalName, owner);
-        return "neko_bound_class(env, " + classCacheVar(owner) + ", \"" + cStringLiteral(owner) + "\")";
+        return "neko_bound_class(thread, env, " + classCacheVar(owner) + ", \"" + cStringLiteral(owner) + "\")";
     }
 
     private String cachedMethodExpression(String owner, String name, String desc, boolean isStatic) {
@@ -1447,7 +1460,7 @@ public final class OpcodeTranslator {
     private String cachedStringExpression(String value) {
         String cacheVar = stringCacheVar(value);
         codeGenerator.registerOwnerStringReference(currentOwnerInternalName, value, cacheVar);
-        return "neko_bound_string(thread, env, &" + cacheVar + ", \"" + cStringLiteral(value) + "\")";
+        return "neko_bound_string(thread, env, &" + cacheVar + ", &" + cacheVar + "_oop, \"" + cStringLiteral(value) + "\")";
     }
 
     private String stringCacheVar(String value) {

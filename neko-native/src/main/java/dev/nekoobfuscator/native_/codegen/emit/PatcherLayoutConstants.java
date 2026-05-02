@@ -18,7 +18,7 @@ public final class PatcherLayoutConstants {
     public static final int OFF_IS_STATIC = 36;
     public static final int OFF_PATCH_STATE = 37;
     /** Byte offset of {@code owner_class_global_ref} within {@code NekoManifestMethod}.
-     *  Set once at JNI_OnLoad time so the per-call dispatcher can hand a stable
-     *  jclass to the impl_fn without crossing the JNI boundary via FindClass. */
+     *  Set once at load time so the per-call dispatcher can hand a stable
+     *  owner mirror to the impl_fn without crossing the JNI function table. */
     public static final int OFF_OWNER_CLASS_GLOBAL = 40;
 }

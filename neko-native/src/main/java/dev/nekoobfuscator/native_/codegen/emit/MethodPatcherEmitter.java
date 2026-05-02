@@ -87,8 +87,8 @@ typedef struct {
     ptrdiff_t off_tlab_end;
     size_t    sizeof_JNIHandleBlock;
     int32_t   jnih_block_capacity;
-    /* Direct read of the pending exception so the dispatcher can substitute
-     * (*env)->ExceptionCheck() without a JNI call after impl_fn returns.
+    /* Direct read of the pending exception so the dispatcher can check
+     * JavaThread::_pending_exception without a JNI call after impl_fn returns.
      * VMStructs exposes Thread::_pending_exception as a stable field. */
     ptrdiff_t off_thread_pending_exception;
     /* === CodeCache / CodeHeap / VirtualSpace / GrowableArray / CodeBlob ===
@@ -285,6 +285,7 @@ __attribute__((visibility("hidden"))) jboolean  g_neko_frame_anchor_ready = JNI_
 __attribute__((visibility("hidden"))) ptrdiff_t g_neko_off_thread_active_handles = 0;
 __attribute__((visibility("hidden"))) ptrdiff_t g_neko_off_jnih_block_top      = 0;
 __attribute__((visibility("hidden"))) ptrdiff_t g_neko_off_jnih_block_handles  = 0;
+__attribute__((visibility("hidden"))) ptrdiff_t g_neko_off_jnih_block_next     = 0;
 __attribute__((visibility("hidden"))) int32_t   g_neko_jnih_block_capacity     = 32;
 __attribute__((visibility("hidden"))) jboolean  g_neko_handle_push_ready = JNI_FALSE;
 __attribute__((visibility("hidden"))) ptrdiff_t g_neko_off_thread_tlab = 0;
@@ -1815,6 +1816,55 @@ static jboolean neko_codecache_walk(void) {
 
     private static String renderPart3() {
         return """
+static jboolean neko_thread_state_matches(int32_t state) {
+    return (g_neko_method_layout.thread_state_in_java != 0 && state == g_neko_method_layout.thread_state_in_java)
+        || (g_neko_method_layout.thread_state_in_native != 0 && state == g_neko_method_layout.thread_state_in_native)
+        || (g_neko_method_layout.thread_state_in_native_trans != 0 && state == g_neko_method_layout.thread_state_in_native_trans);
+}
+
+static jboolean neko_plausible_vm_pointer(void *ptr) {
+    uintptr_t v = (uintptr_t)ptr;
+    return v == 0u || (v > 0x10000u && (v & (uintptr_t)(sizeof(void*) - 1u)) == 0u);
+}
+
+static ptrdiff_t neko_derive_jni_environment_offset(JNIEnv *env) {
+    if (env == NULL || g_neko_jni_functions_table == NULL || *(void**)env != g_neko_jni_functions_table) {
+        return 0;
+    }
+    for (ptrdiff_t off = (ptrdiff_t)sizeof(void*); off < 0x10000; off += (ptrdiff_t)sizeof(void*)) {
+        char *thread = (char*)env - off;
+        int score = 0;
+        if (g_neko_method_layout.off_thread_state > 0) {
+            int32_t state = *(int32_t*)(thread + g_neko_method_layout.off_thread_state);
+            if (!neko_thread_state_matches(state)) continue;
+            score += 2;
+        }
+        if (g_neko_method_layout.off_thread_tlab > 0
+            && g_neko_method_layout.off_tlab_top >= 0
+            && g_neko_method_layout.off_tlab_end >= 0) {
+            char *tlab = thread + g_neko_method_layout.off_thread_tlab;
+            void *top = *(void**)(tlab + g_neko_method_layout.off_tlab_top);
+            void *end = *(void**)(tlab + g_neko_method_layout.off_tlab_end);
+            if (top == NULL || end == NULL) continue;
+            if ((uintptr_t)top > (uintptr_t)end) continue;
+            if ((uintptr_t)end - (uintptr_t)top > (uintptr_t)(256u * 1024u * 1024u)) continue;
+            score += 2;
+        }
+        if (g_neko_method_layout.off_thread_pending_exception > 0) {
+            void *pending = *(void**)(thread + g_neko_method_layout.off_thread_pending_exception);
+            if (!neko_plausible_vm_pointer(pending)) continue;
+            score += 1;
+        }
+        if (g_neko_method_layout.off_thread_active_handles > 0) {
+            void *handles = *(void**)(thread + g_neko_method_layout.off_thread_active_handles);
+            if (!neko_plausible_vm_pointer(handles)) continue;
+            if (handles != NULL) score += 1;
+        }
+        if (score >= 4) return off;
+    }
+    return 0;
+}
+
 static jboolean neko_method_layout_init(JNIEnv *env) {
     if (g_neko_method_layout.initialized) return g_neko_method_layout.usable;
     g_neko_method_layout.initialized = JNI_TRUE;
@@ -1944,26 +1994,16 @@ static jboolean neko_method_layout_init(JNIEnv *env) {
         return JNI_FALSE;
     }
     /* VMStructs only registers JavaThread::_jni_environment under JVMCI.
-     * Without it, the dispatcher cannot recover JNIEnv* without a JNI
-     * GetEnv() round-trip — which violates the no-runtime-JNI rule. Derive
-     * the offset directly: r15 holds JavaThread* on x86_64 SysV (HotSpot
-     * convention), env is a pointer to the embedded _jni_environment field,
-     * so off = (char*)env - (char*)r15. Done once at JNI_OnLoad. */
+     * Without it, derive the offset from the JNIEnv* by validating nearby
+     * Thread/JavaThread fields already recovered from VMStructs. This keeps
+     * the dispatcher and neko_exception_check on direct field loads only. */
     if (g_neko_method_layout.off_thread_jni_environment <= 0 && env != NULL) {
-        /* Use the thread-register snapshot captured at JNI_OnLoad entry.
-         * Reading r15 here would be unreliable: clang freely reassigns r15
-         * to local variables once we are deep in the C code. */
-        void *jt = g_neko_jni_onload_thread_reg;
-        if (jt != NULL) {
-            ptrdiff_t derived = (ptrdiff_t)((char*)env - (char*)jt);
-            if (derived > 0 && derived < 0x10000) {
-                g_neko_method_layout.off_thread_jni_environment = derived;
-                NEKO_PATCH_LOG("derived off_thread_jni_environment=%td via thread_reg=%p env=%p",
-                    derived, jt, (void*)env);
-            } else {
-                NEKO_PATCH_LOG("derived off_thread_jni_environment unreasonable: derived=%td jt=%p env=%p",
-                    derived, jt, (void*)env);
-            }
+        ptrdiff_t derived = neko_derive_jni_environment_offset(env);
+        if (derived > 0) {
+            g_neko_method_layout.off_thread_jni_environment = derived;
+            NEKO_PATCH_LOG("derived off_thread_jni_environment=%td via env=%p", derived, (void*)env);
+        } else {
+            NEKO_PATCH_LOG("could not derive off_thread_jni_environment via env=%p", (void*)env);
         }
     }
     NEKO_PATCH_LOG("offsets: af=%td code=%td i2i=%td fi=%td fc=%td flags=%td af_sz=%zu",
@@ -2021,6 +2061,7 @@ static jboolean neko_method_layout_init(JNIEnv *env) {
     g_neko_off_thread_active_handles = g_neko_method_layout.off_thread_active_handles;
     g_neko_off_jnih_block_top        = g_neko_method_layout.off_jnih_block_top;
     g_neko_off_jnih_block_handles    = g_neko_method_layout.off_jnih_block_handles;
+    g_neko_off_jnih_block_next       = g_neko_method_layout.off_jnih_block_next;
     g_neko_off_thread_pending_exception = g_neko_method_layout.off_thread_pending_exception;
     g_neko_handle_push_ready =
         (g_neko_off_thread_active_handles > 0

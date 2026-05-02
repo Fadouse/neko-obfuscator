@@ -17,12 +17,10 @@ package dev.nekoobfuscator.native_.codegen.emit;
  *       {@code JavaThread::_active_handles->_top}/{@code _handles}.</li>
  *   <li>Pending exception detection reads
  *       {@code JavaThread::_pending_exception} directly when VMStructs has
- *       published the offset, replacing {@code (*env)->ExceptionCheck}.</li>
+ *       published the offset.</li>
  *   <li>For static methods, {@code jclass owner} is taken from the
  *       per-binding {@code owner_class_global_ref} cached at
- *       {@code JNI_OnLoad} time — no {@code FindClass} per call (the
- *       biggest single perf win, since {@code jni_FindClass} traverses
- *       the loader hierarchy and acquires class-loading locks).</li>
+ *       {@code JNI_OnLoad} time through native class metadata.</li>
  *   <li>For reference returns, the raw oop is recovered via a tag-aware
  *       deref — JNI globals carry low-bit tags (0x1 weak, 0x2 strong)
  *       that must be masked before dereferencing the slot, mirroring
@@ -83,12 +81,15 @@ public final class SignatureDispatcherEmitter {
         // jobject slots). restore also unlinks any JNIHandleBlock chain
         // extension performed by nested native/JNI allocations.
         sb.append("    neko_handle_save_t __hsave;\n");
+        sb.append("    neko_handle_save_t *__prev_hsave;\n");
         sb.append("    neko_handle_save(thread, &__hsave);\n");
+        sb.append("    __prev_hsave = g_neko_active_handle_save;\n");
+        sb.append("    g_neko_active_handle_save = &__hsave;\n");
+        sb.append("    neko_bind_manifest_owner_strings(thread, env, entry->owner_internal);\n");
 
         if (isStatic) {
-            // Cached global ref captured at JNI_OnLoad (NewGlobalRef on
-            // FindClass). No per-call FindClass.
-            sb.append("    jclass owner_cls = (jclass)entry->owner_class_global_ref;\n");
+            // Cached owner mirror captured at JNI_OnLoad from native class metadata.
+            sb.append("    jclass owner_cls = (jclass)neko_direct_oop_to_handle(thread, entry->owner_class_global_ref);\n");
         } else {
             sb.append("    void *__recv_oop = raw_recv_slot != NULL ? *(void**)raw_recv_slot : NULL;\n");
             sb.append("    jobject self = (jobject)neko_handle_push(thread, __recv_oop);\n");
@@ -131,6 +132,7 @@ public final class SignatureDispatcherEmitter {
         sb.append("    int __pending = (*(void**)((char*)thread + g_neko_off_thread_pending_exception) != NULL);\n");
         sb.append("    if (__pending) {\n");
         sb.append("        neko_handle_restore(&__hsave);\n");
+        sb.append("        g_neko_active_handle_save = __prev_hsave;\n");
         if (ret == 'V') sb.append("        return;\n");
         else if (ret == 'L') sb.append("        return NULL;\n");
         else sb.append("        return (").append(retC).append(")0;\n");
@@ -139,14 +141,17 @@ public final class SignatureDispatcherEmitter {
         // return + restore
         if (ret == 'V') {
             sb.append("    neko_handle_restore(&__hsave);\n");
+            sb.append("    g_neko_active_handle_save = __prev_hsave;\n");
             sb.append("    return;\n");
         } else if (ret == 'L') {
             sb.append("    void *__raw_ret = NULL;\n");
             sb.append("    if (__ret != NULL) __raw_ret = neko_handle_oop(__ret);\n");
             sb.append("    neko_handle_restore(&__hsave);\n");
+            sb.append("    g_neko_active_handle_save = __prev_hsave;\n");
             sb.append("    return __raw_ret;\n");
         } else {
             sb.append("    neko_handle_restore(&__hsave);\n");
+            sb.append("    g_neko_active_handle_save = __prev_hsave;\n");
             sb.append("    return (").append(retC).append(")__ret;\n");
         }
         sb.append("}\n\n");

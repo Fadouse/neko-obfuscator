@@ -100,8 +100,16 @@ class CCodeGeneratorTest {
         assertTrue(source.contains("static inline void neko_raise_implicit_exception(void *thread, JNIEnv *env, jclass cls, void *ctor_method, void *ctor_entry"));
         assertFalse(source.contains("static inline jint neko_throw("), source);
         assertFalse(source.contains("static inline jint neko_throw_new("), source);
-        assertFalse(source.contains("NEKO_JNI_FN_PTR(env, 13, jint, jthrowable)"), source);
-        assertFalse(source.contains("NEKO_JNI_FN_PTR(env, 14, jint, jclass, const char*)"), source);
+        assertFalse(source.contains("NEKO_JNI_FN_PTR"), source);
+        assertFalse(source.contains("neko_jni_fn"), source);
+        assertFalse(source.contains("return NEKO_JNI_FN_PTR(env, 228"), source);
+        assertFalse(source.contains("neko_new_global_ref("), source);
+        assertFalse(source.contains("neko_delete_local_ref("), source);
+        assertFalse(source.contains("neko_find_class("), source);
+        assertFalse(source.contains("neko_get_method_id("), source);
+        assertFalse(source.contains("neko_new_object_array("), source);
+        assertFalse(source.contains("neko_string_concat2("), source);
+        assertFalse(source.contains("neko_string_concat_string("), source);
         assertTrue(source.contains("off_objarrayklass_element_klass"), source);
         assertTrue(source.contains("NEKO_FAST_INLINE jobject neko_fast_alloc_object(void *thread, JNIEnv *env, jclass cls)"), source);
         assertTrue(source.contains("off_klass_layout_helper"), source);
@@ -197,7 +205,8 @@ class CCodeGeneratorTest {
         assertTrue(source.contains("neko_select_oop_field_load_barrier();"), () -> source);
         assertFalse(source.contains("switch (g_neko_gc_barrier_kind)"), () -> source);
         assertFalse(source.contains("static inline jobject neko_get_object_field"), () -> source);
-        assertTrue(source.contains("neko_bind_string_slot(thread, env, &g_str_0, \"hello-bind\");"), () -> source);
+        assertTrue(source.contains("(void)neko_bind_string_slot(thread, env, &g_str_0, &g_str_0_oop, \"hello-bind\");"), () -> source);
+        assertTrue(bodySection.contains("neko_bound_string(thread, env, &g_str_0, &g_str_0_oop, \"hello-bind\")"), () -> bodySection);
         assertTrue(source.contains("neko_bind_primitive_class_slot(env,"), () -> source);
         assertTrue(source.contains("neko_call_stub_guarded(&__stub_args);"), () -> source);
         assertTrue(source.contains("pushq %%rbx"), () -> source);

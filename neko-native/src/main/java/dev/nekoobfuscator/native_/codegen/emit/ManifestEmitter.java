@@ -14,13 +14,11 @@ import java.util.Map;
  *
  * Also emits the discovery driver {@code neko_manifest_discover_and_patch} that:
  *   - groups manifest entries by owner internal name,
- *   - {@code FindClass}'es each owner once,
- *   - resolves each method's {@code jmethodID} and derives the Method* via
- *     {@code *(Method**)mid},
+ *   - resolves each owner mirror through the native class resolver,
+ *   - resolves each method's HotSpot Method* through metadata walking,
  *   - calls {@code neko_patch_method_entry} (defined in {@link MethodPatcherEmitter}).
  *
- * No JVM-side helpers are used: the discovery driver uses only standard JNI primitives
- * and HotSpot's stable {@code jmethodID -> Method*} representation.
+ * No JNI function-table helpers are used: missing metadata or VM symbols abort.
  */
 public final class ManifestEmitter {
 
@@ -40,11 +38,9 @@ public final class ManifestEmitter {
         sb.append("    uint8_t patch_state;          /* +37 */\n");
         sb.append("    uint8_t _pad0;                /* +38 */\n");
         sb.append("    uint8_t _pad1;                /* +39 */\n");
-        /* Stable jclass for static dispatch. Populated once at JNI_OnLoad
-         * time (NewGlobalRef on FindClass) so the per-call dispatcher does
-         * not need to cross the JNI boundary. The value here is a JNI global
-         * reference (a pointer into HotSpot's JNI global handle table); the
-         * impl_fn treats it like any other jclass. */
+        /* Stable owner class mirror for static dispatch. Populated once from
+         * the native resolver and stored as a direct mirror oop, avoiding JNI
+         * function-table global-ref creation. */
         sb.append("    void *owner_class_global_ref; /* +40 */\n");
         sb.append("};\n");
         sb.append("_Static_assert(sizeof(struct NekoManifestMethod) == ")
@@ -138,30 +134,26 @@ public final class ManifestEmitter {
         sb.append("}\n\n");
         sb.append("static jboolean neko_manifest_resolve_one(JNIEnv *env, uint32_t idx, jclass owner_cls) {\n");
         sb.append("    NekoManifestMethod *entry;\n");
-        sb.append("    jmethodID mid;\n");
+        sb.append("    void *owner_klass;\n");
         sb.append("    void *method_star;\n");
         sb.append("    if (env == NULL || idx >= g_neko_manifest_method_count) return JNI_FALSE;\n");
         sb.append("    entry = &g_neko_manifest_methods[idx];\n");
-        /* JNI_OnLoad-time owner cache: one NewGlobalRef per binding so the
-         * per-call direct dispatcher can hand a stable jclass to impl_fn
-         * without calling FindClass at runtime. Skipped on second visits
-         * (defineClass alias passes can re-enter for the same idx). */
         sb.append("    if (entry->owner_class_global_ref == NULL && owner_cls != NULL) {\n");
-        sb.append("        jobject __owner_global = neko_new_global_ref(env, owner_cls);\n");
-        sb.append("        if (__owner_global == NULL || neko_exception_check(env)) {\n");
+        sb.append("        jobject __owner_mirror = neko_persistent_handle(env, owner_cls, entry->owner_internal);\n");
+        sb.append("        if (__owner_mirror == NULL || neko_exception_check(env)) {\n");
         sb.append("            if (neko_exception_check(env)) neko_exception_clear(env);\n");
         sb.append("        } else {\n");
-        sb.append("            __atomic_store_n((void**)&entry->owner_class_global_ref, (void*)__owner_global, __ATOMIC_RELEASE);\n");
+        sb.append("            __atomic_store_n((void**)&entry->owner_class_global_ref, (void*)__owner_mirror, __ATOMIC_RELEASE);\n");
         sb.append("        }\n");
         sb.append("    }\n");
-        sb.append("    mid = entry->is_static\n");
-        sb.append("        ? neko_get_static_method_id(env, owner_cls, entry->method_name, entry->method_desc)\n");
-        sb.append("        : neko_get_method_id(env, owner_cls, entry->method_name, entry->method_desc);\n");
-        sb.append("    if (mid == NULL || neko_exception_check(env)) {\n");
+        sb.append("    if (owner_cls == NULL) return JNI_FALSE;\n");
+        sb.append("    owner_klass = neko_class_mirror_to_klass(owner_cls);\n");
+        sb.append("    if (owner_klass == NULL || neko_exception_check(env)) {\n");
         sb.append("        if (neko_exception_check(env)) neko_exception_clear(env);\n");
         sb.append("        return JNI_FALSE;\n");
         sb.append("    }\n");
-        sb.append("    method_star = neko_jmethodid_to_method_star(mid);\n");
+        sb.append("    neko_link_class_methods(env, owner_cls, entry->owner_internal, entry->method_name, entry->method_desc);\n");
+        sb.append("    method_star = neko_resolve_method(owner_klass, entry->method_name, entry->method_desc);\n");
         sb.append("    if (method_star == NULL) {\n");
         sb.append("        entry->patch_state = NEKO_PATCH_STATE_FAILED;\n");
         sb.append("        return JNI_FALSE;\n");
@@ -178,35 +170,19 @@ public final class ManifestEmitter {
         sb.append("    entry->patch_state = NEKO_PATCH_STATE_APPLIED;\n");
         sb.append("    return JNI_TRUE;\n");
         sb.append("}\n\n");
-        sb.append("static jboolean neko_manifest_internal_name(JNIEnv *env, jclass owner_cls, char *out, size_t out_size) {\n");
-        sb.append("    jclass class_cls;\n");
-        sb.append("    jmethodID get_name;\n");
-        sb.append("    jstring name_obj;\n");
-        sb.append("    const char *chars;\n");
-        sb.append("    size_t i;\n");
-        sb.append("    if (env == NULL || owner_cls == NULL || out == NULL || out_size == 0u) return JNI_FALSE;\n");
-        sb.append("    out[0] = '\\0';\n");
-        sb.append("    class_cls = neko_find_class(env, \"java/lang/Class\");\n");
-        sb.append("    if (class_cls == NULL || neko_exception_check(env)) { if (neko_exception_check(env)) neko_exception_clear(env); return JNI_FALSE; }\n");
-        sb.append("    get_name = neko_get_method_id(env, class_cls, \"getName\", \"()Ljava/lang/String;\");\n");
-        sb.append("    neko_delete_local_ref(env, class_cls);\n");
-        sb.append("    if (get_name == NULL || neko_exception_check(env)) { if (neko_exception_check(env)) neko_exception_clear(env); return JNI_FALSE; }\n");
-        sb.append("    name_obj = (jstring)NEKO_JNI_FN_PTR(env, 36, jobject, jobject, jmethodID, const jvalue*)(env, owner_cls, get_name, NULL);\n");
-        sb.append("    if (name_obj == NULL || neko_exception_check(env)) { if (neko_exception_check(env)) neko_exception_clear(env); return JNI_FALSE; }\n");
-        sb.append("    chars = neko_get_string_utf_chars(env, name_obj);\n");
-        sb.append("    if (chars == NULL || neko_exception_check(env)) { if (neko_exception_check(env)) neko_exception_clear(env); neko_delete_local_ref(env, name_obj); return JNI_FALSE; }\n");
-        sb.append("    for (i = 0; i + 1u < out_size && chars[i] != '\\0'; i++) out[i] = chars[i] == '.' ? '/' : chars[i];\n");
-        sb.append("    out[i] = '\\0';\n");
-        sb.append("    neko_release_string_utf_chars(env, name_obj, chars);\n");
-        sb.append("    neko_delete_local_ref(env, name_obj);\n");
-        sb.append("    return out[0] != '\\0' ? JNI_TRUE : JNI_FALSE;\n");
+        sb.append("static jboolean neko_manifest_class_matches(jclass owner_cls, const char *expected) {\n");
+        sb.append("    void *klass;\n");
+        sb.append("    void *name;\n");
+        sb.append("    if (owner_cls == NULL || expected == NULL) return JNI_FALSE;\n");
+        sb.append("    klass = neko_class_mirror_to_klass(owner_cls);\n");
+        sb.append("    if (klass == NULL || g_neko_method_layout.off_klass_name < 0) return JNI_FALSE;\n");
+        sb.append("    name = *(void**)((char*)klass + g_neko_method_layout.off_klass_name);\n");
+        sb.append("    return neko_symbol_equals_utf8(name, expected);\n");
         sb.append("}\n\n");
         sb.append("static jboolean neko_manifest_patch_defined_class(JNIEnv *env, jclass owner_cls) {\n");
-        sb.append("    char owner_name[512];\n");
         sb.append("    if (env == NULL || owner_cls == NULL || g_neko_manifest_method_count == 0u) return JNI_TRUE;\n");
-        sb.append("    if (!neko_manifest_internal_name(env, owner_cls, owner_name, sizeof(owner_name))) return JNI_FALSE;\n");
         for (Map.Entry<String, List<Integer>> e : byOwner.entrySet()) {
-            sb.append("    if (strcmp(owner_name, \"").append(escape(e.getKey())).append("\") == 0) {\n");
+            sb.append("    if (neko_manifest_class_matches(owner_cls, \"").append(escape(e.getKey())).append("\")) {\n");
             Integer bindId = ownerBindIds.get(e.getKey());
             if (bindId != null) {
                 sb.append("        neko_bind_owner_").append(bindId).append("(env, owner_cls);\n");
@@ -227,20 +203,19 @@ public final class ManifestEmitter {
             if (e.getKey().contains("$NekoLambda$")) {
                 continue;
             }
-            sb.append("    owner_cls = neko_find_class(env, \"").append(escape(e.getKey())).append("\");\n");
+            sb.append("    owner_cls = neko_resolve_class_mirror_with_env(env, \"").append(escape(e.getKey())).append("\", NULL, NULL);\n");
             sb.append("    if (owner_cls == NULL || neko_exception_check(env)) {\n");
             sb.append("        if (neko_exception_check(env)) neko_exception_clear(env);\n");
             sb.append("    } else {\n");
             Integer bindId = ownerBindIds.get(e.getKey());
             if (bindId != null) {
-                sb.append("        /* Bind this owner's per-class JNI cache (formerly via bindClass). */\n");
+                sb.append("        /* Bind this owner's native class cache. */\n");
                 sb.append("        neko_bind_owner_").append(bindId).append("(env, owner_cls);\n");
             }
             for (int idx : e.getValue()) {
                 sb.append("        if (!neko_manifest_resolve_one(env, ").append(idx).append("u, owner_cls))\n");
                 sb.append("            neko_manifest_abort_patch_failure(&g_neko_manifest_methods[").append(idx).append("u], \"JNI_OnLoad\");\n");
             }
-            sb.append("        neko_delete_local_ref(env, owner_cls);\n");
             sb.append("    }\n");
         }
         sb.append("    return JNI_TRUE;\n");

@@ -585,7 +585,8 @@ public final class NativeTranslator {
     private StringProducer literalStringProducer(String value) {
         String literalVar = "__neko_concat_lit_" + concatLiteralIndex++;
         String prefix = "static jstring " + literalVar + " = NULL; "
-            + "neko_bind_string_slot(thread, env, &" + literalVar + ", \"" + c(value) + "\"); ";
+            + "static void *" + literalVar + "_oop = NULL; "
+            + "neko_bind_string_slot(thread, env, &" + literalVar + ", &" + literalVar + "_oop, \"" + c(value) + "\"); ";
         return new StringProducer(prefix, literalVar);
     }
 
@@ -630,7 +631,7 @@ public final class NativeTranslator {
 
     private String cachedHandlerClassExpression(String bindingOwner, String exceptionType) {
         codeGenerator.registerOwnerClassReference(bindingOwner, exceptionType);
-        return "neko_bound_class(env, " + codeGenerator.classSlotName(exceptionType) + ", \"" + c(exceptionType) + "\")";
+        return "neko_bound_class(thread, env, " + codeGenerator.classSlotName(exceptionType) + ", \"" + c(exceptionType) + "\")";
     }
 
     private boolean isPotentiallyExcepting(AbstractInsnNode insn) {
