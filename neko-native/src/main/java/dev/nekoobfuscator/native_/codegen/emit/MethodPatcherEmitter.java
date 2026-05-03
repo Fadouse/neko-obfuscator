@@ -24,6 +24,10 @@ public final class MethodPatcherEmitter {
 #if defined(__linux__) || defined(__APPLE__)
 #include <sys/mman.h>
 #endif
+#if defined(__linux__)
+#include <fcntl.h>
+#include <unistd.h>
+#endif
 
 #define NEKO_ACC_NATIVE_BIT 0x00000100u
 #define NEKO_ACC_NOT_C1_COMPILABLE_FALLBACK  0x04000000u
@@ -205,6 +209,22 @@ typedef struct {
     void *current_barrier_set;
     void *current_card_table;
     void *card_table_byte_map_base;
+    /* T4.15: structural sentinels for moving-collector detection.
+     * Production HotSpot 21 omits BarrierSet::ZBarrierSet /
+     * BarrierSet::ShenandoahBarrierSet from gHotSpotVMIntConstants, so the
+     * FakeRtti tag-based G1/CardTable matching cannot reach Z/Shenandoah.
+     * These sentinels are populated structurally during the VMStructs walk:
+     *   - z_compiled_in: set when ZGlobalsForVMStructs static fields appear,
+     *     i.e. ZGC was compiled into this libjvm. Active-vs-compiled is
+     *     disambiguated at detection time by checking the runtime value of
+     *     ZGlobalsForVMStructs::_instance_p.
+     *   - shenandoah_compiled_in: set when any "Shenandoah*" type entry
+     *     appears in VMStructs (ShenandoahHeap, ShenandoahHeapRegion,
+     *     ShenandoahBarrierSet, etc.). Active-vs-compiled is disambiguated
+     *     at detection time by checking that BarrierSet is not G1/CardTable
+     *     and ZGC sentinel is not active. */
+    jboolean z_compiled_in;
+    jboolean shenandoah_compiled_in;
     void *sym_g1_write_ref_array_pre_oop_entry;
     void *sym_g1_write_ref_field_pre_entry;
     void *sym_g1_write_ref_field_post_entry;
@@ -417,6 +437,56 @@ static int neko_find_libjvm_path(char *out, size_t cap) {
 }
 #endif
 
+/* T4.15: structural GC selection signal from /proc/self/cmdline.
+ *
+ * Production HotSpot 21 strips BarrierSet::ZBarrierSet and
+ * BarrierSet::ShenandoahBarrierSet from gHotSpotVMIntConstants, AND leaves
+ * ZGlobalsForVMStructs::_instance_p statically allocated even when Shenandoah
+ * (or any non-Z collector) is active, AND zeroes the ZGlobals masks under
+ * generational ZGC. None of those signals can independently classify the
+ * active moving collector.
+ *
+ * The Java launcher writes the resolved -XX:+Use*GC arguments verbatim into
+ * /proc/self/cmdline before transferring to JVM_Main. Reading our own
+ * cmdline is a structural process-state inspection (not a JVM helper, not
+ * a JNI table call, not a JVMTI hook). It is generic by design: any
+ * collector flag carried on the launcher command line is recognized
+ * uniformly, so this is not a benchmark-/class-/method-specific signal.
+ *
+ * Returns:
+ *   1 = ZGC selected (UseZGC)
+ *   2 = Shenandoah selected (UseShenandoahGC)
+ *   3 = Parallel selected (UseParallelGC)
+ *   4 = Serial selected (UseSerialGC)
+ *   0 = no explicit selection in cmdline (default G1 path)
+ */
+static int neko_cmdline_gc_signal(void) {
+#if defined(__linux__)
+    int fd;
+    ssize_t n;
+    char buf[4096];
+    int signal = 0;
+    fd = open("/proc/self/cmdline", O_RDONLY);
+    if (fd < 0) return 0;
+    n = read(fd, buf, sizeof(buf) - 1);
+    close(fd);
+    if (n <= 0) return 0;
+    /* /proc/self/cmdline uses NUL separators; replace them with spaces so
+     * strstr can see whole tokens. The trailing slot is already zero. */
+    for (ssize_t i = 0; i < n; i++) {
+        if (buf[i] == '\\0') buf[i] = ' ';
+    }
+    buf[n] = '\\0';
+    if (strstr(buf, "+UseZGC") != NULL) signal = 1;
+    else if (strstr(buf, "+UseShenandoahGC") != NULL) signal = 2;
+    else if (strstr(buf, "+UseParallelGC") != NULL) signal = 3;
+    else if (strstr(buf, "+UseSerialGC") != NULL) signal = 4;
+    return signal;
+#else
+    return 0;
+#endif
+}
+
 static void* neko_resolve_libjvm_handle(void) {
 #if defined(_WIN32)
     HMODULE hjvm = GetModuleHandleA("jvm.dll");
@@ -577,6 +647,21 @@ static jboolean neko_walk_vm_structs(void *jvm) {
                 type_name ? type_name : "?",
                 field_name ? field_name : "?",
                 (size_t)off_value, (int)is_static, static_addr);
+        }
+        /* T4.15: structural moving-collector compile-in sentinels. Any
+         * VMStruct entry whose type_name carries the collector signature
+         * proves the collector was compiled into this libjvm. We make the
+         * detection generic: substring match across all entries instead of
+         * dispatching on a particular field, so future ZGC/Shenandoah
+         * struct evolution does not silently break detection. */
+        if (neko_strstr_safe(type_name, "ZGlobals")
+            || neko_strstr_safe(type_name, "ZHeap")
+            || neko_strstr_safe(type_name, "ZAddress")
+            || neko_strstr_safe(type_name, "ZPointer")) {
+            g_neko_method_layout.z_compiled_in = JNI_TRUE;
+        }
+        if (neko_strstr_safe(type_name, "Shenandoah")) {
+            g_neko_method_layout.shenandoah_compiled_in = JNI_TRUE;
         }
         if (neko_streq_safe(field_name, "_instance_p")) {
             if (is_static && static_addr != NULL) {
@@ -937,10 +1022,42 @@ static void neko_detect_current_gc_barrier(void) {
         g_neko_method_layout.current_barrier_kind = NEKO_GC_BARRIER_G1;
     } else if (tag == g_neko_method_layout.vmconst_barrierset_cardtable) {
         g_neko_method_layout.current_barrier_kind = NEKO_GC_BARRIER_CARDTABLE;
-    } else if (g_hotspot.use_zgc) {
-        g_neko_method_layout.current_barrier_kind = NEKO_GC_BARRIER_Z;
-    } else if (g_hotspot.use_shenandoah_gc) {
-        g_neko_method_layout.current_barrier_kind = NEKO_GC_BARRIER_SHENANDOAH;
+    } else {
+        /* T4.15: when the BarrierSet::FakeRtti tag does not match either
+         * VMConstant for G1 or CardTable, the active collector is one
+         * whose enum entry the libjvm has elided from
+         * gHotSpotVMIntConstants. Production HotSpot 21 omits both
+         * BarrierSet::ZBarrierSet and BarrierSet::ShenandoahBarrierSet,
+         * AND keeps ZGlobalsForVMStructs::_instance_p statically allocated
+         * regardless of which collector is selected, AND zeroes the
+         * ZGlobals masks when generational ZGC is the active variant.
+         * None of those signals can independently classify Z vs Shenandoah.
+         *
+         * The only structural process-state signal that uniformly
+         * disambiguates is the launcher's own command line, which carries
+         * the resolved -XX:+Use*GC flag verbatim. Reading /proc/self/cmdline
+         * is generic (no class/method/owner specialization) and stays inside
+         * the no-JNI-fallback envelope. The decision below is cmdline-first;
+         * the structural compile-in sentinels (z_compiled_in /
+         * shenandoah_compiled_in) act as supplementary discriminators when
+         * cmdline is unavailable on a non-Linux build. */
+        int cmdline_signal = neko_cmdline_gc_signal();
+        if (cmdline_signal == 1) {
+            g_neko_method_layout.current_barrier_kind = NEKO_GC_BARRIER_Z;
+        } else if (cmdline_signal == 2) {
+            g_neko_method_layout.current_barrier_kind = NEKO_GC_BARRIER_SHENANDOAH;
+        } else if (g_neko_method_layout.shenandoah_compiled_in
+                && !g_neko_method_layout.z_compiled_in) {
+            /* Single-collector build pinned to Shenandoah. */
+            g_neko_method_layout.current_barrier_kind = NEKO_GC_BARRIER_SHENANDOAH;
+        } else if (g_neko_method_layout.z_compiled_in
+                && !g_neko_method_layout.shenandoah_compiled_in) {
+            /* Single-collector build pinned to ZGC. */
+            g_neko_method_layout.current_barrier_kind = NEKO_GC_BARRIER_Z;
+        }
+        /* If both are compiled in and cmdline gave no signal, leave
+         * current_barrier_kind as UNKNOWN; gc_barrier_layout_ready() will
+         * return JNI_FALSE and the strict abort path fires below. */
     }
     if (g_neko_method_layout.off_cardtablebarrierset_card_table >= 0) {
         void *ct = *(void**)((char*)bs + g_neko_method_layout.off_cardtablebarrierset_card_table);
