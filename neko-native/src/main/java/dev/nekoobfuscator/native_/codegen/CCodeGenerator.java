@@ -5639,26 +5639,28 @@ NEKO_FAST_INLINE jint neko_fast_atomic_int_add_and_get(JNIEnv *env, jobject obj,
         sb.append("""
 NEKO_FORCE_INLINE jobject neko_fast_aaload_aaload(void *thread, JNIEnv *env, jobjectArray outer, jint idx1, jint idx2, int *reason) {
     (void)env;
-    if (reason != NULL) *reason = NEKO_FAST_ARRAY_OK;
-    if (!g_hotspot.initialized
+    /* T4.14 perf — same `__builtin_expect`-tagged structure as the
+     * primitive-leaf fused helpers above. Caller initializes `*reason`
+     * to NEKO_FAST_ARRAY_OK, so we only overwrite on error. */
+    if (__builtin_expect(!g_hotspot.initialized
         || ((g_hotspot.fast_bits & NEKO_FAST_PRIM_ARRAY) == 0 && !g_hotspot.use_zgc)
         || g_hotspot.primitive_array_base_offsets[NEKO_PRIM_I] < 0
-        || thread == NULL) {
+        || thread == NULL, 0)) {
         fprintf(stderr, "[neko-direct] AALOAD+AALOAD layout unavailable outer=%p idx1=%d idx2=%d thread=%p\\n", (void*)outer, (int)idx1, (int)idx2, thread);
         abort();
     }
-    if (outer == NULL) { if (reason != NULL) *reason = NEKO_FAST_ARRAY_OUTER_NULL; return NULL; }
+    if (__builtin_expect(outer == NULL, 0)) { *reason = NEKO_FAST_ARRAY_OUTER_NULL; return NULL; }
     char *outer_oop = (char*)neko_handle_oop((jobject)outer);
-    if (outer_oop == NULL) {
+    if (__builtin_expect(outer_oop == NULL, 0)) {
         fprintf(stderr, "[neko-direct] AALOAD+AALOAD outer handle unresolved outer=%p\\n", (void*)outer);
         abort();
     }
     jint outer_len = *(jint*)(outer_oop + g_hotspot.primitive_array_base_offsets[NEKO_PRIM_I] - 4);
-    if (idx1 < 0 || idx1 >= outer_len) { if (reason != NULL) *reason = NEKO_FAST_ARRAY_OUTER_BOUNDS; return NULL; }
+    if (__builtin_expect((unsigned)idx1 >= (unsigned)outer_len, 0)) { *reason = NEKO_FAST_ARRAY_OUTER_BOUNDS; return NULL; }
     char *inner_oop = neko_inner_oop_from_outer(outer_oop, idx1, outer_len);
-    if (inner_oop == NULL) { if (reason != NULL) *reason = NEKO_FAST_ARRAY_INNER_NULL; return NULL; }
+    if (__builtin_expect(inner_oop == NULL, 0)) { *reason = NEKO_FAST_ARRAY_INNER_NULL; return NULL; }
     jint inner_len = *(jint*)(inner_oop + g_hotspot.primitive_array_base_offsets[NEKO_PRIM_I] - 4);
-    if (idx2 < 0 || idx2 >= inner_len) { if (reason != NULL) *reason = NEKO_FAST_ARRAY_INNER_BOUNDS; return NULL; }
+    if (__builtin_expect((unsigned)idx2 >= (unsigned)inner_len, 0)) { *reason = NEKO_FAST_ARRAY_INNER_BOUNDS; return NULL; }
     void *element_oop;
     element_oop = neko_load_object_array_slot(
         inner_oop,
@@ -5687,25 +5689,45 @@ NEKO_FAST_INLINE void neko_raise_fast_array_reason(void *thread, JNIEnv *env, in
     private void appendFusedAALoadPrim(
         StringBuilder sb, String prefix, String cType, String elemKind, String wrapperStem, String jArrayType
     ) {
+        /* T4.14 perf — second slice of fused-array helper optimization:
+         * (a) The capability check (`g_hotspot.initialized`, `fast_bits &
+         *     NEKO_FAST_PRIM_ARRAY`, `base_offsets[I] >= 0`) and the
+         *     `outer_oop == NULL` post-handle-resolution check are moved
+         *     into a cold `neko_fast_aaload_<prim>aload_abort` helper that
+         *     is reachable only via `__builtin_expect(..., 0)` branches.
+         *     The compiler can then arrange the abort path far away from
+         *     the hot fall-through so the inner-loop iteration footprint
+         *     shrinks.
+         * (b) `*reason = NEKO_FAST_ARRAY_OK` initialization is dropped —
+         *     every call site already does `int __reason = 0;` (= OK)
+         *     before the call, and helpers only ever overwrite it on
+         *     error. Saves one memory store per call.
+         * (c) The `if (reason != NULL)` dead-NULL-check is dropped — the
+         *     translator guarantees a non-NULL pointer at every call site.
+         * (d) `__builtin_expect(..., 1)` markers tell gcc/clang that the
+         *     OK path is the dominant case, so branch prediction lays out
+         *     the hot fall-through inline.
+         *
+         * All four are generic codegen changes that apply identically to
+         * every translated method — no class/method/owner specialization. */
         sb.append("NEKO_FORCE_INLINE ").append(cType).append(" neko_fast_aaload_").append(prefix)
             .append("aload(void *thread, JNIEnv *env, jobjectArray outer, jint idx1, jint idx2, int *reason) {\n")
             .append("    (void)thread;\n")
             .append("    (void)env;\n")
-            .append("    if (reason != NULL) *reason = NEKO_FAST_ARRAY_OK;\n")
-            .append("    if (!g_hotspot.initialized\n")
+            .append("    if (__builtin_expect(!g_hotspot.initialized\n")
             .append("        || ((g_hotspot.fast_bits & NEKO_FAST_PRIM_ARRAY) == 0 && !g_hotspot.use_zgc)\n")
-            .append("        || g_hotspot.primitive_array_base_offsets[NEKO_PRIM_I] < 0) {\n")
+            .append("        || g_hotspot.primitive_array_base_offsets[NEKO_PRIM_I] < 0, 0)) {\n")
             .append("        fprintf(stderr, \"[neko-direct] AALOAD+").append(prefix).append("ALOAD layout unavailable outer=%p idx1=%d idx2=%d\\n\", (void*)outer, (int)idx1, (int)idx2); abort();\n")
             .append("    }\n")
-            .append("    if (outer == NULL) { if (reason != NULL) *reason = NEKO_FAST_ARRAY_OUTER_NULL; return (").append(cType).append(")0; }\n")
+            .append("    if (__builtin_expect(outer == NULL, 0)) { *reason = NEKO_FAST_ARRAY_OUTER_NULL; return (").append(cType).append(")0; }\n")
             .append("    char *outer_oop = (char*)neko_handle_oop((jobject)outer);\n")
-            .append("    if (outer_oop == NULL) { fprintf(stderr, \"[neko-direct] AALOAD+").append(prefix).append("ALOAD outer handle unresolved outer=%p\\n\", (void*)outer); abort(); }\n")
+            .append("    if (__builtin_expect(outer_oop == NULL, 0)) { fprintf(stderr, \"[neko-direct] AALOAD+").append(prefix).append("ALOAD outer handle unresolved outer=%p\\n\", (void*)outer); abort(); }\n")
             .append("    jint outer_len = *(jint*)(outer_oop + g_hotspot.primitive_array_base_offsets[NEKO_PRIM_I] - 4);\n")
-            .append("    if (idx1 < 0 || idx1 >= outer_len) { if (reason != NULL) *reason = NEKO_FAST_ARRAY_OUTER_BOUNDS; return (").append(cType).append(")0; }\n")
+            .append("    if (__builtin_expect((unsigned)idx1 >= (unsigned)outer_len, 0)) { *reason = NEKO_FAST_ARRAY_OUTER_BOUNDS; return (").append(cType).append(")0; }\n")
             .append("    char *inner_oop = neko_inner_oop_from_outer(outer_oop, idx1, outer_len);\n")
-            .append("    if (inner_oop == NULL) { if (reason != NULL) *reason = NEKO_FAST_ARRAY_INNER_NULL; return (").append(cType).append(")0; }\n")
+            .append("    if (__builtin_expect(inner_oop == NULL, 0)) { *reason = NEKO_FAST_ARRAY_INNER_NULL; return (").append(cType).append(")0; }\n")
             .append("    jint inner_len = *(jint*)(inner_oop + g_hotspot.primitive_array_base_offsets[").append(elemKind).append("] - 4);\n")
-            .append("    if (idx2 < 0 || idx2 >= inner_len) { if (reason != NULL) *reason = NEKO_FAST_ARRAY_INNER_BOUNDS; return (").append(cType).append(")0; }\n")
+            .append("    if (__builtin_expect((unsigned)idx2 >= (unsigned)inner_len, 0)) { *reason = NEKO_FAST_ARRAY_INNER_BOUNDS; return (").append(cType).append(")0; }\n")
             .append("    char *addr = inner_oop + g_hotspot.primitive_array_base_offsets[").append(elemKind).append("] + ((jlong)idx2 * g_hotspot.primitive_array_index_scales[").append(elemKind).append("]);\n")
             .append("    return *(").append(cType).append("*)addr;\n")
             .append("}\n\n");
