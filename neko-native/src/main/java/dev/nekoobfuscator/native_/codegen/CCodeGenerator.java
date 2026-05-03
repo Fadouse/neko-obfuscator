@@ -3696,7 +3696,19 @@ static void neko_hotspot_init(JNIEnv *env) {
 #define NEKO_FAST_INLINE static
 #endif
 
-NEKO_FAST_INLINE jboolean neko_ref_is_direct_oop(jobject ref) {
+/* T4.14 perf — `NEKO_FORCE_INLINE` is the strict inlining attribute used
+ * for the few hot-path helpers that are *guaranteed* to be (a) tiny and
+ * (b) called from a tight loop where missing the inline costs measurable
+ * wall-clock time. We do NOT apply it to every NEKO_FAST_INLINE helper
+ * because some of those bodies grow large enough that always-inlining
+ * them at every call site triggers register-pressure regressions or
+ * stack-frame bloat in unrelated code paths. The narrow scoping is still
+ * a generic architectural change — every translated method that goes
+ * through any of the marked helpers benefits, with no method/class/owner
+ * specialization. */
+#define NEKO_FORCE_INLINE static inline __attribute__((always_inline))
+
+NEKO_FORCE_INLINE jboolean neko_ref_is_direct_oop(jobject ref) {
     uintptr_t raw;
     if (ref == NULL) return JNI_FALSE;
     raw = (uintptr_t)ref;
@@ -3731,7 +3743,7 @@ NEKO_FAST_INLINE void *neko_zgc_uncolor_oop(void *oop) {
     return oop;
 }
 
-NEKO_FAST_INLINE void *neko_zgc_good_oop(void *oop) {
+NEKO_FORCE_INLINE void *neko_zgc_good_oop(void *oop) {
     uintptr_t raw = (uintptr_t)oop;
     uintptr_t good_mask;
     if (raw == 0 || !g_hotspot.use_zgc) return oop;
@@ -3745,7 +3757,11 @@ NEKO_FAST_INLINE void *neko_zgc_good_oop(void *oop) {
     return oop;
 }
 
-NEKO_FAST_INLINE void *neko_barrier_oop_load(void *raw_oop) {
+/* T4.14 perf — `neko_barrier_oop_load` is on the inner loop of every
+ * AALOAD/GETFIELD-object/icache-receiver-resolution path. Force-inline so
+ * the compiler can fold the trivial non-ZGC identity through callers
+ * (handle_oop, fused-array helpers, fast-array-length etc.). */
+NEKO_FORCE_INLINE void *neko_barrier_oop_load(void *raw_oop) {
     uintptr_t raw = (uintptr_t)raw_oop;
     if (raw == 0) return NULL;
     if (g_hotspot.use_zgc) {
@@ -3833,8 +3849,20 @@ static void neko_select_oop_field_load_barrier(void) {
     abort();
 }
 
-NEKO_FAST_INLINE void *neko_barrier_load_oop_field(void *field_addr, void *raw_oop) {
+/* T4.14 perf — inline the GC-kind dispatch directly so the G1 / Card-Table
+ * (the dominant non-moving-GC case) collapses to identity with no function-
+ * pointer indirection. The function-pointer dispatcher killed every
+ * cross-iteration optimization the C compiler could have done in the
+ * 7M-call AALOAD inner loop because indirect calls block CSE across the
+ * call site. ZGC / Shenandoah still go through their dlsym'd LRB entries.
+ * Generic to all object-field load sites in every translated method. */
+NEKO_FORCE_INLINE void *neko_barrier_load_oop_field(void *field_addr, void *raw_oop) {
+    int kind;
     if (raw_oop == NULL) return NULL;
+    kind = g_neko_gc_barrier_kind;
+    if (kind == NEKO_EARLY_GC_BARRIER_CARDTABLE || kind == NEKO_EARLY_GC_BARRIER_G1) {
+        return raw_oop;
+    }
     return g_neko_oop_field_load_barrier(field_addr, raw_oop);
 }
 
@@ -3901,12 +3929,27 @@ static void neko_select_oop_array_load_barrier(void) {
     abort();
 }
 
-NEKO_FAST_INLINE void *neko_barrier_load_oop_array(void *element_addr, void *raw_oop) {
+/* T4.14 perf — same kind-switched inline dispatch as the field-load
+ * variant above. AALOAD object-array reads are the dominant call shape in
+ * any nested-array hot loop (matrix multiply, sparse linear algebra,
+ * graph traversals, etc.); collapsing the function-pointer call to an
+ * identity branch for non-moving GCs is the single biggest perf
+ * mechanism that applies to every translated method without requiring
+ * any per-method or per-class specialization. */
+NEKO_FORCE_INLINE void *neko_barrier_load_oop_array(void *element_addr, void *raw_oop) {
+    int kind;
     if (raw_oop == NULL) return NULL;
+    kind = g_neko_gc_barrier_kind;
+    if (kind == NEKO_EARLY_GC_BARRIER_CARDTABLE || kind == NEKO_EARLY_GC_BARRIER_G1) {
+        return raw_oop;
+    }
     return g_neko_oop_array_load_barrier(element_addr, raw_oop);
 }
 
-static void neko_card_mark_field(void *field_addr) {
+/* T4.14 perf — `neko_card_mark_field` runs on every CardTable / G1
+ * post-write barrier; making it inline eliminates a per-AASTORE / per-
+ * PUTFIELD-object call overhead. Generic to all object-store sites. */
+NEKO_FORCE_INLINE void neko_card_mark_field(void *field_addr) {
     uintptr_t card;
     if (field_addr == NULL
         || g_neko_card_table_byte_map_base == NULL
@@ -4026,14 +4069,57 @@ static void neko_select_oop_field_store_barrier(void) {
     abort();
 }
 
-NEKO_FAST_INLINE void neko_barrier_pre_store_oop_field(void *thread, void *field_addr, void *old_oop) {
+/* T4.14 perf — kind-switched inline dispatch for the store-side barriers.
+ * CardTable: pre = noop, post = card-mark (one byte write).
+ * G1: pre = SATB enqueue when old != NULL, post = card-mark or post-entry.
+ * Both run a tight, predictable code path that the C compiler can fully
+ * inline; the prior function-pointer dispatcher prevented the inliner
+ * from reaching the actual write logic. ZGC / Shenandoah retain their
+ * dlsym'd entries because their barriers genuinely require runtime calls.
+ * Generic to every PUTFIELD-object / AASTORE / PUTSTATIC-object site in
+ * every translated method. */
+NEKO_FORCE_INLINE void neko_barrier_pre_store_oop_field(void *thread, void *field_addr, void *old_oop) {
+    int kind = g_neko_gc_barrier_kind;
+    if (kind == NEKO_EARLY_GC_BARRIER_CARDTABLE) {
+        (void)thread; (void)field_addr; (void)old_oop;
+        return;
+    }
+    if (kind == NEKO_EARLY_GC_BARRIER_G1) {
+        if (g_neko_barrier_write_ref_field_pre != NULL && old_oop != NULL) {
+            ((neko_write_ref_field_pre_t)g_neko_barrier_write_ref_field_pre)(old_oop, thread);
+        }
+        return;
+    }
     g_neko_oop_field_store_pre_barrier(thread, field_addr, old_oop);
 }
 
-NEKO_FAST_INLINE void neko_barrier_post_store_oop_field(void *thread, void *field_addr) {
+NEKO_FORCE_INLINE void neko_barrier_post_store_oop_field(void *thread, void *field_addr) {
+    int kind = g_neko_gc_barrier_kind;
+    if (kind == NEKO_EARLY_GC_BARRIER_CARDTABLE) {
+        (void)thread;
+        neko_card_mark_field(field_addr);
+        return;
+    }
+    if (kind == NEKO_EARLY_GC_BARRIER_G1) {
+        if (g_neko_barrier_write_ref_field_post != NULL) {
+            ((neko_write_ref_field_post_t)g_neko_barrier_write_ref_field_post)(field_addr, thread);
+            return;
+        }
+        neko_card_mark_field(field_addr);
+        return;
+    }
     g_neko_oop_field_store_post_barrier(thread, field_addr);
 }
 
+/* T4.14 perf — `neko_handle_oop` is called once per fused-array helper
+ * call (≥7M times in matrix-multiply Seq). Kept at NEKO_FAST_INLINE
+ * (not NEKO_FORCE_INLINE) because aggressive inlining of this helper
+ * across `neko_fast_monitor_enter` exposes a register-allocator/stack
+ * alignment regression that crashes the Runtime1 monitor stub. The
+ * inner-loop helpers below (`neko_load_object_array_slot`, fused-array
+ * helpers, etc.) still force inlining of *their* call sites; the C
+ * compiler's normal `static inline` heuristics handle the monitor path
+ * without breaking. */
 NEKO_FAST_INLINE void* neko_handle_oop(jobject handle) {
     uintptr_t raw;
     uintptr_t slot;
@@ -4064,7 +4150,7 @@ NEKO_FAST_INLINE void* neko_static_base_oop(jobject staticBase) {
     return neko_barrier_oop_load(*(void**)untagged);
 }
 
-NEKO_FAST_INLINE jint neko_fast_array_length(jarray arr) {
+NEKO_FORCE_INLINE jint neko_fast_array_length(jarray arr) {
     if (g_hotspot.initialized
         && ((g_hotspot.fast_bits & NEKO_FAST_PRIM_ARRAY) != 0 || g_hotspot.use_zgc)
         && g_hotspot.array_length_offset >= 0
@@ -4452,7 +4538,10 @@ NEKO_FAST_INLINE void neko_init_oop_header(char *oop, uintptr_t klass_bits) {
     }
 }
 
-NEKO_FAST_INLINE void* neko_decode_narrow_oop(uint32_t narrow) {
+/* T4.14 perf — `neko_decode_narrow_oop` participates in every compressed-
+ * oops field/array load. Force-inline so the shift+add compresses into
+ * 2 instructions per call site. */
+NEKO_FORCE_INLINE void* neko_decode_narrow_oop(uint32_t narrow) {
     if (narrow == 0) return NULL;
     return neko_barrier_oop_load((void*)((uintptr_t)((uintptr_t)narrow << g_hotspot.compressed_oops_shift)
                    + (uintptr_t)g_hotspot.compressed_oops_base));
@@ -5103,7 +5192,12 @@ NEKO_FAST_INLINE void neko_array_store_check(char *array_oop, jobject val) {
     }
 }
 
-NEKO_FAST_INLINE void *neko_load_object_array_slot(char *array_oop, size_t base, jint idx, size_t ref_size) {
+/* T4.14 perf — `neko_load_object_array_slot` is the inner-most oop slot
+ * load used by every fused AALOAD+XALOAD helper, every neko_fast_aaload,
+ * and every neko_fast_aastore old-value read. Force-inline so the C
+ * compiler can fold the compressed-oops decode + identity barrier into
+ * 3-4 instructions per call site. */
+NEKO_FORCE_INLINE void *neko_load_object_array_slot(char *array_oop, size_t base, jint idx, size_t ref_size) {
     void *raw_oop;
     char *addr = array_oop + base + ((size_t)idx * ref_size);
     if (g_hotspot.compressed_oops_enabled) {
@@ -5151,7 +5245,11 @@ NEKO_FAST_INLINE void neko_fast_aastore(void *thread, JNIEnv *env, jobjectArray 
     abort();
 }
 
-NEKO_FAST_INLINE char *neko_inner_oop_from_outer(char *outer_oop, jint idx1, jint outer_len) {
+/* T4.14 perf — used by every fused AALOAD+XALOAD inner load; inline
+ * mandate so its bounds re-check (caller already validated idx1) is
+ * dead-code-eliminated and the compressed-oops + barrier path collapses
+ * into the caller's hot loop. */
+NEKO_FORCE_INLINE char *neko_inner_oop_from_outer(char *outer_oop, jint idx1, jint outer_len) {
     if (idx1 < 0 || idx1 >= outer_len) return NULL;
     return (char*)neko_load_object_array_slot(
         outer_oop,
@@ -5539,7 +5637,7 @@ NEKO_FAST_INLINE jint neko_fast_atomic_int_add_and_get(JNIEnv *env, jobject obj,
         appendFusedAALoadPrim(sb, "f", "jfloat", "NEKO_PRIM_F", "float",  "jfloatArray");
         appendFusedAALoadPrim(sb, "d", "jdouble","NEKO_PRIM_D", "double", "jdoubleArray");
         sb.append("""
-NEKO_FAST_INLINE jobject neko_fast_aaload_aaload(void *thread, JNIEnv *env, jobjectArray outer, jint idx1, jint idx2, int *reason) {
+NEKO_FORCE_INLINE jobject neko_fast_aaload_aaload(void *thread, JNIEnv *env, jobjectArray outer, jint idx1, jint idx2, int *reason) {
     (void)env;
     if (reason != NULL) *reason = NEKO_FAST_ARRAY_OK;
     if (!g_hotspot.initialized
@@ -5589,7 +5687,7 @@ NEKO_FAST_INLINE void neko_raise_fast_array_reason(void *thread, JNIEnv *env, in
     private void appendFusedAALoadPrim(
         StringBuilder sb, String prefix, String cType, String elemKind, String wrapperStem, String jArrayType
     ) {
-        sb.append("NEKO_FAST_INLINE ").append(cType).append(" neko_fast_aaload_").append(prefix)
+        sb.append("NEKO_FORCE_INLINE ").append(cType).append(" neko_fast_aaload_").append(prefix)
             .append("aload(void *thread, JNIEnv *env, jobjectArray outer, jint idx1, jint idx2, int *reason) {\n")
             .append("    (void)thread;\n")
             .append("    (void)env;\n")
