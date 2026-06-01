@@ -129,12 +129,12 @@ abstract class CffKeyTransferRewriter extends CffKeyStateEmitter {
 
     protected boolean requiresRuntimeKeys(PipelineContext pctx, AbstractInsnNode insn) {
         if (
-            pctx.config().isTransformEnabled(JvmConstantObfuscationPass.ID) &&
+            pctx.isTransformEnabledForClass(JvmConstantObfuscationPass.ID, pctx.currentL1Class()) &&
             isNumericConstantSite(insn)
         ) {
             return true;
         }
-        if (!pctx.config().isTransformEnabled(JvmStringObfuscationPass.ID)) {
+        if (!pctx.isTransformEnabledForClass(JvmStringObfuscationPass.ID, pctx.currentL1Class())) {
             return false;
         }
         if (insn instanceof LdcInsnNode ldc && ldc.cst instanceof String) {

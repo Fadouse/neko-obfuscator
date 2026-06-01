@@ -215,7 +215,24 @@ rules:
       controlFlowFlattening: { enabled: true, intensity: 1.0 }
 ```
 
-Current pipeline support for rules is limited; the main reliable control surface is explicit transform and native pattern configuration.
+Rule `match` values accept class-name globs in either dotted or internal JVM
+form, for example `com.example.**` or `com/example/**`. `*` matches one
+package/name segment and `**` matches across package separators.
+
+Top-level `transforms` are the default. Rules are evaluated in file order
+against each class; later matching rules override earlier matching rules for
+the same transform ID. Transform entries merge by ID, so a rule that mentions
+only `stringObfuscation` does not change the effective `renamer` setting. The
+last matching rule's `exclude` value is authoritative: a final `exclude: true`
+disables all JVM transforms for the class, while a later `exclude: false`
+re-enables the merged effective transform settings.
+
+Excluded and non-enabled classes remain in the global class graph for name
+reservation, hierarchy, override, and linkage analysis, but they are not
+mutation targets for the scoped transform. Inner, local, and anonymous classes
+are matched as independent JVM class entries by their actual names, such as
+`com/example/Outer$Inner` or `com/example/Outer$1`; `com.example.Outer` does
+not automatically match those entries.
 
 ## Minimal JVM-Only Example
 

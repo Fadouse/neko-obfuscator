@@ -114,11 +114,13 @@ public final class JvmRenamerPass implements TransformPass {
             .filter(this::canRemapClassReferences)
             .sorted(Comparator.comparing(L1Class::name))
             .toList();
-        List<L1Class> renameClasses = remapClasses;
+        List<L1Class> renameClasses = remapClasses.stream()
+            .filter(clazz -> pctx.isTransformEnabledForClass(ID, clazz))
+            .toList();
         if (remapClasses.isEmpty() || renameClasses.isEmpty()) return;
 
         Map<String, String> classesByOldName = buildClassMap(pctx, renameClasses);
-        verifyMainEntryClassesRenamed(pctx, remapClasses, classesByOldName);
+        verifyMainEntryClassesRenamed(pctx, renameClasses, classesByOldName);
         Map<MemberKey, String> membersByOldKey = buildMemberMap(pctx, renameClasses);
         Map<String, Map<String, String>> methodNameMap = methodNameMap(membersByOldKey);
         Map<String, Map<String, String>> fieldNameMap = fieldNameMap(membersByOldKey);
@@ -170,11 +172,12 @@ public final class JvmRenamerPass implements TransformPass {
     }
 
     private Map<String, String> buildClassMap(PipelineContext pctx, List<L1Class> classes) {
-        String prefix = stringOption(pctx, "packagePrefix", "a/");
         Set<String> occupied = new HashSet<>(pctx.classMap().keySet());
-        NameSource names = new NameSource(prefix);
+        Map<String, NameSource> namesByPrefix = new LinkedHashMap<>();
         Map<String, String> out = new LinkedHashMap<>();
         for (L1Class clazz : classes) {
+            String prefix = stringOption(pctx, clazz, "packagePrefix", "a/");
+            NameSource names = namesByPrefix.computeIfAbsent(prefix, NameSource::new);
             String newName;
             do {
                 newName = names.nextInternalName();
@@ -187,10 +190,10 @@ public final class JvmRenamerPass implements TransformPass {
 
     private void verifyMainEntryClassesRenamed(
         PipelineContext pctx,
-        List<L1Class> remapClasses,
+        List<L1Class> classesToRename,
         Map<String, String> classes
     ) {
-        for (L1Class clazz : remapClasses) {
+        for (L1Class clazz : classesToRename) {
             if (!declaresMainEntry(clazz)) continue;
             String mapped = classes.get(clazz.name());
             if (mapped == null || mapped.equals(clazz.name())) {
@@ -686,6 +689,13 @@ public final class JvmRenamerPass implements TransformPass {
 
     private String stringOption(PipelineContext pctx, String name, String defaultValue) {
         var transform = pctx.config().transforms().get(ID);
+        if (transform == null) return defaultValue;
+        Object value = transform.options().get(name);
+        return value instanceof String text ? text : defaultValue;
+    }
+
+    private String stringOption(PipelineContext pctx, L1Class clazz, String name, String defaultValue) {
+        var transform = pctx.transformForClass(ID, clazz);
         if (transform == null) return defaultValue;
         Object value = transform.options().get(name);
         return value instanceof String text ? text : defaultValue;

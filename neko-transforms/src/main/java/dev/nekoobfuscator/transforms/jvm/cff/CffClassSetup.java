@@ -255,13 +255,14 @@ abstract class CffClassSetup extends CffSharedState {
     }
 
     protected void lowerStringConstantValuesForStringPass(PipelineContext pctx) {
-        if (!pctx.config().isTransformEnabled(JvmStringObfuscationPass.ID)) {
+        if (!pctx.config().isTransformEnabledForAnyClass(JvmStringObfuscationPass.ID)) {
             return;
         }
         if (Boolean.TRUE.equals(pctx.getPassData(STRING_CONSTANT_VALUES_LOWERED))) {
             return;
         }
         for (L1Class clazz : pctx.classMap().values()) {
+            if (!pctx.isTransformEnabledForClass(JvmStringObfuscationPass.ID, clazz)) continue;
             lowerStringConstantValues(clazz);
         }
         pctx.putPassData(STRING_CONSTANT_VALUES_LOWERED, Boolean.TRUE);

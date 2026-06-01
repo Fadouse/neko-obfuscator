@@ -2,6 +2,7 @@ package dev.nekoobfuscator.api.config;
 
 import java.nio.file.Path;
 import java.util.*;
+import java.util.regex.Pattern;
 
 public final class ObfuscationConfig {
 
@@ -39,9 +40,89 @@ public final class ObfuscationConfig {
         return tc != null && tc.enabled();
     }
 
+    public boolean isTransformEnabledForAnyClass(String transformId) {
+        if (isTransformEnabled(transformId)) return true;
+        for (ClassRule rule : rules) {
+            if (rule.exclude()) continue;
+            TransformConfig tc = rule.transforms().get(transformId);
+            if (tc != null && tc.enabled()) return true;
+        }
+        return false;
+    }
+
+    public boolean isTransformEnabledForClass(String transformId, String className) {
+        TransformConfig tc = transformForClass(transformId, className);
+        return tc != null && tc.enabled();
+    }
+
+    public TransformConfig transformForClass(String transformId, String className) {
+        TransformConfig effective = transforms.get(transformId);
+        boolean excluded = false;
+        for (ClassRule rule : rules) {
+            if (!matches(rule.match(), className)) continue;
+            excluded = rule.exclude();
+            TransformConfig scoped = rule.transforms().get(transformId);
+            if (scoped != null) {
+                effective = scoped;
+            }
+        }
+        return excluded ? null : effective;
+    }
+
     public double getTransformIntensity(String transformId) {
         TransformConfig tc = transforms.get(transformId);
         return tc != null ? tc.intensity() : 0.0;
+    }
+
+    private boolean matches(String pattern, String className) {
+        if (pattern == null || pattern.isBlank() || className == null || className.isBlank()) {
+            return false;
+        }
+        String normalizedPattern = normalizeClassPattern(pattern);
+        String normalizedName = normalizeClassName(className);
+        return Pattern.matches(toRegex(normalizedPattern), normalizedName);
+    }
+
+    private String normalizeClassPattern(String pattern) {
+        String text = pattern.trim();
+        if (text.endsWith(".class")) {
+            text = text.substring(0, text.length() - ".class".length());
+        }
+        return text.replace('.', '/');
+    }
+
+    private String normalizeClassName(String className) {
+        String text = className.trim();
+        if (text.endsWith(".class")) {
+            text = text.substring(0, text.length() - ".class".length());
+        }
+        return text.replace('.', '/');
+    }
+
+    private String toRegex(String glob) {
+        StringBuilder out = new StringBuilder("^");
+        for (int i = 0; i < glob.length(); i++) {
+            char ch = glob.charAt(i);
+            if (ch == '*') {
+                if (i + 1 < glob.length() && glob.charAt(i + 1) == '*') {
+                    out.append(".*");
+                    i++;
+                } else {
+                    out.append("[^/]*");
+                }
+                continue;
+            }
+            if (ch == '?') {
+                out.append("[^/]");
+                continue;
+            }
+            if ("\\.^$+{}[]()|".indexOf(ch) >= 0) {
+                out.append('\\');
+            }
+            out.append(ch);
+        }
+        out.append('$');
+        return out.toString();
     }
 
     public static final class NativeConfig {

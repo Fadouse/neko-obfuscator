@@ -37,6 +37,14 @@ public final class ConfigValidator {
                 errors.add("Transform '" + entry.getKey() + "' intensity must be between 0.0 and 1.0, got: " + intensity);
             }
         }
+        for (var rule : config.rules()) {
+            for (var entry : rule.transforms().entrySet()) {
+                double intensity = entry.getValue().intensity();
+                if (intensity < 0.0 || intensity > 1.0) {
+                    errors.add("Rule transform '" + entry.getKey() + "' intensity must be between 0.0 and 1.0, got: " + intensity);
+                }
+            }
+        }
 
         if (config.nativeConfig().enabled()) {
             if (config.nativeConfig().targets().isEmpty()) {

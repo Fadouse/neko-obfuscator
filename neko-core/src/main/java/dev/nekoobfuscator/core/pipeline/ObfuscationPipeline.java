@@ -69,7 +69,7 @@ public final class ObfuscationPipeline {
         // Step 4: Schedule and filter passes
         List<TransformPass> enabledPasses = new ArrayList<>();
         for (TransformPass pass : registry.all()) {
-            if (config.isTransformEnabled(pass.id())) {
+            if (config.isTransformEnabledForAnyClass(pass.id())) {
                 enabledPasses.add(pass);
             }
         }
@@ -88,6 +88,7 @@ public final class ObfuscationPipeline {
             for (L1Class clazz : input.classes()) {
                 ctx.setCurrentL1Class(clazz);
                 ctx.setCurrentL1Method(null);
+                if (!ctx.isTransformEnabledForClass(pass.id(), clazz)) continue;
 
                 // Check if pass applies to this class
                 if (!pass.isApplicable(ctx)) continue;
@@ -237,7 +238,7 @@ public final class ObfuscationPipeline {
 
     private void runRuntimeControlFlow(List<L1Class> classes, ClassHierarchy hierarchy,
             PipelineContext ctx, List<TransformPass> ordered) {
-        if (!config.isTransformEnabled("controlFlowFlattening")) return;
+        if (!config.isTransformEnabledForAnyClass("controlFlowFlattening")) return;
 
         TransformPass cff = null;
         for (TransformPass pass : ordered) {
@@ -284,7 +285,7 @@ public final class ObfuscationPipeline {
         TransformPass stack = findPass(ordered, "stackObfuscation");
         TransformPass cff = findPass(ordered, "controlFlowFlattening");
         if (invoke == null && string == null && number == null && stack == null
-                && !config.isTransformEnabled("controlFlowFlattening")) return;
+                && !config.isTransformEnabledForAnyClass("controlFlowFlattening")) return;
 
         List<L1Class> targetClasses = new ArrayList<>();
         for (L1Class clazz : classes) {
@@ -297,18 +298,18 @@ public final class ObfuscationPipeline {
 
         log.info("Running generated helper hardening on {} classes", targetClasses.size());
         long passStart = System.currentTimeMillis();
-        if (cff != null && config.isTransformEnabled("controlFlowFlattening")) {
+        if (cff != null && config.isTransformEnabledForAnyClass("controlFlowFlattening")) {
             ctx.putPassData("controlFlowFlattening.hardenGeneratedHelpers", Boolean.TRUE);
             runControlFlowOnUnkeyedGeneratedHelpers(cff, targetClasses, ctx);
             ctx.putPassData("controlFlowFlattening.hardenGeneratedHelpers", Boolean.FALSE);
         } else {
             insertGeneratedHelperStateGates(targetClasses);
         }
-        if (invoke != null && config.isTransformEnabled("invokeDynamic")) {
+        if (invoke != null && config.isTransformEnabledForAnyClass("invokeDynamic")) {
             ctx.putPassData("invokeDynamic.hardenGeneratedHelpers", Boolean.TRUE);
             runPassOnGeneratedHelpers(invoke, targetClasses, ctx);
             ctx.putPassData("invokeDynamic.hardenGeneratedHelpers", Boolean.FALSE);
-            if (cff != null && config.isTransformEnabled("controlFlowFlattening")) {
+            if (cff != null && config.isTransformEnabledForAnyClass("controlFlowFlattening")) {
                 ctx.putPassData("controlFlowFlattening.hardenGeneratedHelpers", Boolean.TRUE);
                 runControlFlowOnUnkeyedGeneratedHelpers(cff, targetClasses, ctx);
                 ctx.putPassData("controlFlowFlattening.hardenGeneratedHelpers", Boolean.FALSE);
@@ -328,7 +329,7 @@ public final class ObfuscationPipeline {
             ctx.putPassData("constantObfuscation.hardenGeneratedHelpers", Boolean.FALSE);
             ctx.putPassData("numberEncryption.hardenGeneratedHelpers", Boolean.FALSE);
         }
-        if (stack != null && config.isTransformEnabled("stackObfuscation")) {
+        if (stack != null && config.isTransformEnabledForAnyClass("stackObfuscation")) {
             ctx.putPassData("stackObfuscation.hardenGeneratedHelpers", Boolean.TRUE);
             runPassOnGeneratedHelpers(stack, targetClasses, ctx);
             ctx.putPassData("stackObfuscation.hardenGeneratedHelpers", Boolean.FALSE);
@@ -397,7 +398,7 @@ public final class ObfuscationPipeline {
     private void runJvmOutputFinalizers(List<L1Class> classes, ClassHierarchy hierarchy,
             PipelineContext ctx, List<TransformPass> ordered) {
         for (TransformPass pass : ordered) {
-            if (!config.isTransformEnabled(pass.id())) continue;
+            if (!config.isTransformEnabledForAnyClass(pass.id())) continue;
             try {
                 Method finalizer = pass.getClass().getMethod(
                     "finalizeOutput",
@@ -422,7 +423,7 @@ public final class ObfuscationPipeline {
 
     private boolean isAnyTransformEnabled(String... ids) {
         for (String id : ids) {
-            if (config.isTransformEnabled(id)) return true;
+            if (config.isTransformEnabledForAnyClass(id)) return true;
         }
         return false;
     }
@@ -483,7 +484,7 @@ public final class ObfuscationPipeline {
     }
 
     private void obfuscateGeneratedHelperApi(Collection<L1Class> classes, ClassHierarchy hierarchy, PipelineContext ctx) {
-        if (!config.isTransformEnabled("renamer")) return;
+        if (!config.isTransformEnabledForAnyClass("renamer")) return;
         List<String> renamerMapLines = ctx.getPassData("renamer.mapLines");
         if (renamerMapLines == null) {
             renamerMapLines = new ArrayList<>();
@@ -613,7 +614,7 @@ public final class ObfuscationPipeline {
     }
 
     private void obfuscateRuntimeApi(List<L1Class> classes, ClassHierarchy hierarchy) {
-        if (!config.isTransformEnabled("renamer")
+        if (!config.isTransformEnabledForAnyClass("renamer")
                 || !transformBooleanOption("renamer", "renameRuntime", true)) {
             return;
         }
@@ -911,7 +912,7 @@ public final class ObfuscationPipeline {
         }
         Set<String> enabled = new LinkedHashSet<>();
         for (TransformPass pass : ordered) {
-            if (config.isTransformEnabled(pass.id())) {
+            if (config.isTransformEnabledForAnyClass(pass.id())) {
                 enabled.add(pass.id());
             }
         }
@@ -923,9 +924,16 @@ public final class ObfuscationPipeline {
         List<String> missing = new ArrayList<>();
         for (L1Class clazz : classes) {
             if (isRuntimeClass(clazz.name())) continue;
+            Set<String> enabledForClass = new LinkedHashSet<>();
+            for (String passId : bytecodePasses) {
+                if (ctx.isTransformEnabledForClass(passId, clazz)) {
+                    enabledForClass.add(passId);
+                }
+            }
+            if (enabledForClass.isEmpty()) continue;
             for (L1Method method : clazz.methods()) {
                 if (!method.hasCode()) continue;
-                if (!coverage.hasApplied(clazz.name(), method.name(), method.descriptor(), bytecodePasses)) {
+                if (!coverage.hasApplied(clazz.name(), method.name(), method.descriptor(), enabledForClass)) {
                     missing.add(clazz.name() + "." + method.name() + method.descriptor());
                 }
             }
@@ -940,6 +948,12 @@ public final class ObfuscationPipeline {
         for (TransformConfig transform : config.transforms().values()) {
             Object value = transform.options().get("strictCoverage");
             if (value instanceof Boolean bool && bool) return true;
+        }
+        for (var rule : config.rules()) {
+            for (TransformConfig transform : rule.transforms().values()) {
+                Object value = transform.options().get("strictCoverage");
+                if (value instanceof Boolean bool && bool) return true;
+            }
         }
         return false;
     }

@@ -63,6 +63,7 @@ public final class JvmKeyDispatchPass implements TransformPass {
     private static final String ACTUAL_KEYED_ENTRIES = "keyDispatch.actualKeyedEntries";
     private static final String REUSABLE_KEYED_ENTRIES = "keyDispatch.reusableKeyedEntries";
     private static final String INDY_SAM_TARGETS = "keyDispatch.indySamTargets";
+    private static final String UNKEYED_INBOUND_TARGETS = "keyDispatch.unkeyedInboundTargets";
 
     @Override
     public String id() {
@@ -168,6 +169,7 @@ public final class JvmKeyDispatchPass implements TransformPass {
     }
 
     public static boolean isKeyCandidate(PipelineContext pctx, L1Class clazz, L1Method method) {
+        if (!pctx.isTransformEnabledForClass(ID, clazz)) return false;
         if (TransformGuards.isRuntimeClass(clazz) || TransformGuards.isGeneratedMethod(method)) return false;
         if (method.isAbstract() || method.isNative()) return false;
         return true;
@@ -461,7 +463,9 @@ public final class JvmKeyDispatchPass implements TransformPass {
         Map<String, Integer> keyIndexes = keyIndexMap(pctx);
         Set<String> indySamTargets = indySamTargets(pctx);
         Map<String, Integer> lambdaIndexes = lambdaKeyIndexes(pctx);
+        Set<String> unkeyedInboundTargets = unkeyedInboundTargets(pctx);
         for (L1Class clazz : pctx.classMap().values()) {
+            if (!pctx.isTransformEnabledForClass(ID, clazz)) continue;
             for (L1Method method : clazz.methods()) {
                 if (TransformGuards.isRuntimeClass(clazz) || TransformGuards.isGeneratedMethod(method)) continue;
                 if (clazz.isAnnotation() || !canReceiveLongKey(method) || method.isNative()) continue;
@@ -469,6 +473,7 @@ public final class JvmKeyDispatchPass implements TransformPass {
                 if (indySamTargets.contains(coverageKey(clazz.name(), method.name(), method.descriptor()))) continue;
                 String original = method.descriptor();
                 String methodKey = coverageKey(clazz.name(), method.name(), original);
+                if (unkeyedInboundTargets.contains(methodKey)) continue;
                 int keyIndex = lambdaIndexes.getOrDefault(methodKey, Type.getArgumentTypes(original).length);
                 String keyedDesc = insertLongParameter(original, keyIndex);
                 keyed.put(methodKey, keyedDesc);
@@ -486,6 +491,7 @@ public final class JvmKeyDispatchPass implements TransformPass {
         if (targets != null) return targets;
         targets = new java.util.LinkedHashSet<>();
         for (L1Class clazz : pctx.classMap().values()) {
+            if (!pctx.isTransformEnabledForClass(ID, clazz)) continue;
             for (L1Method method : clazz.methods()) {
                 if (!method.hasCode()) continue;
                 for (AbstractInsnNode insn = method.instructions().getFirst(); insn != null; insn = insn.getNext()) {
@@ -523,6 +529,7 @@ public final class JvmKeyDispatchPass implements TransformPass {
         String desc
     ) {
         for (L1Class clazz : pctx.classMap().values()) {
+            if (!pctx.isTransformEnabledForClass(ID, clazz)) continue;
             if (!isSubtypeOf(pctx, clazz, owner)) continue;
             for (L1Method method : clazz.methods()) {
                 if (method.name().equals(name) && method.descriptor().equals(desc)) {
@@ -548,6 +555,7 @@ public final class JvmKeyDispatchPass implements TransformPass {
         if (indexes != null) return indexes;
         indexes = new LinkedHashMap<>();
         for (L1Class clazz : pctx.classMap().values()) {
+            if (!pctx.isTransformEnabledForClass(ID, clazz)) continue;
             for (L1Method method : clazz.methods()) {
                 if (!method.hasCode()) continue;
                 for (AbstractInsnNode insn = method.instructions().getFirst(); insn != null; insn = insn.getNext()) {
@@ -570,6 +578,72 @@ public final class JvmKeyDispatchPass implements TransformPass {
         }
         pctx.putPassData("keyDispatch.lambdaKeyIndexes", indexes);
         return indexes;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Set<String> unkeyedInboundTargets(PipelineContext pctx) {
+        Set<String> targets = pctx.getPassData(UNKEYED_INBOUND_TARGETS);
+        if (targets != null) return targets;
+        targets = new java.util.LinkedHashSet<>();
+        for (L1Class clazz : pctx.classMap().values()) {
+            if (pctx.isTransformEnabledForClass(ID, clazz)) continue;
+            for (L1Method method : clazz.methods()) {
+                if (!method.hasCode()) continue;
+                for (AbstractInsnNode insn = method.instructions().getFirst(); insn != null; insn = insn.getNext()) {
+                    if (insn instanceof MethodInsnNode call) {
+                        addUnkeyedInboundTarget(pctx, targets, call.owner, call.name, call.desc, call.getOpcode());
+                        continue;
+                    }
+                    if (insn instanceof InvokeDynamicInsnNode indy) {
+                        addUnkeyedInboundHandle(pctx, targets, indy.bsm);
+                        for (Object arg : indy.bsmArgs) {
+                            if (arg instanceof Handle handle) {
+                                addUnkeyedInboundHandle(pctx, targets, handle);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        pctx.putPassData(UNKEYED_INBOUND_TARGETS, targets);
+        return targets;
+    }
+
+    private static void addUnkeyedInboundHandle(PipelineContext pctx, Set<String> targets, Handle handle) {
+        addUnkeyedInboundTarget(
+            pctx,
+            targets,
+            handle.getOwner(),
+            handle.getName(),
+            handle.getDesc(),
+            opcodeForHandle(handle.getTag())
+        );
+    }
+
+    private static void addUnkeyedInboundTarget(
+        PipelineContext pctx,
+        Set<String> targets,
+        String owner,
+        String name,
+        String desc,
+        int opcode
+    ) {
+        if (!pctx.classMap().containsKey(owner)) return;
+        targets.add(coverageKey(owner, name, desc));
+        if (opcode == Opcodes.INVOKEVIRTUAL || opcode == Opcodes.INVOKEINTERFACE) {
+            addVirtualFamilyTargets(pctx, targets, owner, name, desc);
+        }
+    }
+
+    private static int opcodeForHandle(int tag) {
+        return switch (tag) {
+            case Opcodes.H_INVOKEVIRTUAL -> Opcodes.INVOKEVIRTUAL;
+            case Opcodes.H_INVOKESTATIC -> Opcodes.INVOKESTATIC;
+            case Opcodes.H_INVOKESPECIAL,
+                 Opcodes.H_NEWINVOKESPECIAL -> Opcodes.INVOKESPECIAL;
+            case Opcodes.H_INVOKEINTERFACE -> Opcodes.INVOKEINTERFACE;
+            default -> -1;
+        };
     }
 
     private static boolean canReceiveLongKey(L1Method method) {

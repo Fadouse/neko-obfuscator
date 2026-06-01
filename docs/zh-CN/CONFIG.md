@@ -213,7 +213,22 @@ rules:
       controlFlowFlattening: { enabled: true, intensity: 1.0 }
 ```
 
-当前流水线 (Pipeline) 对 Rules 的细粒度支持依然有限。在实际工程实践中，更可靠的控制面 (Control Plane) 是使用显式的顶层 Transform 以及 Native 的模式 (Pattern) 匹配来进行全局配置。
+`match` 支持点号类名或 JVM internal name 形式的通配符，例如
+`com.example.**` 或 `com/example/**`。`*` 匹配单个包/名称片段，`**`
+可以跨包分隔符匹配。
+
+顶层 `transforms` 是默认值。规则按文件顺序对每个 class 求值；后匹配的规则
+会覆盖前面规则中同一个 transform ID 的设置。Transform 配置按 ID 合并，
+所以只声明 `stringObfuscation` 的规则不会改变该 class 的 `renamer` 有效设置。
+最后一个匹配规则的 `exclude` 值生效：最终 `exclude: true` 会禁用该 class
+的全部 JVM transforms；后续 `exclude: false` 会重新启用合并后的有效
+transform 设置。
+
+被排除或未启用的 class 仍保留在全局 class 图中，用于名称占用、继承层级、
+override 和链接分析，但它们不是该 scoped transform 的修改目标。Inner、
+local 和 anonymous class 会按真实 JVM class entry 独立匹配，例如
+`com/example/Outer$Inner` 或 `com/example/Outer$1`；`com.example.Outer`
+不会自动匹配这些条目。
 
 ## 最小纯 JVM 混淆示例
 

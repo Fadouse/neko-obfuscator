@@ -23,6 +23,7 @@ public final class PipelineContext extends TransformContext {
     private final L1ToL2Lifter lifter = new L1ToL2Lifter();
     private final Map<String, ControlFlowGraph> cfgCache = new ConcurrentHashMap<>();
     private final Map<String, SSAForm> ssaCache = new ConcurrentHashMap<>();
+    private final Map<L1Class, String> originalClassNames = new IdentityHashMap<>();
     private final RandomUtil random;
     private final long masterSeed;
 
@@ -35,6 +36,9 @@ public final class PipelineContext extends TransformContext {
         super(config);
         this.hierarchy = hierarchy;
         this.classMap = classMap;
+        for (L1Class clazz : classMap.values()) {
+            originalClassNames.put(clazz, clazz.name());
+        }
         long seed = config.keyConfig().masterSeed();
         this.masterSeed = seed != 0 ? seed : RandomUtil.secureLong();
         this.random = new RandomUtil(masterSeed);
@@ -44,6 +48,19 @@ public final class PipelineContext extends TransformContext {
     public Map<String, L1Class> classMap() { return classMap; }
     public RandomUtil random() { return random; }
     public long masterSeed() { return masterSeed; }
+
+    public String originalClassName(L1Class clazz) {
+        if (clazz == null) return null;
+        return originalClassNames.computeIfAbsent(clazz, L1Class::name);
+    }
+
+    public boolean isTransformEnabledForClass(String transformId, L1Class clazz) {
+        return config().isTransformEnabledForClass(transformId, originalClassName(clazz));
+    }
+
+    public dev.nekoobfuscator.api.config.TransformConfig transformForClass(String transformId, L1Class clazz) {
+        return config().transformForClass(transformId, originalClassName(clazz));
+    }
 
     public L1Class currentL1Class() { return currentL1Class; }
     public void setCurrentL1Class(L1Class clazz) {
