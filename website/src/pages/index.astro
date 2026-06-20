@@ -1,18 +1,202 @@
 ---
 import BaseLayout from '../layouts/BaseLayout.astro';
-import HeroSection from '../components/HeroSection.astro';
-import FeaturesSection from '../components/FeaturesSection.astro';
-import NativeSection from '../components/NativeSection.astro';
-import AINativeSection from '../components/AINativeSection.astro';
-import PerformanceSection from '../components/PerformanceSection.astro';
-import FooterSection from '../components/FooterSection.astro';
+import LandingNav from '../components/landing/LandingNav.astro';
+import LandingHero from '../components/landing/LandingHero.astro';
+import ProtectionSystem from '../components/landing/ProtectionSystem.astro';
+import PipelineSection from '../components/landing/PipelineSection.astro';
+import NativeSection from '../components/landing/NativeSection.astro';
+import ClosingSection from '../components/landing/ClosingSection.astro';
+import LandingFooter from '../components/landing/LandingFooter.astro';
+import '../styles/landing-shell.css';
+import '../styles/landing-system.css';
+import '../styles/landing-native.css';
+import '../styles/landing-responsive.css';
 ---
 
 <BaseLayout>
-  <HeroSection />
-  <FeaturesSection />
-  <NativeSection />
-  <AINativeSection />
-  <PerformanceSection />
-  <FooterSection />
+  <div class="page" data-neko-page>
+    <div class="cursor-glow" aria-hidden="true"></div>
+    <div class="scroll-meter" aria-hidden="true"><span class="scroll-meter__bar"></span></div>
+
+    <LandingNav />
+
+    <main id="top">
+      <LandingHero />
+      <ProtectionSystem />
+      <PipelineSection />
+      <NativeSection />
+      <ClosingSection />
+    </main>
+
+    <LandingFooter />
+  </div>
 </BaseLayout>
+
+<script>
+  import { gsap } from 'gsap';
+  import { ScrollTrigger } from 'gsap/ScrollTrigger';
+
+  gsap.registerPlugin(ScrollTrigger);
+
+  const initializePage = () => {
+    const root = document.querySelector('[data-neko-page]');
+    if (!root || root.getAttribute('data-motion-ready') === 'true') return;
+    root.setAttribute('data-motion-ready', 'true');
+    document.documentElement.classList.add('is-ready');
+
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const finePointer = window.matchMedia('(pointer: fine)').matches;
+
+    const copyButton = root.querySelector('[data-copy]');
+    copyButton?.addEventListener('click', async () => {
+      const command = root.querySelector('[data-command]')?.textContent?.trim() ?? '';
+      try {
+        await navigator.clipboard.writeText(command);
+      } catch {
+        const textarea = document.createElement('textarea');
+        textarea.value = command;
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        textarea.remove();
+      }
+      copyButton.setAttribute('data-copied', 'true');
+      window.setTimeout(() => copyButton.removeAttribute('data-copied'), 1500);
+    });
+
+    if (reduceMotion) return;
+
+    const context = gsap.context(() => {
+      const intro = gsap.timeline({ defaults: { ease: 'power4.out' } });
+      intro
+        .from('.site-nav', { y: -24, opacity: 0, duration: 0.9 })
+        .from('.hero-kicker > *', { y: 14, opacity: 0, stagger: 0.08, duration: 0.7 }, '-=0.55')
+        .from('.hero-title .line > span', { yPercent: 115, rotate: 2, stagger: 0.09, duration: 1.15 }, '-=0.45')
+        .from('.hero-lede, .hero-actions, .hero-stat', { y: 26, opacity: 0, stagger: 0.09, duration: 0.8 }, '-=0.75')
+        .from('.hero-machine', { y: 42, opacity: 0, rotateX: 7, scale: 0.96, duration: 1.25 }, '-=1.1')
+        .from('.machine-orbit', { scale: 0.55, opacity: 0, stagger: 0.12, duration: 1 }, '-=0.9');
+
+      gsap.to('.machine-core', { rotate: 360, duration: 28, repeat: -1, ease: 'none', transformOrigin: '50% 50%' });
+      gsap.to('.orbit-one', { rotate: 360, duration: 34, repeat: -1, ease: 'none' });
+      gsap.to('.orbit-two', { rotate: -360, duration: 44, repeat: -1, ease: 'none' });
+      gsap.to('.output-signal span', {
+        scaleY: () => gsap.utils.random(0.25, 1),
+        duration: 0.7,
+        stagger: { each: 0.06, repeat: -1, yoyo: true, from: 'random' },
+        ease: 'sine.inOut',
+      });
+
+      gsap.utils.toArray('[data-reveal]').forEach((element) => {
+        gsap.from(element, {
+          y: 48,
+          opacity: 0,
+          duration: 1,
+          ease: 'power3.out',
+          scrollTrigger: {
+            trigger: element,
+            start: 'top 86%',
+            once: true,
+          },
+        });
+      });
+
+      gsap.utils.toArray('[data-stage]').forEach((stage, index) => {
+        gsap.from(stage.querySelector('.stage-node'), {
+          scale: 0,
+          duration: 0.55,
+          delay: index * 0.025,
+          ease: 'back.out(2)',
+          scrollTrigger: {
+            trigger: stage,
+            start: 'top 84%',
+            once: true,
+          },
+        });
+      });
+
+      const nativeTimeline = gsap.timeline({
+        scrollTrigger: {
+          trigger: '.native-route',
+          start: 'top 76%',
+          once: true,
+        },
+      });
+      const compactNativeRoute = window.matchMedia('(max-width: 820px)').matches;
+      const routeReveal = compactNativeRoute ? { scaleY: 1 } : { scaleX: 1 };
+      nativeTimeline
+        .to('.native-route-line', { ...routeReveal, duration: 1.2, ease: 'power3.inOut' })
+        .from('[data-native-node]', { y: 24, opacity: 0, stagger: 0.12, duration: 0.75, ease: 'power3.out' }, '-=0.7');
+
+      ScrollTrigger.create({
+        start: 0,
+        end: 'max',
+        onUpdate: (self) => gsap.set('.scroll-meter__bar', { scaleX: self.progress }),
+      });
+
+      gsap.to('.hero-visual-wrap', {
+        yPercent: 12,
+        ease: 'none',
+        scrollTrigger: {
+          trigger: '.hero',
+          start: 'top top',
+          end: 'bottom top',
+          scrub: true,
+        },
+      });
+    }, root);
+
+    if (finePointer) {
+      const glow = root.querySelector('.cursor-glow');
+      if (glow) {
+        gsap.set(glow, { xPercent: -50, yPercent: -50 });
+        const moveX = gsap.quickTo(glow, 'x', { duration: 0.75, ease: 'power3.out' });
+        const moveY = gsap.quickTo(glow, 'y', { duration: 0.75, ease: 'power3.out' });
+        window.addEventListener('pointermove', (event) => {
+          moveX(event.clientX);
+          moveY(event.clientY);
+          gsap.to(glow, { opacity: 1, duration: 0.35 });
+        });
+      }
+
+      const machine = root.querySelector('[data-tilt]');
+      if (machine) {
+        const rotateX = gsap.quickTo(machine, 'rotationX', { duration: 0.8, ease: 'power3.out' });
+        const rotateY = gsap.quickTo(machine, 'rotationY', { duration: 0.8, ease: 'power3.out' });
+        machine.addEventListener('pointermove', (event) => {
+          const rect = machine.getBoundingClientRect();
+          const x = (event.clientX - rect.left) / rect.width - 0.5;
+          const y = (event.clientY - rect.top) / rect.height - 0.5;
+          rotateY(x * 8);
+          rotateX(y * -8);
+        });
+        machine.addEventListener('pointerleave', () => {
+          rotateX(0);
+          rotateY(0);
+        });
+      }
+
+      root.querySelectorAll('.magnetic').forEach((button) => {
+        button.addEventListener('pointermove', (event) => {
+          const rect = button.getBoundingClientRect();
+          gsap.to(button, {
+            x: (event.clientX - rect.left - rect.width / 2) * 0.12,
+            y: (event.clientY - rect.top - rect.height / 2) * 0.18,
+            duration: 0.35,
+            ease: 'power2.out',
+          });
+        });
+        button.addEventListener('pointerleave', () => {
+          gsap.to(button, { x: 0, y: 0, duration: 0.65, ease: 'elastic.out(1, .45)' });
+        });
+      });
+    }
+
+    window.addEventListener('load', () => ScrollTrigger.refresh(), { once: true });
+    return () => context.revert();
+  };
+
+  initializePage();
+  document.addEventListener('astro:page-load', initializePage);
+</script>
