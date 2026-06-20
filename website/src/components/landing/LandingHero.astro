@@ -1,0 +1,114 @@
+<section class="hero container" aria-labelledby="hero-title">
+  <div class="hero-copy-block">
+    <div class="hero-kicker mono">
+      <span>OPEN SOURCE</span>
+      <span class="hero-kicker-dot" aria-hidden="true"></span>
+      <span>JVM + NATIVE PROTECTION</span>
+    </div>
+
+    <h1 class="hero-title" id="hero-title">
+      <span class="line"><span>Destroy the</span></span>
+      <span class="line"><span class="outline-word">static shape</span></span>
+      <span class="line"><span>of Java.</span></span>
+    </h1>
+
+    <p class="hero-lede">
+      NekoObfuscator composes dependency-aware bytecode transforms, binds protected data to live control flow, and can translate selected methods into native libraries.
+    </p>
+
+    <div class="hero-actions">
+      <a class="button button-primary magnetic" href="https://github.com/Fadouse/neko-obfuscator" target="_blank" rel="noreferrer">
+        <span>Inspect the code</span>
+        <svg viewBox="0 0 18 18" fill="none" aria-hidden="true">
+          <path d="m5 13 8-8m-6 0h6v6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </a>
+      <a class="button button-quiet magnetic" href="#pipeline">Trace the pipeline</a>
+    </div>
+
+    <div class="hero-stats" aria-label="Project facts">
+      <div class="hero-stat">
+        <strong class="mono" data-count="9">09</strong>
+        <span>registered JVM passes</span>
+      </div>
+      <div class="hero-stat">
+        <strong class="mono" data-count="5">05</strong>
+        <span>native build targets</span>
+      </div>
+      <div class="hero-stat">
+        <strong class="mono">C11</strong>
+        <span>generated through Zig CC</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="hero-visual-wrap" aria-hidden="true">
+    <div class="machine-orbit orbit-one"></div>
+    <div class="machine-orbit orbit-two"></div>
+
+    <div class="hero-machine" data-tilt>
+      <div class="machine-chrome mono">
+        <span class="chrome-dots"><i></i><i></i><i></i></span>
+        <span>NEKO / TRANSFORM GRAPH</span>
+        <span>LIVE</span>
+      </div>
+
+      <div class="machine-body">
+        <div class="machine-code mono">
+          <div class="code-head"><span>INPUT.class</span><span>ASM / L1</span></div>
+          <p><span class="code-dim">00</span> aload_0</p>
+          <p><span class="code-dim">01</span> ldc <em>"license"</em></p>
+          <p><span class="code-dim">02</span> invokevirtual <em>equals</em></p>
+          <p><span class="code-dim">05</span> ifeq <em>L_fail</em></p>
+          <p><span class="code-dim">08</span> getstatic <em>FLAG</em></p>
+        </div>
+
+        <div class="machine-core-wrap">
+          <svg class="machine-core" viewBox="0 0 240 240">
+            <defs>
+              <linearGradient id="coreGradient" x1="24" y1="24" x2="216" y2="216" gradientUnits="userSpaceOnUse">
+                <stop stop-color="#A7FF75" />
+                <stop offset="1" stop-color="#9FC8FF" />
+              </linearGradient>
+            </defs>
+            <circle cx="120" cy="120" r="90" stroke="rgba(255,255,255,.08)" />
+            <circle cx="120" cy="120" r="64" stroke="rgba(255,255,255,.12)" stroke-dasharray="4 8" />
+            <path class="core-path" d="M120 30c49.7 0 90 40.3 90 90s-40.3 90-90 90-90-40.3-90-90 40.3-90 90-90Z" stroke="url(#coreGradient)" stroke-width="1.5" stroke-dasharray="26 14" />
+            <path d="m84 136 36-60 36 60-36 28-36-28Z" fill="rgba(167,255,117,.07)" stroke="url(#coreGradient)" stroke-width="1.5" />
+            <circle cx="120" cy="76" r="5" fill="#A7FF75" />
+            <circle cx="84" cy="136" r="5" fill="#9FC8FF" />
+            <circle cx="156" cy="136" r="5" fill="#9FC8FF" />
+            <circle cx="120" cy="164" r="5" fill="#A7FF75" />
+          </svg>
+          <div class="core-label mono">
+            <strong>0x4E4B</strong>
+            <span>FLOW KEY</span>
+          </div>
+        </div>
+
+        <div class="machine-output mono">
+          <div class="output-head"><span>PROTECTED.jar</span><span>09/09</span></div>
+          <div class="output-row"><span>symbol surface</span><b>remapped</b></div>
+          <div class="output-row"><span>control graph</span><b>keyed</b></div>
+          <div class="output-row"><span>data sites</span><b>flow-bound</b></div>
+          <div class="output-row"><span>native methods</span><b>selective</b></div>
+          <div class="output-signal">
+            <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="machine-footer mono">
+        <span><i class="status-dot"></i> PIPELINE STABLE</span>
+        <span>seed :: deterministic</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="signal-tape mono" aria-hidden="true">
+  <div class="signal-tape-track">
+    <span>RENAMER</span><i></i><span>KEY DISPATCH</span><i></i><span>CARRIER ABI</span><i></i><span>CONTROL FLOW</span><i></i><span>VALIDATION</span><i></i><span>SHADOW LOCALS</span><i></i><span>INVOKEDYNAMIC</span><i></i><span>CONSTANTS</span><i></i><span>STRINGS</span><i></i>
+    <span>RENAMER</span><i></i><span>KEY DISPATCH</span><i></i><span>CARRIER ABI</span><i></i><span>CONTROL FLOW</span><i></i><span>VALIDATION</span><i></i><span>SHADOW LOCALS</span><i></i><span>INVOKEDYNAMIC</span><i></i><span>CONSTANTS</span><i></i><span>STRINGS</span><i></i>
+  </div>
+</div>
