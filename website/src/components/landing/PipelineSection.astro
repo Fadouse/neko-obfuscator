@@ -1,0 +1,44 @@
+---
+const stages = [
+  { id: 'renamer', name: 'Renamer', phase: 'PRE', detail: 'Class/member remap, reflective literals, manifest entry, debug metadata, mapping output.' },
+  { id: 'keyDispatch', name: 'Key dispatch', phase: 'PRE', detail: 'Hidden long-key propagation for mutable descriptors; local key seeding for fixed JVM entry points.' },
+  { id: 'methodParameterObfuscation', name: 'Parameter carriers', phase: 'PRE', detail: 'Eligible arguments become a single Object[] carrier with rewritten direct, reflective, lambda, and proxy paths.' },
+  { id: 'controlFlowFlattening', name: 'Control-flow flattening', phase: 'CORE', detail: 'Original method body becomes keyed verifier-safe blocks routed through target-local dispatchers.' },
+  { id: 'validationSinkHardening', name: 'Validation sinks', phase: 'CORE', detail: 'Compact validation patterns become staged checks coupled to live CFF state.' },
+  { id: 'runtimeVariableObfuscation', name: 'Runtime variables', phase: 'CORE', detail: 'Primitive locals move into encrypted shadow slots with masks recomputed from the running flow.' },
+  { id: 'invokeDynamic', name: 'InvokeDynamic references', phase: 'CORE', detail: 'Field and method references become flow-keyed indy sites with encrypted bootstrap material.' },
+  { id: 'constantObfuscation', name: 'Numeric constants', phase: 'CORE', detail: 'Pushes, LDC values, arrays, and ConstantValue material are decoded against live CFF keys.' },
+  { id: 'stringObfuscation', name: 'String protection', phase: 'CORE', detail: 'Literal and concat constants are encrypted per site, decoded with flow state, and cached where useful.' },
+];
+---
+
+<section class="pipeline-section" id="pipeline" aria-labelledby="pipeline-title">
+  <div class="container pipeline-layout">
+    <div class="pipeline-sticky" data-reveal>
+      <p class="section-index mono">02 / ACTUAL PASS ORDER</p>
+      <h2 id="pipeline-title">Nine stages.<br />One dependency graph.</h2>
+      <p>These are the passes registered by the CLI today, in the order exposed by the codebase.</p>
+      <div class="pipeline-key mono">
+        <span><i class="key-pre"></i> PRE_TRANSFORM</span>
+        <span><i class="key-core"></i> TRANSFORM</span>
+      </div>
+    </div>
+
+    <div class="stage-list">
+      {stages.map((stage, index) => (
+        <article class="stage" data-stage data-reveal>
+          <div class="stage-number mono">{String(index + 1).padStart(2, '0')}</div>
+          <div class="stage-main">
+            <div class="stage-title-row">
+              <h3>{stage.name}</h3>
+              <span class:list={['stage-phase', 'mono', stage.phase === 'PRE' ? 'phase-pre' : 'phase-core']}>{stage.phase}</span>
+            </div>
+            <p>{stage.detail}</p>
+            <code>{stage.id}</code>
+          </div>
+          <div class="stage-node" aria-hidden="true"><span></span></div>
+        </article>
+      ))}
+    </div>
+  </div>
+</section>
