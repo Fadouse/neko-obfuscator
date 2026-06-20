@@ -1,0 +1,72 @@
+---
+const targets = [
+  'linux / x86_64',
+  'linux / aarch64',
+  'windows / x86_64',
+  'macOS / x86_64',
+  'macOS / aarch64',
+];
+---
+
+<section class="native-section container" id="native" aria-labelledby="native-title">
+  <div class="native-panel">
+    <div class="native-topline mono" data-reveal>
+      <span>03 / SELECTIVE NATIVE BACKEND</span>
+      <span>BYTECODE → C → SHARED LIBRARY</span>
+    </div>
+
+    <div class="native-copy" data-reveal>
+      <h2 id="native-title">Move selected methods<br />outside the class file.</h2>
+      <p>
+        Candidate methods pass a safety checker, translate into generated C, compile through Zig for configured targets, and return to the JAR as platform libraries with runtime loading and binding support.
+      </p>
+    </div>
+
+    <div class="native-route" aria-label="Native translation route">
+      <div class="native-route-line" aria-hidden="true"></div>
+      <div class="native-node" data-native-node>
+        <span class="native-node-index mono">01</span>
+        <strong>SELECT</strong>
+        <small>annotations + filters</small>
+      </div>
+      <div class="native-node" data-native-node>
+        <span class="native-node-index mono">02</span>
+        <strong>VERIFY</strong>
+        <small>safety closure</small>
+      </div>
+      <div class="native-node" data-native-node>
+        <span class="native-node-index mono">03</span>
+        <strong>TRANSLATE</strong>
+        <small>L1 bytecode → C IR</small>
+      </div>
+      <div class="native-node" data-native-node>
+        <span class="native-node-index mono">04</span>
+        <strong>COMPILE</strong>
+        <small>Zig CC / C11 / O3</small>
+      </div>
+      <div class="native-node" data-native-node>
+        <span class="native-node-index mono">05</span>
+        <strong>LOAD</strong>
+        <small>JAR resource → runtime</small>
+      </div>
+    </div>
+
+    <div class="native-bottom">
+      <div class="target-block" data-reveal>
+        <p class="target-label mono">EMITTED TARGETS</p>
+        <div class="target-grid">
+          {targets.map((target) => <span class="mono">{target}</span>)}
+        </div>
+      </div>
+
+      <div class="native-terminal mono" data-reveal>
+        <div class="terminal-head"><span>native-stage.log</span><span>●</span></div>
+        <p><i>›</i> safety-check selected methods</p>
+        <p><i>›</i> generate sliced C source set</p>
+        <p><i>›</i> zig cc -O3 -shared -target …</p>
+        <p><i>›</i> pack /neko/native/libneko_*</p>
+        <p class="terminal-ok"><i>✓</i> runtime loader installed</p>
+      </div>
+    </div>
+  </div>
+</section>
