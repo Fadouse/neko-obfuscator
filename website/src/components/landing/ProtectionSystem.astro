@@ -1,0 +1,60 @@
+---
+const protectionLayers = [
+  {
+    index: '01',
+    eyebrow: 'IDENTITY',
+    title: 'Erase the readable surface.',
+    description: 'Deterministic class and member renaming rewrites references, manifests, reflective strings, enum annotation values, and mapping output as one coordinated pass.',
+    signal: 'renamer',
+  },
+  {
+    index: '02',
+    eyebrow: 'EXECUTION',
+    title: 'Make control flow carry the key.',
+    description: 'Eligible methods receive hidden key material; verifier-safe blocks return through local dispatchers with encoded, evolving state instead of a readable graph.',
+    signal: 'keyDispatch → CFF',
+  },
+  {
+    index: '03',
+    eyebrow: 'DATA',
+    title: 'Bind values to live flow.',
+    description: 'Primitive locals, numeric constants, strings, validation sites, and dynamic references derive material from the active control-flow state—not a detached global secret.',
+    signal: 'flow-keyed material',
+  },
+  {
+    index: '04',
+    eyebrow: 'CALL SURFACE',
+    title: 'Break familiar method shapes.',
+    description: 'Eligible parameter lists collapse into Object[] carriers while call sites, constructors, lambdas, proxies, method handles, and reflective lookups are reconciled around the new ABI.',
+    signal: 'carrier ABI',
+  },
+];
+---
+
+<section class="system-section container" id="system" aria-labelledby="system-title">
+  <div class="section-heading" data-reveal>
+    <p class="section-index mono">01 / PROTECTION SYSTEM</p>
+    <h2 id="system-title">Not a bag of tricks.<br />A shared runtime state.</h2>
+    <p>The strongest parts of the current implementation are connected: later transforms consume metadata and keys produced by earlier passes.</p>
+  </div>
+
+  <div class="layer-grid">
+    {protectionLayers.map((layer) => (
+      <article class="layer-card" data-reveal>
+        <div class="layer-card-top mono">
+          <span>{layer.index}</span>
+          <span>{layer.eyebrow}</span>
+        </div>
+        <div class="layer-card-icon" aria-hidden="true">
+          <span></span><span></span><span></span>
+        </div>
+        <h3>{layer.title}</h3>
+        <p>{layer.description}</p>
+        <div class="layer-signal mono">
+          <span>{layer.signal}</span>
+          <svg viewBox="0 0 16 16" fill="none"><path d="M3 8h10m-3-3 3 3-3 3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </div>
+      </article>
+    ))}
+  </div>
+</section>
